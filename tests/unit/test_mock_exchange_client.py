@@ -77,6 +77,34 @@ def test_mock_get_orderbook_returns_well_formed_book():
     assert book.spread is not None and book.spread > 0
 
 
+def test_mock_synthetic_orderbook_is_tier_a():
+    """The default synthetic mock book is the in-memory analogue of a
+    WS-maintained depth-diff book and therefore advertises tier A
+    (Issue #3 review fix)."""
+    client = MockExchangeClient()
+    book = client.get_orderbook("BTCUSDT")
+    assert book.reliability is DataReliability.A
+
+
+def test_mock_can_serve_a_tier_b_seed_orderbook():
+    """A REST-fallback book passed via `MockExchangeSeed` is preserved
+    as tier B - the mock must not silently upgrade it."""
+    seed = MockExchangeSeed(
+        orderbooks={
+            "BTCUSDT": OrderBook(
+                symbol="BTCUSDT",
+                timestamp=1,
+                bids=(OrderBookLevel(price=99.9, qty=1.0),),
+                asks=(OrderBookLevel(price=100.1, qty=1.0),),
+                reliability=DataReliability.B,
+            ),
+        },
+    )
+    client = MockExchangeClient(seed=seed)
+    book = client.get_orderbook("BTCUSDT")
+    assert book.reliability is DataReliability.B
+
+
 def test_mock_get_recent_trades_returns_deterministic_tape():
     client = MockExchangeClient()
     trades = client.get_recent_trades("BTCUSDT", limit=5)

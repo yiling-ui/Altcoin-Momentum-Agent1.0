@@ -118,8 +118,20 @@ def test_orderbook_rejects_unsorted_asks():
         )
 
 
-def test_orderbook_default_reliability_is_b():
+def test_orderbook_default_reliability_is_a():
+    """Issue #3 review fix: a WS-maintained book is tier A; REST
+    fallbacks must opt into tier B explicitly.
+    """
     book = OrderBook(symbol="BTCUSDT", timestamp=0)
+    assert book.reliability is DataReliability.A
+
+
+def test_orderbook_can_be_tagged_tier_b_for_rest_fallback():
+    """Adapters that fall back to a REST snapshot when the WS link is
+    degraded must be able to tag the response tier B."""
+    book = OrderBook(
+        symbol="BTCUSDT", timestamp=0, reliability=DataReliability.B
+    )
     assert book.reliability is DataReliability.B
 
 

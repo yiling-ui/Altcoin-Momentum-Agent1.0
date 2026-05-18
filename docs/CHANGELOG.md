@@ -7,6 +7,72 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 3 - Review fixes (Issue #3 review feedback)
+
+#### Changed
+
+- **Reliability tier alignment** (review item 1). The default
+  `OrderBook.reliability` was tier B; this was inconsistent with
+  the rest of the PR description and with the actual Phase 4+ source
+  (a WS-maintained depth-diff book is tier A). Updated:
+  - `app/exchanges/base.ExchangeClientBase.reliability_tiers` now
+    returns `get_orderbook -> A` (was B). The full table is now
+    locked: `get_recent_trades=A`, `get_orderbook=A`,
+    `get_funding_rate=B`, `get_open_interest=B`, `get_symbols=B`,
+    `get_account_snapshot=B`.
+  - `app/exchanges/models.OrderBook.reliability` default raised from
+    `DataReliability.B` to `DataReliability.A`. Adapters that fall
+    back to a REST snapshot when the WS link is degraded must tag
+    that response tier B explicitly.
+  - `MockExchangeClient.get_orderbook` now stamps its synthetic book
+    as tier A (it is the in-memory analogue of a WS-maintained book).
+    A tier-B `OrderBook` supplied via `MockExchangeSeed.orderbooks`
+    is preserved as-is - the mock does not silently upgrade it.
+  - 4 new tests pin the new contract:
+    `test_reliability_tiers_contract` (full-table assertion),
+    `test_reliability_tiers_lists_all_six_read_methods`,
+    `test_orderbook_default_reliability_is_a_at_model_level`,
+    `test_orderbook_can_be_tagged_tier_b_for_rest_fallback`,
+    `test_mock_synthetic_orderbook_is_tier_a`,
+    `test_mock_can_serve_a_tier_b_seed_orderbook`.
+- **Phase 4 constraint hardened** (review item 2). The Phase 4
+  recommendation in the PR description and the
+  `BinanceClient.get_*` `NotImplementedError` messages are reworded:
+  Phase 4 (Market Data Buffer) must drive the buffer from
+  `MockExchangeClient` / fixture data **by default**; any real public
+  read-only WS / REST adapter must be opt-in (off by default),
+  require no API key, expose no write surface, and not auto-connect
+  to the real exchange. `WebSocketManager`'s docstring is reworded
+  for the same reason - it no longer claims Phase 4 will plug in a
+  real `aiohttp` / `websockets` client. New test
+  `test_binance_real_market_data_methods_message_is_explicit_about_phase4_constraints`
+  asserts every public-data `NotImplementedError` message contains
+  the four constraint phrases ("opt-in", "off by default", "no API
+  key", "no write surface", "auto-connect").
+- **`get_account_snapshot` mock-only / skeleton-only** (review item
+  3). The `BinanceClient.get_account_snapshot` `NotImplementedError`
+  message is rewritten to say explicitly: real account snapshots
+  require authentication and an API key, both of which are forbidden
+  until the limited-live phase; the only working implementation is
+  `MockExchangeClient.get_account_snapshot`. New test
+  `test_binance_get_account_snapshot_message_is_explicit_about_no_api_key`
+  asserts the message contains "api key", "authenticated",
+  "mockexchangeclient", and "limited-live".
+- **README** updated with an explicit "Reliability tier contract"
+  table and a "Phase 4 constraints" section that declares the four
+  Phase 4 invariants up-front so the next PR cannot drift.
+
+#### Tests
+**+7 review-fix tests on top of 97 Phase 3 tests = 104 Phase 3 tests
+total. Full suite: 211 passed in 1.87s** (107 retained from
+Phase 1 / 2 + 104 Phase 3).
+
+#### Live trading risk
+None. The review fixes only adjust default reliability tiers,
+strengthen `NotImplementedError` messages, and tighten Phase 4
+constraint documentation. No new mode flag, no loosened safety lock,
+no new dependency, no new write surface.
+
 ### Phase 3 - Exchange Gateway Read-Only
 
 #### Added

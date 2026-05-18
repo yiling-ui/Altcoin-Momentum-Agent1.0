@@ -303,18 +303,43 @@ def test_reads_succeed_when_connected():
 # reliability_tiers contract (Spec §13.3)
 # ---------------------------------------------------------------------------
 def test_reliability_tiers_contract():
+    """Phase 3 reviewer-mandated tier table (Issue #3 review fix).
+
+    Locks the canonical, healthy-link tier each surface returns:
+      get_recent_trades     A
+      get_orderbook         A
+      get_funding_rate      B
+      get_open_interest     B
+      get_symbols           B
+      get_account_snapshot  B (mock-only / skeleton-only in Phase 3+4)
+    """
     client = _FakeReadOnlyClient()
     tiers = client.reliability_tiers
-    # Trades are tier A (WS); everything else is tier B (REST) by default.
-    assert tiers["get_recent_trades"] is DataReliability.A
-    for name in (
-        "get_symbols",
-        "get_orderbook",
-        "get_funding_rate",
-        "get_open_interest",
-        "get_account_snapshot",
-    ):
-        assert tiers[name] is DataReliability.B
+    assert tiers == {
+        "get_symbols": DataReliability.B,
+        "get_orderbook": DataReliability.A,
+        "get_recent_trades": DataReliability.A,
+        "get_funding_rate": DataReliability.B,
+        "get_open_interest": DataReliability.B,
+        "get_account_snapshot": DataReliability.B,
+    }
+
+
+def test_reliability_tiers_lists_all_six_read_methods():
+    """Every entry in READ_ONLY_METHODS has a tier; no extras."""
+    client = _FakeReadOnlyClient()
+    assert set(client.reliability_tiers.keys()) == set(READ_ONLY_METHODS)
+
+
+def test_orderbook_default_reliability_is_a_at_model_level():
+    """A bare-default OrderBook (no explicit reliability) is tier A.
+
+    This pins the model-level contract that backs `reliability_tiers`.
+    A REST-fallback snapshot must override this explicitly via
+    `OrderBook(..., reliability=DataReliability.B)`.
+    """
+    book = OrderBook(symbol="BTCUSDT", timestamp=0)
+    assert book.reliability is DataReliability.A
 
 
 def test_read_only_methods_constant_matches_abstract_set():

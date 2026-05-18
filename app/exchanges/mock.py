@@ -143,7 +143,11 @@ class MockExchangeClient(ExchangeClientBase):
         if symbol in self._seed.orderbooks:
             book = self._seed.orderbooks[symbol]
         else:
-            # Build a deterministic synthetic book centred at 100.
+            # Build a deterministic synthetic book centred at 100. The
+            # mock is an in-memory analogue of a WS-maintained depth-diff
+            # book, so it advertises tier A by default. Tests that want
+            # to model a REST fallback can supply a tier-B `OrderBook`
+            # via `MockExchangeSeed.orderbooks`.
             mid = 100.0
             tick = 0.1
             bids = tuple(
@@ -159,7 +163,7 @@ class MockExchangeClient(ExchangeClientBase):
                 timestamp=now_ms(),
                 bids=bids,
                 asks=asks,
-                reliability=DataReliability.B,
+                reliability=DataReliability.A,
             )
         if depth and depth < len(book.bids):
             book = book.model_copy(

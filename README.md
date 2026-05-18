@@ -65,10 +65,15 @@ abstraction every later phase will sit on top of. Specifically:
     `DataReliability` tier each surface returns (Spec §13.3).
 
 - **`BinanceClient` skeleton** (`app/exchanges/binance.py`)
-  - Real Binance USDT-M perpetual implementation lands in Phase 4
-    (Market Data Buffer) and Phase 9 (Execution FSM). Phase 3 ships
-    the class so future phases have a stable target to extend.
-  - All 6 read methods raise `NotImplementedError`.
+  - Real Binance USDT-M perpetual implementation lands later. Phase 3
+    ships the class so future phases have a stable target to extend.
+  - All 6 read methods raise `NotImplementedError` and the message of
+    each spells out the Phase 4 constraints (see *Phase 4 constraints*
+    below). `get_account_snapshot` raises a stronger message: it must
+    remain mock-only / skeleton-only in **both** Phase 3 and Phase 4
+    because a real account snapshot needs an authenticated REST call
+    and an API key, neither of which is allowed before the
+    limited-live phase.
   - All 4 write methods inherit the base-class `SafeModeViolation`
     refusal.
   - The constructor **refuses** if any `api_key` / `api_secret` is
@@ -89,7 +94,50 @@ abstraction every later phase will sit on top of. Specifically:
   - Tier-A surfaces (`get_orderbook`, `get_recent_trades`) refuse when
     not `CONNECTED`; tier-B REST surfaces (`get_symbols`,
     `get_account_snapshot`) remain usable when `DEGRADED` per Spec
-    §13.3.
+    §13.3. A REST-fallback book passed via `MockExchangeSeed` is
+    preserved as tier B - the mock does not silently upgrade it.
+
+### Reliability tier contract (Spec §13.3)
+
+Locked by `app/exchanges/base.ExchangeClientBase.reliability_tiers`
+and asserted by `tests/unit/test_exchange_base.py
+::test_reliability_tiers_contract`:
+
+| Surface                | Default tier | Source                              |
+| ---------------------- | ------------ | ----------------------------------- |
+| `get_recent_trades`    | A            | WS aggTrade / trade stream          |
+| `get_orderbook`        | A            | WS depth-diff maintained book       |
+| `get_funding_rate`     | B            | REST                                |
+| `get_open_interest`    | B            | REST                                |
+| `get_symbols`          | B            | REST exchangeInfo                   |
+| `get_account_snapshot` | B            | mock-only / skeleton-only in Phase 3+4 |
+
+Adapters that fall back to a tier-B REST orderbook snapshot when the WS
+link is degraded must tag *that specific response* with
+`DataReliability.B` on the model. The default mapping above documents
+the canonical, healthy-link tier - not the worst case.
+
+### Phase 4 constraints (declared up-front so the next PR cannot drift)
+
+Phase 4 (Issue #4 - Market Data Buffer) **must**:
+
+1. Drive the Market Data Buffer from `MockExchangeClient` / fixture
+   data **by default**.
+2. Treat any real public read-only WS / REST adapter as **opt-in**
+   (off by default) - never auto-connect to the real exchange.
+3. Require **no API key**, accept **no credentials**, expose **no
+   write surface**.
+4. Keep `get_account_snapshot` as a skeleton on `BinanceClient`. A
+   real account snapshot needs an authenticated REST call; that is
+   forbidden until the limited-live phase. The only working
+   implementation in Phase 3 and Phase 4 is
+   `MockExchangeClient.get_account_snapshot`.
+5. Inherit every Phase 1 / Phase 3 safety guarantee unchanged.
+
+Each `BinanceClient` read method raises a `NotImplementedError` whose
+message restates points 1-3 verbatim, so any traceback reminds the
+caller what the next-phase contract is. `get_account_snapshot`
+additionally restates point 4.
 
 - **Phase 3 boot self-check** in `python -m app.main`
   - The entrypoint instantiates `MockExchangeClient`, runs
@@ -217,7 +265,7 @@ python -m app.main
 #   exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
 #   risk_decision=True/paper_only_skeleton_approval health=ok
 
-# 4. Run the test suite (204 tests):
+# 4. Run the test suite (211 tests):
 pytest
 ```
 
@@ -262,11 +310,16 @@ except ExchangeConnectionError as exc:
 Everything in Issues #4 through #10. Specifically:
 
 - **No real exchange adapter.** `BinanceClient` is a skeleton; every
-  read method raises `NotImplementedError`. Real REST / WebSocket
-  wiring lands in Issue #4 (Market Data Buffer) and Issue #9
-  (Execution FSM / Reconciliation). The Phase 1 safety lock plus the
-  Phase 3 `SafeModeViolation` refusals will continue to gate any
-  write attempt that future phases add.
+  read method raises `NotImplementedError`. Phase 4 (Market Data
+  Buffer) is the next phase that may extend the public-data read
+  methods, but only under the constraints listed in *Phase 4
+  constraints* above: mock / fixture data is the default, any real
+  adapter is opt-in, no API key, no write surface, no auto-connect to
+  the real exchange. `get_account_snapshot` must remain a skeleton in
+  Phase 3 **and** Phase 4 because authenticated account reads cannot
+  land before the limited-live phase. Real authenticated REST and the
+  user-data WebSocket stream both land with Issue #9 (Reconciliation),
+  behind the Risk Engine.
 - No Market Data Buffer (Issue #4).
 - No Regime / Universe / Liquidity engines (Issue #5).
 - No anomaly / confirmation / manipulation scanners (Issue #6).

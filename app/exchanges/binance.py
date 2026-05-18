@@ -83,41 +83,76 @@ class BinanceClient(ExchangeClientBase):
     def get_symbols(self) -> list[ExchangeSymbol]:
         raise NotImplementedError(
             "BinanceClient.get_symbols is a Phase 4 concern (Market Data "
-            "Buffer). Phase 3 only ships the skeleton; use "
-            "MockExchangeClient for tests and the boot self-check."
+            "Buffer). The Phase 4 implementation must drive the Market "
+            "Data Buffer from MockExchangeClient / fixture data by "
+            "default. Any real public read-only REST adapter added in "
+            "Phase 4 must be opt-in (off by default), require no API "
+            "key, expose no write surface, and never auto-connect to "
+            "the real exchange. Phase 3 ships only the skeleton."
         )
 
     def get_orderbook(self, symbol: str, *, depth: int = 20) -> OrderBook:
         raise NotImplementedError(
             "BinanceClient.get_orderbook is a Phase 4 concern (Market "
-            "Data Buffer). Phase 3 only ships the skeleton; use "
-            "MockExchangeClient for tests."
+            "Data Buffer). The Phase 4 implementation must drive the "
+            "Market Data Buffer from MockExchangeClient / fixture data "
+            "by default. Any real public read-only WS / REST adapter "
+            "added in Phase 4 must be opt-in (off by default), require "
+            "no API key, expose no write surface, and never auto-connect "
+            "to the real exchange. Phase 3 ships only the skeleton."
         )
 
     def get_recent_trades(self, symbol: str, *, limit: int = 100) -> list[RecentTrade]:
         raise NotImplementedError(
             "BinanceClient.get_recent_trades is a Phase 4 concern "
-            "(Market Data Buffer). Phase 3 only ships the skeleton; use "
-            "MockExchangeClient for tests."
+            "(Market Data Buffer). The Phase 4 implementation must "
+            "drive the Market Data Buffer from MockExchangeClient / "
+            "fixture data by default. Any real public read-only WS / "
+            "REST adapter added in Phase 4 must be opt-in (off by "
+            "default), require no API key, expose no write surface, "
+            "and never auto-connect to the real exchange. Phase 3 "
+            "ships only the skeleton."
         )
 
     def get_funding_rate(self, symbol: str) -> FundingRate:
         raise NotImplementedError(
             "BinanceClient.get_funding_rate is a Phase 4 concern "
-            "(Market Data Buffer). Phase 3 only ships the skeleton; use "
-            "MockExchangeClient for tests."
+            "(Market Data Buffer). The Phase 4 implementation must "
+            "drive the Market Data Buffer from MockExchangeClient / "
+            "fixture data by default. Any real public read-only REST "
+            "adapter added in Phase 4 must be opt-in (off by default), "
+            "require no API key, expose no write surface, and never "
+            "auto-connect to the real exchange. Phase 3 ships only the "
+            "skeleton."
         )
 
     def get_open_interest(self, symbol: str) -> OpenInterest:
         raise NotImplementedError(
             "BinanceClient.get_open_interest is a Phase 4 concern "
-            "(Market Data Buffer). Phase 3 only ships the skeleton; use "
-            "MockExchangeClient for tests."
+            "(Market Data Buffer). The Phase 4 implementation must "
+            "drive the Market Data Buffer from MockExchangeClient / "
+            "fixture data by default. Any real public read-only REST "
+            "adapter added in Phase 4 must be opt-in (off by default), "
+            "require no API key, expose no write surface, and never "
+            "auto-connect to the real exchange. Phase 3 ships only the "
+            "skeleton."
         )
 
     def get_account_snapshot(self) -> AccountSnapshot:
+        # Real account snapshots require an *authenticated* REST call
+        # and an API key. Issue #3 forbids API keys; Issue #4 (Market
+        # Data Buffer) is a public-data-only phase. The earliest a real
+        # account snapshot can land is the limited-live phase, behind
+        # the Risk Engine and the Reconciliation loop. Until then this
+        # method must remain a skeleton, and the only working
+        # implementation is `MockExchangeClient.get_account_snapshot`.
         raise NotImplementedError(
-            "BinanceClient.get_account_snapshot is a Phase 8 / 9 concern "
-            "(Capital Flow Engine + Reconciliation). Phase 3 only ships "
-            "the skeleton; use MockExchangeClient for tests."
+            "BinanceClient.get_account_snapshot must remain a skeleton "
+            "in Phase 3 and Phase 4. A real account snapshot requires "
+            "an authenticated REST call and an API key, both of which "
+            "are forbidden until the limited-live phase. Use "
+            "MockExchangeClient for tests, the boot self-check, and the "
+            "Capital Flow Engine wiring (Issue #8). The real "
+            "implementation lands in Issue #9 (Reconciliation), behind "
+            "the Risk Engine."
         )

@@ -135,9 +135,16 @@ class WebSocketManager:
 
     Issue #3 mandates a "WebSocket management skeleton". Phase 3 ships
     state-tracking and disconnect handling only - no real socket is ever
-    opened. Phase 4 (Issue #4 - Market Data Buffer) plugs the read side
-    into a real `aiohttp` / `websockets` client; Phase 9 (Issue #9 -
-    Reconciliation) hooks the order-event stream.
+    opened.
+
+    Phase 4 (Issue #4 - Market Data Buffer) drives the buffer from
+    `MockExchangeClient` / fixture data by default. Any public read-only
+    WS adapter that Phase 4 adds must be **opt-in** (off by default),
+    must not require an API key, must not expose any write surface,
+    and must not auto-connect to the real exchange. The
+    authenticated user-data stream needed for order events
+    (Issue #9 - Reconciliation) is forbidden until the limited-live
+    phase.
 
     The manager exists so Phase 4 has a stable surface to extend rather
     than a constructor it must invent. Until then, every subscribe /
@@ -325,7 +332,14 @@ class ExchangeClientBase(ABC):
 
     @abstractmethod
     def get_orderbook(self, symbol: str, *, depth: int = 20) -> OrderBook:
-        """Return a snapshot of the order book. Tier B (REST) by default."""
+        """Return a snapshot of the order book.
+
+        Default tier is A: a WS-maintained order book reconstructed from
+        the depth diff stream is the canonical Phase 4+ source and counts
+        as raw exchange data. A REST-only snapshot taken as a fallback
+        when the WS link is degraded should be tagged tier B by the
+        adapter that produced it; the model accepts either tier.
+        """
 
     @abstractmethod
     def get_recent_trades(self, symbol: str, *, limit: int = 100) -> list[RecentTrade]:
@@ -406,14 +420,31 @@ class ExchangeClientBase(ABC):
 
     @property
     def reliability_tiers(self) -> dict[str, DataReliability]:
-        """Static mapping showing the default tier each surface returns.
+        """Default reliability tier each surface returns (Spec §13.3).
 
-        Used by Issue #4 / #7 / #9 + the test suite to assert Spec
-        §13.3's tier contract.
+        Phase 3 contract, locked by `tests/unit/test_exchange_base.py
+        ::test_reliability_tiers_contract`:
+
+          - `get_recent_trades`     -> A (WS aggTrade / trade stream)
+          - `get_orderbook`         -> A (WS depth-diff maintained book)
+          - `get_funding_rate`      -> B (REST)
+          - `get_open_interest`     -> B (REST)
+          - `get_symbols`           -> B (REST exchangeInfo)
+          - `get_account_snapshot`  -> B - mock / skeleton only in
+            Phase 3 and Phase 4. Real account snapshots require an
+            authenticated REST call and an API key, both of which are
+            forbidden until the limited-live phase. A concrete
+            implementation lives only in `MockExchangeClient`; the
+            `BinanceClient` skeleton refuses with `NotImplementedError`.
+
+        Adapters that fall back to a tier-B REST orderbook snapshot when
+        the WS link is degraded should tag *that specific response*
+        with `DataReliability.B` on the model. The default mapping here
+        documents the canonical, healthy-link tier - not the worst case.
         """
         return {
             "get_symbols": DataReliability.B,
-            "get_orderbook": DataReliability.B,
+            "get_orderbook": DataReliability.A,
             "get_recent_trades": DataReliability.A,
             "get_funding_rate": DataReliability.B,
             "get_open_interest": DataReliability.B,

@@ -111,6 +111,54 @@ def test_binance_get_account_snapshot_raises_not_implemented():
         client.get_account_snapshot()
 
 
+# ---------------------------------------------------------------------------
+# Phase 3+4 contract: get_account_snapshot is mock-only / skeleton-only
+# (Issue #3 review fix item 3)
+# ---------------------------------------------------------------------------
+def test_binance_get_account_snapshot_message_is_explicit_about_no_api_key():
+    """A real account snapshot needs authentication. Phase 3 and Phase 4
+    must keep the BinanceClient surface as a skeleton; the only working
+    implementation is `MockExchangeClient`. The error message must call
+    that out explicitly so the contract is obvious from any traceback.
+    """
+    client = BinanceClient()
+    with pytest.raises(NotImplementedError) as exc_info:
+        client.get_account_snapshot()
+    msg = str(exc_info.value).lower()
+    assert "api key" in msg, "must mention API-key prohibition"
+    assert "authenticated" in msg, "must explain why this is mock-only"
+    assert "mockexchangeclient" in msg, "must point at the working alternative"
+    assert "limited-live" in msg, "must name the earliest allowed phase"
+
+
+def test_binance_real_market_data_methods_message_is_explicit_about_phase4_constraints():
+    """Issue #3 review fix item 2: every Phase-4 NotImplementedError on
+    a public-data method must spell out that Phase 4's adapter is
+    opt-in, requires no API key, exposes no write surface, and cannot
+    auto-connect to the real exchange.
+    """
+    client = BinanceClient()
+    public_methods: tuple[tuple[str, tuple], ...] = (
+        ("get_symbols", ()),
+        ("get_orderbook", ("BTCUSDT",)),
+        ("get_recent_trades", ("BTCUSDT",)),
+        ("get_funding_rate", ("BTCUSDT",)),
+        ("get_open_interest", ("BTCUSDT",)),
+    )
+    for method_name, args in public_methods:
+        method = getattr(client, method_name)
+        with pytest.raises(NotImplementedError) as exc_info:
+            method(*args)
+        msg = str(exc_info.value).lower()
+        assert "opt-in" in msg, f"{method_name}: must say opt-in"
+        assert "off by default" in msg, f"{method_name}: must say off by default"
+        assert "no api key" in msg, f"{method_name}: must say no API key"
+        assert "no write surface" in msg, f"{method_name}: must say no write surface"
+        assert "auto-connect" in msg, (
+            f"{method_name}: must mention no auto-connect"
+        )
+
+
 def test_binance_implements_every_abstract_read_method():
     """BinanceClient is concrete (instantiable) only because it
     overrides every abstract read-only method - even if those overrides

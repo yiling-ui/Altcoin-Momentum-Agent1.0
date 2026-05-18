@@ -61,16 +61,19 @@ class OrderBook(_Base):
     """A point-in-time snapshot of the order book.
 
     `bids` are sorted descending by price; `asks` are sorted ascending.
-    `reliability` is filled in by the gateway and reflects the source:
-    REST snapshots default to tier B; WebSocket-maintained books are
-    tier A.
+    `reliability` is filled in by the gateway and reflects the source.
+    A WS-maintained depth-diff book is tier A (raw exchange data); a
+    one-shot REST snapshot taken as a fallback when the WS link is
+    degraded should be tagged tier B explicitly by the adapter that
+    produced it. The default here is tier A because that is the canonical
+    Phase 4+ source.
     """
 
     symbol: str
     timestamp: int  # ms
     bids: tuple[OrderBookLevel, ...] = Field(default_factory=tuple)
     asks: tuple[OrderBookLevel, ...] = Field(default_factory=tuple)
-    reliability: DataReliability = DataReliability.B
+    reliability: DataReliability = DataReliability.A
 
     @property
     def best_bid(self) -> float | None:
