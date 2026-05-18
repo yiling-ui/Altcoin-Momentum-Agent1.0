@@ -1,22 +1,27 @@
-"""AMA-RT entrypoint (Phase 1 - Safety Foundation).
+"""AMA-RT entrypoint (Phase 2 - Event Sourcing and Database).
 
 Run with:
 
     python -m app.main
 
 This entrypoint DOES NOT trade. It only:
-    1. Loads settings (with the Phase 1 safety lock applied).
-    2. Initialises the events.db SQLite database.
+    1. Loads settings (with the Phase 1 safety lock applied + re-asserted).
+    2. Opens & migrates the five Phase 2 SQLite databases:
+       events.db, trades.db, positions.db, capital.db, incidents.db.
     3. Wires the Phase 1 skeletons (RiskEngine, ExecutionFSM,
-       TelegramCommandCenter, MetricsRegistry, HealthChecker) and writes a
-       single STATE_TRANSITION audit event so it is visible that the
-       process started.
-    4. Prints a banner that includes the phase, mode and safety flag set,
-       and exits 0.
+       TelegramCommandCenter, MetricsRegistry, HealthChecker).
+    4. Writes one self-check audit trail:
+         RISK_APPROVED         (paper-only skeleton check)
+         STATE_TRANSITION      (IDLE -> IDLE)
+         TELEGRAM_COMMAND_RECEIVED (/status)
+         CAPITAL_DEPOSIT       (paper-mode boot deposit, mirrored into
+                                capital.db's capital_events_index)
+       and prints a one-line status banner before exiting 0.
 
-It will refuse to run if the safety flags ever evaluate to a non-Phase-1
-configuration. This is the runtime-side mirror of the unit-tested invariant
-in `app.config.settings`.
+It will refuse to run if the safety flags ever evaluate to a
+non-Phase-1 configuration. This is the runtime-side mirror of the
+unit-tested invariant in `app.config.settings`. Phase 2 does NOT loosen
+any Phase 1 safety guarantee.
 """
 
 from __future__ import annotations
@@ -30,12 +35,12 @@ if str(ROOT) not in sys.path:
 
 from app import __phase__, __version__  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
-from app.core.constants import DB_EVENTS, PROJECT_NAME  # noqa: E402
+from app.core.constants import PROJECT_NAME  # noqa: E402
 from app.core.enums import ExecutionState  # noqa: E402
 from app.core.errors import SafetyViolation  # noqa: E402
 from app.core.events import Event, EventType  # noqa: E402
-from app.database.connection import open_sqlite  # noqa: E402
-from app.database.migrations import apply_schema  # noqa: E402
+from app.database.connection import DatabaseSet, PHASE2_DATABASES  # noqa: E402
+from app.database.migrations import migrate_database_set  # noqa: E402
 from app.database.repositories import EventRepository  # noqa: E402
 from app.execution.fsm import ExecutionFSM  # noqa: E402
 from app.monitoring.health import HealthChecker, HealthStatus  # noqa: E402
@@ -44,90 +49,110 @@ from app.risk.engine import RiskEngine, RiskRequest  # noqa: E402
 from app.telegram.bot import TelegramCommandCenter  # noqa: E402
 
 
+# Phase 2 keeps the same safety invariant Phase 1 introduced. Issue #2 is
+# explicit: "禁止修改默认安全配置" / "禁止 live trading".
 def _assert_phase1_safety(settings) -> None:
     """Defence-in-depth: refuse to start if the safety lock has been undone."""
     if settings.trading_mode != "paper":
-        raise SafetyViolation("Phase 1 requires trading_mode=paper")
+        raise SafetyViolation("Phase 1 safety lock requires trading_mode=paper")
     if settings.live_trading_enabled:
-        raise SafetyViolation("Phase 1 forbids live_trading_enabled=True")
+        raise SafetyViolation("Phase 1 safety lock forbids live_trading_enabled=True")
     if settings.right_tail_enabled:
-        raise SafetyViolation("Phase 1 forbids right_tail_enabled=True")
+        raise SafetyViolation("Phase 1 safety lock forbids right_tail_enabled=True")
     if settings.llm_enabled:
-        raise SafetyViolation("Phase 1 forbids llm_enabled=True")
+        raise SafetyViolation("Phase 1 safety lock forbids llm_enabled=True")
     if settings.exchange_live_order_enabled:
-        raise SafetyViolation("Phase 1 forbids exchange_live_order_enabled=True")
+        raise SafetyViolation(
+            "Phase 1 safety lock forbids exchange_live_order_enabled=True"
+        )
 
 
 def run() -> int:
     settings = get_settings()
     _assert_phase1_safety(settings)
 
-    # Database
+    # Database: open + migrate all five Phase 2 databases.
     settings.sqlite_dir.mkdir(parents=True, exist_ok=True)
-    conn = open_sqlite(
-        settings.sqlite_dir / DB_EVENTS,
+    dbs = DatabaseSet.open(
+        settings.sqlite_dir,
         wal=settings.defaults.database.wal_mode,
+        databases=PHASE2_DATABASES,
     )
-    apply_schema(conn)
-    repo = EventRepository(conn)
+    try:
+        migrate_database_set(dbs)
 
-    # Skeletons
-    risk = RiskEngine(settings=settings, event_repo=repo)
-    fsm = ExecutionFSM()
-    telegram = TelegramCommandCenter(settings=settings, event_repo=repo)
-    metrics = MetricsRegistry()
-    health = HealthChecker()
-    health.register("event_log", lambda: HealthStatus.OK)
-    health.register("safety_lock", lambda: HealthStatus.OK)
+        # `capital.db` is wired into the EventRepository so CAPITAL_*
+        # events are mirrored into capital_events_index automatically.
+        repo = EventRepository(dbs.events, capital_conn=dbs.capital)
 
-    # A demonstration that the wiring is alive: ask the Risk Engine to
-    # adjudicate a trivial paper-mode action. This will write a
-    # RISK_APPROVED event but no trade.
-    decision = risk.evaluate(
-        RiskRequest(
-            source_module="bootstrap",
-            action="phase1_self_check",
-            symbol=None,
-            live_trading_required=False,
-            right_tail_amplify=False,
+        # Skeletons
+        risk = RiskEngine(settings=settings, event_repo=repo)
+        fsm = ExecutionFSM()
+        telegram = TelegramCommandCenter(settings=settings, event_repo=repo)
+        metrics = MetricsRegistry()
+        health = HealthChecker()
+        health.register("event_log", lambda: HealthStatus.OK)
+        health.register("safety_lock", lambda: HealthStatus.OK)
+
+        # Demonstration that the wiring is alive: ask the Risk Engine to
+        # adjudicate a trivial paper-mode action. RISK_APPROVED is written.
+        decision = risk.evaluate(
+            RiskRequest(
+                source_module="bootstrap",
+                action="phase2_self_check",
+                symbol=None,
+                live_trading_required=False,
+                right_tail_amplify=False,
+            )
         )
-    )
-    metrics.incr("risk_decisions_total")
-    metrics.set_gauge("phase", 1)
+        metrics.incr("risk_decisions_total")
+        metrics.set_gauge("phase", 2)
 
-    # Write a STATE_TRANSITION event marking IDLE -> IDLE so replay shows
-    # the process booted.
-    repo.append(
-        Event(
-            event_type=EventType.STATE_TRANSITION,
-            source_module="bootstrap",
-            payload={
-                "from": fsm.state.value,
-                "to": ExecutionState.IDLE.value,
-                "reason": "phase1_boot",
-            },
+        # STATE_TRANSITION marker so replay shows the process booted.
+        repo.append_event(
+            Event(
+                event_type=EventType.STATE_TRANSITION,
+                source_module="bootstrap",
+                payload={
+                    "from": fsm.state.value,
+                    "to": ExecutionState.IDLE.value,
+                    "reason": "phase2_boot",
+                },
+            )
         )
-    )
 
-    # Telegram skeleton: drive one /status command through the bus so the
-    # event log shows TELEGRAM_COMMAND_RECEIVED. There is no outbound call.
-    from app.telegram.commands import Command  # local import keeps boot light
+        # Telegram skeleton: drive one /status command through the bus.
+        from app.telegram.commands import Command  # local import keeps boot light
 
-    telegram.handle(Command(name="/status", user_id="phase1-bootstrap"))
+        telegram.handle(Command(name="/status", user_id="phase2-bootstrap"))
 
-    overall, _ = health.evaluate()
-    print(
-        f"[{PROJECT_NAME}] {__phase__} v{__version__} "
-        f"mode={settings.trading_mode} "
-        f"live_trading={settings.live_trading_enabled} "
-        f"right_tail={settings.right_tail_enabled} "
-        f"llm={settings.llm_enabled} "
-        f"exchange_live_orders={settings.exchange_live_order_enabled} "
-        f"events_count={repo.count()} "
-        f"risk_decision={decision.approved}/{decision.reasons[0]} "
-        f"health={overall.value}"
-    )
-    conn.close()
+        # Phase 2 introduces capital event helpers. Emit a paper-mode
+        # CAPITAL_DEPOSIT marker so a fresh database has at least one
+        # capital event for replay tests. This is paper-mode bookkeeping
+        # only - no funds move.
+        repo.record_capital_deposit(
+            amount=0.0,
+            source_module="bootstrap",
+            note="phase2_boot_paper_marker",
+        )
+
+        overall, _ = health.evaluate()
+        capital_count = repo.count_events(event_type=EventType.CAPITAL_DEPOSIT)
+        print(
+            f"[{PROJECT_NAME}] {__phase__} v{__version__} "
+            f"mode={settings.trading_mode} "
+            f"live_trading={settings.live_trading_enabled} "
+            f"right_tail={settings.right_tail_enabled} "
+            f"llm={settings.llm_enabled} "
+            f"exchange_live_orders={settings.exchange_live_order_enabled} "
+            f"databases={len(PHASE2_DATABASES)} "
+            f"events_count={repo.count_events()} "
+            f"capital_events={capital_count} "
+            f"risk_decision={decision.approved}/{decision.reasons[0]} "
+            f"health={overall.value}"
+        )
+    finally:
+        dbs.close()
     return 0
 
 

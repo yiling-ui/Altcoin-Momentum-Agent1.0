@@ -111,9 +111,21 @@ CAPITAL_EVENT_TYPES = frozenset(
 
 @dataclass(frozen=True)
 class Event:
-    """Canonical event payload (Spec §12.1).
+    """Canonical event payload (Spec §12.1 + Issue #2 field contract).
 
-    `event_id` is generated lazily; `timestamp` defaults to wall-clock ms.
+    `event_id`     - lazily generated UUID4
+    `timestamp`    - wall-clock ms when the event was *produced*
+    `event_type`   - one of `EventType`
+    `source_module`- module that emitted the event
+    `symbol`       - optional symbol the event is about
+    `position_id`  - optional position the event is about
+    `order_id`     - optional order the event is about
+    `payload`      - JSON-serialisable dict of free-form context
+    `created_at`   - wall-clock ms when the row was *persisted*; populated
+                     by SQLite on insert, returned to in-memory readers
+                     by `EventRepository`. None for events that have not
+                     yet been persisted.
+
     `payload` MUST be JSON-serialisable - the repository layer enforces
     this on append.
     """
@@ -126,6 +138,7 @@ class Event:
     order_id: str | None = None
     timestamp: int = field(default_factory=now_ms)
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,6 +150,7 @@ class Event:
             "position_id": self.position_id,
             "order_id": self.order_id,
             "payload": self.payload,
+            "created_at": self.created_at,
         }
 
     def serialise_payload(self) -> str:

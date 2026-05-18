@@ -37,22 +37,31 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    assert "Phase 1 - Safety Foundation" in captured
+    # Phase 2 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 2 - Event Sourcing and Database" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
     assert "llm=False" in captured
+    assert "exchange_live_orders=False" in captured
+    assert "databases=5" in captured
+    assert "capital_events=" in captured
 
     settings = load_settings()
-    db_path = settings.sqlite_dir / "events.db"
-    assert db_path.exists()
+    sqlite_dir = settings.sqlite_dir
+    # All five Phase 2 databases were created.
+    for name in ("events.db", "trades.db", "positions.db", "capital.db", "incidents.db"):
+        assert (sqlite_dir / name).exists(), f"{name} missing after main()"
 
+    db_path = sqlite_dir / "events.db"
     conn = open_sqlite(db_path)
     repo = EventRepository(conn)
     try:
-        types = {e.event_type for e in repo.list()}
+        types = {e.event_type for e in repo.list_events()}
         assert EventType.RISK_APPROVED in types
         assert EventType.STATE_TRANSITION in types
         assert EventType.TELEGRAM_COMMAND_RECEIVED in types
+        # Phase 2: a paper-mode CAPITAL_DEPOSIT marker is emitted.
+        assert EventType.CAPITAL_DEPOSIT in types
     finally:
         conn.close()

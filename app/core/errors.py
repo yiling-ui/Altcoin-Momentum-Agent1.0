@@ -34,3 +34,13 @@ class ExecutionError(AMARTError):
 
 class ReconciliationError(AMARTError):
     """Local state and exchange state disagree."""
+
+
+class EventPersistenceError(AMARTError):
+    """An event could not be appended to (or read from) the event log.
+
+    Phase 2 raises this from `EventRepository` when SQLite reports an
+    integrity / IO error, after logging the failure via loguru. Callers
+    should treat this as a hard error - losing an event silently is the
+    one thing the event-sourcing substrate is forbidden to do.
+    """
