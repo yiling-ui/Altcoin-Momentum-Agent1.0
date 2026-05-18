@@ -7,6 +7,272 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 4 - Market Data Buffer
+
+#### Added
+- **`app/market_data/` package** introducing the in-process Market
+  Data Buffer that every later phase will read from. The package
+  never imports an exchange SDK, never opens an outbound socket,
+  never reads a credential, never adds a write surface. This is
+  asserted by `tests/unit/test_phase4_no_network.py` (and by the
+  pre-existing repo-wide `test_phase3_no_network.py`).
+
+- **`app/market_data/models.py`** - frozen Pydantic v2 value objects:
+  - `Bar`, `BarInterval` (`M1` / `M5`).
+  - `LiquidationEvent`, `LiquidationSide` (data shape only - Phase 4
+    does NOT subscribe to a real liquidation feed).
+  - `MarketDataBufferConfig`, `MarketDataStalenessConfig` -
+    rolling-window widths (1m / 5m / 15m), bar-history sizes, ATR
+    windows, per-surface staleness thresholds.
+  - `MarketDataDegradedReason` enum: `never_initialised`,
+    `exchange_disconnected`, `exchange_degraded`, `trades_stale`,
+    `orderbook_stale`, `oi_stale`, `funding_stale`,
+    `rest_ws_conflict`, `explicit_mark`. Vocabulary locked by
+    `tests/unit/test_market_data_models.py::test_degraded_reason_vocabulary`.
+  - `BufferStats` - per-tick observability shape exposed by
+    `MarketDataBuffer.stats()`.
+  - The Spec §11.1 `MarketSnapshot` model lives in
+    `app/core/models.py` (Phase 1) - this PR populates it, it does
+    NOT redefine it.
+
+- **`app/market_data/candles.py`** - streaming OHLCV builder with
+  buy / sell taker volume split. Late trades (arrived after their
+  bucket has already closed) are *dropped*, not back-filled (Spec
+  §14.2: silent rewrites are forbidden); the
+  `dropped_late_trades` counter exposes the count for monitoring.
+  Multi-minute gaps between trades are filled with **flat synthetic
+  bars** so ATR sees no missing slots.
+
+- **`app/market_data/cvd.py`** - pure CVD calculator
+  (`signed_volume`, `compute_cvd`). Honours Binance's
+  `is_buyer_maker=True` convention as "the aggressor was a seller";
+  falls back to `RecentTrade.side` when the flag is unset (mock
+  fixtures).
+
+- **`app/market_data/atr.py`** - SMA-of-True-Range over closed
+  bars. Returns `None` for fewer than two closed bars. Wilder-style
+  EMA smoothing is deliberately deferred to Issue #6 / #7 - SMA is
+  enough for Phase 4's data-quality role and trivially deterministic
+  under replay.
+
+- **`app/market_data/oi.py`** + **`app/market_data/funding.py`** -
+  `OpenInterestSnapshotState` and `FundingSnapshotState` keep the
+  latest plus previous snapshot per symbol. Out-of-order updates are
+  rejected. Cross-symbol updates raise `ValueError`. `delta()` and
+  `percent_change()` handle the zero-baseline case explicitly.
+
+- **`app/market_data/liquidation.py`** - bounded
+  `LiquidationFeedState` deque per symbol; FIFO eviction with a
+  configurable capacity. Phase 4 ships only the data structure and a
+  `LiquidationEvent` shape - there is no `get_liquidations` method
+  on the gateway, no real-time feed, no auto-subscribe.
+
+- **`app/market_data/buffer.py` - `MarketDataBuffer`**:
+  - Lazy per-symbol state via `track(symbol)` or auto-creation on
+    first ingest.
+  - Rolling trade windows for **1m / 5m / 15m**, anchored to the
+    *latest observed timestamp across all surfaces* so the buffer
+    is fully deterministic under replay (Spec §14, Issue #4
+    "necessary support" list).
+  - 1m and 5m candle builders fed by every ingested trade.
+  - Latest order book per symbol with reliability tier carried.
+  - Latest / previous funding rate and open interest.
+  - Bounded liquidation history.
+  - **`is_degraded(symbol)` and `degraded_reasons(symbol)`** for the
+    future No-Trade Gate (Issue #7) and Reconciliation loop
+    (Issue #9). Spec §14.2 + §31: untrustworthy data must NOT feed
+    new openings.
+  - **`snapshot(symbol)`** returns a Spec §11.1 `MarketSnapshot`
+    populated with `last_price`, `bid`, `ask`, `spread_pct`,
+    `volume_1m`, `volume_5m`, `cvd_1m`, `cvd_5m`, `atr_1m`,
+    `atr_5m`, `oi`, `funding_rate`, `orderbook_depth_usdt`. Emits a
+    `MARKET_SNAPSHOT` event when an `EventRepository` is wired in.
+  - **`cvd_15m(symbol)`** for the 15-minute window required by
+    Issue #4.
+  - **REST vs WS conflict detection** (Spec §14.2): when an
+    incoming order book has a different `DataReliability` tier than
+    the existing one, the buffer emits a single
+    `DATA_UNRELIABLE` event tagged
+    `MarketDataDegradedReason.REST_WS_CONFLICT` with the previous
+    and incoming tiers in the payload, AND keeps the strong-tier
+    book on a tier downgrade. A tier upgrade (e.g. REST -> WS) is
+    accepted but still counted; the audit trail captures both.
+  - **`on_websocket_disconnect(reason=...)`** - marks every tracked
+    symbol as `EXCHANGE_DISCONNECTED` and writes one batched
+    `DATA_UNRELIABLE` event with `scope=all_symbols`,
+    `trigger=websocket_disconnect`, and the full symbol list.
+    Issue #4 acceptance criterion 4.
+  - **`on_websocket_reconnect(reason=...)`** - clears the explicit
+    disconnect / degraded reasons (stale-window reasons are
+    recomputed and may legitimately stay set until fresh data
+    arrives).
+  - **Exchange-link health propagation**: when wired to an
+    `ExchangeClientBase`, the gateway's
+    `ExchangeConnectionState.{DISCONNECTED, DEGRADED, UNINITIALISED}`
+    automatically maps to the corresponding degraded reason on every
+    symbol view.
+  - **`mark_degraded` / `clear_explicit_degraded`** for manual
+    test-driven and Reconciliation-driven transitions.
+  - **`refresh_from_exchange(symbol)`** - convenience helper that
+    pulls trades, book, funding and OI from the attached client and
+    feeds them through the ingest path. **Phase 4 only ever wires a
+    `MockExchangeClient`** here; if a `BinanceClient` skeleton ever
+    gets wired in, the call surfaces the underlying
+    `NotImplementedError` instead of pretending it has data
+    (asserted by
+    `test_refresh_from_exchange_propagates_notimplementederror_from_binance`).
+    The helper batches its emits so a fresh refresh produces at most
+    one `DATA_UNRELIABLE` event per symbol regardless of how many
+    surfaces it touched.
+
+- **Boot path additions** in `python -m app.main`:
+  - `_build_phase4_boot_seed()` constructs a deterministic
+    in-process tape anchored at `now_ms()` so the buffer's
+    staleness gate sees a fresh window. **No fixture file is read,
+    no network call is made, no credential is consumed.**
+  - `MarketDataBuffer` is instantiated, every symbol the mock
+    exposes is `track`-ed, `refresh_from_exchange`-ed, and
+    `snapshot`-ed.
+  - One WS disconnect + reconnect probe is driven through the
+    buffer so the audit trail at boot includes one batched
+    `DATA_UNRELIABLE` event with `trigger=websocket_disconnect`
+    and one recovery.
+  - A `market_data_buffer` health probe is registered that goes
+    `DEGRADED` if any symbol is degraded.
+  - Banner extended with three Phase 4 fields:
+    - `market_data=<tracked>/<degraded>`
+    - `market_snapshots=<count>`
+    - `data_unreliable=<count>`
+
+  Sample boot output:
+
+  ```
+  [AMA-RT] Phase 4 - Market Data Buffer v1.4.0a4 mode=paper \
+    live_trading=False right_tail=False llm=False exchange_live_orders=False \
+    databases=5 events_count=9 capital_events=1 \
+    exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+    market_data=3/0 market_snapshots=3 data_unreliable=1 \
+    risk_decision=True/paper_only_skeleton_approval health=ok
+  ```
+
+- **76 new unit tests**:
+  - `tests/unit/test_market_data_models.py` (8) - `Bar` /
+    `LiquidationEvent` shape, `BarInterval` widths,
+    `MarketDataBufferConfig` defaults, frozen-ness, degraded-reason
+    vocabulary.
+  - `tests/unit/test_market_data_candles.py` (12) - bucket
+    alignment, first-trade live bar, in-place updates, bar
+    closing, multi-minute gap filling with flat bars, late-trade
+    drop, buy/sell volume split (both `is_buyer_maker` and `side`
+    fallback), `force_close` padding, history bound, cross-symbol
+    rejection.
+  - `tests/unit/test_market_data_cvd.py` (7) - `signed_volume`
+    sign, `compute_cvd` empty / pure-buy / pure-sell / mixed,
+    Issue #4 acceptance criterion 1.
+  - `tests/unit/test_market_data_atr.py` (8) - True Range with /
+    without prev close, `compute_atr` `None` cases, simple-average
+    correctness, prev-close from history when window is smaller
+    than history, unclosed-bar exclusion, Issue #4 acceptance
+    criterion 2.
+  - `tests/unit/test_market_data_oi_funding_liquidation.py` (12) -
+    initial state, advance-on-update, out-of-order rejection,
+    cross-symbol rejection, zero-baseline percent change,
+    capacity eviction, recent-since-ts filter.
+  - `tests/unit/test_market_data_buffer.py` (25) - lazy track,
+    never-initialised symbol, rolling-window math, MarketSnapshot
+    Spec §11.1 fields, CVD helpers match `compute_cvd`,
+    Issue #4 acceptance criterion 3 (no data -> degraded; partial
+    data -> stale; fresh data -> clean), live recomputation of
+    staleness, Issue #4 acceptance criterion 4 (WS disconnect ->
+    DATA_UNRELIABLE), reconnect clears explicit reasons,
+    `mark_degraded` / `clear_explicit_degraded` semantics, REST vs
+    WS conflict in both directions plus same-tier-newer-wins,
+    exchange health propagation (DISCONNECTED, DEGRADED), per-symbol
+    liquidation deque, stats consistency, `refresh_from_exchange`
+    requires a client, `BinanceClient` skeleton surfaces
+    `NotImplementedError`, disconnected-client short-circuit,
+    constructor refuses an `api_key` parameter, `BinanceClient`
+    still refuses credentials at construction.
+  - `tests/unit/test_phase4_no_network.py` (4) - `app/market_data/`
+    imports no network library, mentions no `api_key` /
+    `api_secret`, never creates `market.db`, and
+    `BinanceClient.get_account_snapshot` continues to raise
+    `NotImplementedError` with messages that mention "skeleton",
+    "phase 4" and "api key".
+  - `tests/unit/test_main_entrypoint.py` extended (1 test, now
+    Phase 4-aware) - banner contains `Phase 4 - Market Data
+    Buffer`, `market_data=...`, `market_snapshots=...`,
+    `data_unreliable=...`, and the events DB contains at least one
+    `MARKET_SNAPSHOT` event plus one batched
+    `DATA_UNRELIABLE` event with `trigger=websocket_disconnect`.
+
+#### Changed
+- `app/__init__.py` - `__phase__` is now `Phase 4 - Market Data
+  Buffer`; `__version__` is `1.4.0a4`.
+- `app/main.py` - new `_build_phase4_boot_seed()` helper, boot path
+  drives the buffer through one full ingest + snapshot + WS
+  disconnect / reconnect cycle. The Phase 1
+  `_assert_phase1_safety()` and Phase 3 `_assert_phase3_read_only()`
+  guards are unchanged. `STATE_TRANSITION` reason updated to
+  `phase4_boot`. Exchange shutdown reason updated to
+  `phase4_shutdown`.
+
+#### Phase 4 boundary (declared explicitly to avoid drift)
+
+This PR observes the boundary set by Issue #4 and the user-facing
+review of PR #14:
+
+1. **Market Data Buffer ONLY.** No Regime / Universe / Liquidity
+   engine, no Scanner, no Confirmation, no Manipulation Detector.
+2. The buffer is fed by `MockExchangeClient` / fixture data **by
+   default**. The boot path uses the deterministic mock; tests use
+   deterministic fixtures.
+3. **No real Binance WebSocket and no real REST.** `BinanceClient`
+   continues to raise `NotImplementedError` for every read method.
+4. **No API key.** `BinanceClient.__init__` still refuses any
+   credential. `MarketDataBuffer.__init__` exposes no `api_key`
+   parameter (asserted by a test that passes the kwarg and expects
+   a `TypeError`).
+5. **No write surface.** The four `SafeModeViolation` refusals on
+   `ExchangeClientBase` (`create_order`, `cancel_order`,
+   `set_leverage`, `set_margin_mode`) are unchanged.
+6. **No auto-connect.** `MarketDataBuffer` opens no socket; it only
+   receives data via `ingest_*` calls or via
+   `refresh_from_exchange` against a deterministic
+   `MockExchangeClient`.
+7. **Tests do not depend on real network.** Both
+   `test_phase3_no_network.py` and the new
+   `test_phase4_no_network.py` enforce this.
+8. **`BinanceClient.get_account_snapshot` remains mock-only /
+   skeleton-only in both Phase 3 and Phase 4.** Real account
+   snapshots require an authenticated REST call and an API key,
+   forbidden until the limited-live phase. Locked by
+   `test_binance_client_get_account_snapshot_remains_skeleton` in
+   `test_phase4_no_network.py`.
+
+#### Not in Phase 4 (deferred)
+- Issue #5 - Regime / Universe / Liquidity engines.
+- Issue #6 - Pre-anomaly / Anomaly / Confirmation / Manipulation
+  scanners.
+- Issue #7 - full Risk Engine (will read `is_degraded` from this
+  buffer to drive the No-Trade Gate).
+- Issue #8 - Capital Flow Engine.
+- Issue #9 - real Execution FSM + Reconciliation; first place a
+  real `create_order` is *allowed* to exist, behind the Risk
+  Engine.
+- Issue #10 - LLM, Telegram outbound, Replay diff reports,
+  Reflection.
+
+#### Live trading risk
+**None.** Phase 4 ships only an in-process buffer and a
+deterministic boot drill. No exchange SDK is added. No outbound
+HTTP / WebSocket library is imported. No API key is read. No
+write surface is added. The Phase 1 safety lock and Phase 3
+read-only invariant are unchanged. Six layers of defence (config
+lock, Phase 1 boot assertion, Phase 3 read-only assertion, Risk
+Engine refusal, base-class write-surface refusal, Phase 4
+no-network / no-api-key tests) are all unit-tested.
+
 ### Phase 3 - Review fixes (Issue #3 review feedback)
 
 #### Changed

@@ -1,17 +1,21 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 3 - Exchange Gateway Read-Only. **Paper mode only.**
-> The Exchange Gateway shipped in this branch is **read-only by construction**.
-> This repository does **not** trade real money, does **not** open any
-> outbound network socket, does **not** import any exchange SDK
-> (`ccxt`, `binance-connector`, `python-binance` are intentionally
-> absent from `requirements.txt`), does **not** call any LLM, and does
-> **not** read real API keys. Phase 3 introduces an abstract
-> `ExchangeClientBase` whose four write surfaces (`create_order`,
-> `cancel_order`, `set_leverage`, `set_margin_mode`) **always** raise
-> `SafeModeViolation`. The only concrete client wired into
-> `python -m app.main` is `MockExchangeClient`, which serves
-> deterministic in-memory data.
+> **Phase status:** Phase 4 - Market Data Buffer. **Paper mode only.**
+> The Market Data Buffer added in this branch is fed by
+> `MockExchangeClient` / fixture data only. This repository does
+> **not** trade real money, does **not** open any outbound network
+> socket, does **not** import any exchange SDK (`ccxt`,
+> `binance-connector`, `python-binance` are intentionally absent
+> from `requirements.txt`), does **not** call any LLM, and does
+> **not** read real API keys. The four write surfaces on
+> `ExchangeClientBase` (`create_order`, `cancel_order`,
+> `set_leverage`, `set_margin_mode`) continue to raise
+> `SafeModeViolation` from the base class. The only concrete client
+> wired into `python -m app.main` is `MockExchangeClient`, which
+> serves deterministic in-memory data. Phase 4 adds an in-process
+> `MarketDataBuffer` that reads from that mock - no real Binance
+> WebSocket, no real REST, no API key, no write surface, no
+> auto-connect.
 
 ---
 
@@ -24,14 +28,117 @@ This is the implementation of the production specification in
 | --- | --- | --- | --- |
 | Phase 1 - Safety Foundation | #1  | merged | `feature/phase-1-safety-foundation` (PR #11), `feature/phase-1-review-fixes` (PR #12) |
 | Phase 2 - Event Sourcing and Database | #2  | merged | `feature/phase-2-event-sourcing-database` (PR #13) |
-| Phase 3 - Exchange Gateway Read-Only | #3  | this branch | `feature/phase-3-exchange-gateway-read-only` |
-| Phase 4 - Market Data Buffer | #4  | open | - |
+| Phase 3 - Exchange Gateway Read-Only | #3  | merged | `feature/phase-3-exchange-gateway-read-only` (PR #14) |
+| Phase 4 - Market Data Buffer | #4  | this branch | `feature/phase-4-market-data-buffer` |
 | Phase 5 - Regime / Universe / Liquidity | #5  | open | - |
 | Phase 6 - Scanner / Confirmation / Manipulation | #6  | open | - |
 | Phase 7 - State Machine / Risk Engine | #7  | open | - |
 | Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | open | - |
 | Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+
+## Phase 4 deliverable
+
+Phase 4 introduces the `app/market_data/` package - the in-process
+**Market Data Buffer** that every later phase will read from. The
+package never imports an exchange SDK, never opens an outbound
+socket, never reads a credential, never adds a write surface.
+
+- **`MarketDataBuffer`** (`app/market_data/buffer.py`)
+  - Per-symbol rolling trade windows for **1m / 5m / 15m**.
+  - 1m + 5m candle builders fed by every ingested trade. Late trades
+    (those that arrive after their bucket has already closed) are
+    *dropped* (Spec §14.2 forbids silent rewrites). Multi-minute
+    gaps between trades are filled with **flat synthetic bars** so
+    ATR sees no missing slots.
+  - Latest order book per symbol (with reliability tier preserved).
+  - Latest / previous funding rate and open interest.
+  - Bounded liquidation history.
+  - **`is_degraded(symbol)` and `degraded_reasons(symbol)`** for the
+    future No-Trade Gate (Issue #7) and Reconciliation loop
+    (Issue #9). Spec §14.2 + §31.
+  - **`snapshot(symbol)`** returns a Spec §11.1 `MarketSnapshot` with
+    `cvd_1m`, `cvd_5m`, `atr_1m`, `atr_5m`, `volume_1m`,
+    `volume_5m`, latest funding and OI. Emits a `MARKET_SNAPSHOT`
+    event when an `EventRepository` is wired in.
+  - **REST vs WS conflict detection** (Spec §14.2): a tier mismatch
+    on incoming order books emits a `DATA_UNRELIABLE` event tagged
+    `MarketDataDegradedReason.REST_WS_CONFLICT` and never silently
+    overwrites strong-tier data with weak-tier data.
+  - **`on_websocket_disconnect` / `on_websocket_reconnect`** drive the
+    `EXCHANGE_DISCONNECTED` reason in and out of the symbol view and
+    write a batched `DATA_UNRELIABLE` event with the full symbol
+    list (Issue #4 acceptance criterion 4).
+  - **Exchange health propagation**: an `ExchangeClientBase` whose
+    `health.state` is `DISCONNECTED` / `DEGRADED` / `UNINITIALISED`
+    automatically maps to the corresponding degraded reason on
+    every symbol view. The buffer NEVER reads `now_ms()` to anchor
+    staleness - it uses the latest observed timestamp across all
+    surfaces, so the buffer is fully deterministic under replay.
+
+- **Helpers**
+  - `compute_cvd(trades)` - signed taker volume sum (positive on buy
+    aggression, negative on sell aggression). Honours the Binance
+    `is_buyer_maker=True` convention; falls back to
+    `RecentTrade.side` when the flag is unset (mock fixtures).
+  - `compute_atr(bars, window=14)` - SMA-of-True-Range over closed
+    bars. Returns `None` for fewer than two closed bars.
+  - `CandleBuilder` - streaming OHLCV with buy / sell taker volume
+    split.
+  - `OpenInterestSnapshotState`, `FundingSnapshotState` - latest /
+    previous snapshot with out-of-order rejection.
+  - `LiquidationFeedState` - bounded deque per symbol.
+
+- **Phase 4 hard boundary** (declared explicitly so the next PR
+  cannot drift):
+
+  1. Market Data Buffer ONLY. No Regime / Universe / Liquidity
+     engine, no Scanner, no Confirmation, no Manipulation Detector.
+  2. The buffer is fed by `MockExchangeClient` / fixture data **by
+     default**. The boot path uses the deterministic mock; tests use
+     deterministic fixtures.
+  3. **No real Binance WebSocket and no real REST.** `BinanceClient`
+     continues to raise `NotImplementedError` for every read method.
+  4. **No API key.** `BinanceClient.__init__` still refuses any
+     credential. `MarketDataBuffer.__init__` exposes no `api_key`
+     parameter.
+  5. **No write surface.** The four `SafeModeViolation` refusals on
+     `ExchangeClientBase` are unchanged.
+  6. **No auto-connect.** `MarketDataBuffer` opens no socket; it
+     only receives data via `ingest_*` calls or via
+     `refresh_from_exchange` against a deterministic
+     `MockExchangeClient`.
+  7. **Tests do not depend on real network**
+     (`test_phase3_no_network.py`, `test_phase4_no_network.py`).
+  8. **`BinanceClient.get_account_snapshot` remains mock-only /
+     skeleton-only in both Phase 3 and Phase 4.** Real account
+     snapshots require an authenticated REST call and an API key,
+     forbidden until the limited-live phase.
+
+- **Phase 4 boot self-check** in `python -m app.main`
+  - Constructs a deterministic in-process boot tape via
+    `_build_phase4_boot_seed()` so the buffer's staleness gate sees a
+    fresh window.
+  - Tracks every symbol the mock exposes, runs
+    `refresh_from_exchange` on each, and produces one
+    `MARKET_SNAPSHOT` per symbol.
+  - Drives one WS disconnect + reconnect probe through the buffer so
+    the audit trail shows one batched `DATA_UNRELIABLE` event with
+    `trigger=websocket_disconnect`.
+  - Registers a `market_data_buffer` health probe.
+  - Banner extended with `market_data=<tracked>/<degraded>`,
+    `market_snapshots=<count>`, `data_unreliable=<count>`.
+
+  Sample boot output:
+
+  ```
+  [AMA-RT] Phase 4 - Market Data Buffer v1.4.0a4 mode=paper \
+    live_trading=False right_tail=False llm=False exchange_live_orders=False \
+    databases=5 events_count=9 capital_events=1 \
+    exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+    market_data=3/0 market_snapshots=3 data_unreliable=1 \
+    risk_decision=True/paper_only_skeleton_approval health=ok
+  ```
 
 ## Phase 3 deliverable
 
@@ -210,11 +317,27 @@ app/
                             WebSocketManager + write-surface refusals
     binance.py              BinanceClient skeleton (NotImplementedError)
     mock.py                 MockExchangeClient (deterministic, no network)
+  market_data/              ## Phase 4 - Market Data Buffer
+    __init__.py             public exports
+    models.py               Bar / BarInterval / LiquidationEvent /
+                            MarketDataBufferConfig /
+                            MarketDataDegradedReason / BufferStats
+    candles.py              CandleBuilder + bucket_start_ms
+    cvd.py                  signed_volume + compute_cvd
+    atr.py                  true_range + compute_atr
+    oi.py                   OpenInterestSnapshotState
+    funding.py              FundingSnapshotState
+    liquidation.py          LiquidationFeedState
+    buffer.py               MarketDataBuffer (track / ingest_* /
+                            snapshot / is_degraded /
+                            on_websocket_disconnect / reconnect /
+                            mark_degraded / refresh_from_exchange)
   execution/      Execution FSM skeleton (full impl in Issue #9)
   risk/           Risk Engine skeleton (full impl in Issue #7)
   telegram/       Telegram Command Center skeleton (Issue #10)
   monitoring/     metrics + health + alerts (in-memory)
-  main.py         Phase 3 entrypoint with read-only self-check
+  main.py         Phase 4 entrypoint with read-only self-check +
+                  Market Data Buffer self-check
 scripts/
   init_db.py      Initialise all five Phase 2 databases
 tests/
@@ -223,12 +346,19 @@ tests/
     test_phase2_schemas.py          Phase 2 schema column contract
     test_event_repository.py        EventRepository full Phase 2 API
     test_init_db_script.py          init_db.py
-    test_main_entrypoint.py         entrypoint smoke incl. Phase 3
+    test_main_entrypoint.py         entrypoint smoke incl. Phase 4
     test_exchange_models.py         Phase 3 model contracts + tiers
     test_exchange_base.py           ExchangeClientBase + WS + Health
     test_binance_client.py          BinanceClient skeleton refusals
     test_mock_exchange_client.py    MockExchangeClient lifecycle
     test_phase3_no_network.py       repo-wide no-SDK / no-import scan
+    test_market_data_models.py      Phase 4 value-object contract
+    test_market_data_candles.py     CandleBuilder + bucket alignment
+    test_market_data_cvd.py         CVD calculator + acceptance #1
+    test_market_data_atr.py         ATR + acceptance #2
+    test_market_data_oi_funding_liquidation.py  OI / funding / liq state
+    test_market_data_buffer.py      MarketDataBuffer + acceptance #3, #4
+    test_phase4_no_network.py       Phase 4 no-network / no-API-key scan
     ... + the Phase 1 tests (enums, models, settings, telegram, etc.)
 docs/
   AMA_RT_V1_4_Production_Spec_Kiro.md  - V1.4 production spec
@@ -256,16 +386,17 @@ python -m scripts.init_db
 # [ama-rt][init_db]   capital.db     journal=wal    schema=capital.sql
 # [ama-rt][init_db]   incidents.db   journal=wal    schema=incidents.sql
 
-# 3. Run the Phase 3 entrypoint - prints a status banner and exits 0:
+# 3. Run the Phase 4 entrypoint - prints a status banner and exits 0:
 python -m app.main
 # Sample output:
-# [AMA-RT] Phase 3 - Exchange Gateway Read-Only v1.4.0a3 mode=paper \
+# [AMA-RT] Phase 4 - Market Data Buffer v1.4.0a4 mode=paper \
 #   live_trading=False right_tail=False llm=False exchange_live_orders=False \
-#   databases=5 events_count=5 capital_events=1 \
+#   databases=5 events_count=9 capital_events=1 \
 #   exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+#   market_data=3/0 market_snapshots=3 data_unreliable=1 \
 #   risk_decision=True/paper_only_skeleton_approval health=ok
 
-# 4. Run the test suite (211 tests):
+# 4. Run the test suite (311 tests):
 pytest
 ```
 
@@ -305,26 +436,46 @@ except ExchangeConnectionError as exc:
     print("expected:", exc)
 ```
 
+## Programmatic usage (Phase 4 Market Data Buffer)
+
+```python
+from app.exchanges import MockExchangeClient
+from app.market_data import MarketDataBuffer
+
+client = MockExchangeClient(autostart=True)
+buffer = MarketDataBuffer(exchange=client)
+
+buffer.track("BTCUSDT")
+buffer.refresh_from_exchange("BTCUSDT")          # uses the mock only
+
+snapshot = buffer.snapshot("BTCUSDT", emit_event=False)
+print(snapshot.cvd_1m, snapshot.atr_1m, snapshot.volume_1m)
+
+# WS disconnect drives DATA_UNRELIABLE through to consumers.
+buffer.on_websocket_disconnect(reason="test")
+assert buffer.is_degraded("BTCUSDT")
+```
+
 ## What is NOT here yet
 
-Everything in Issues #4 through #10. Specifically:
+Everything in Issues #5 through #10. Specifically:
 
 - **No real exchange adapter.** `BinanceClient` is a skeleton; every
-  read method raises `NotImplementedError`. Phase 4 (Market Data
-  Buffer) is the next phase that may extend the public-data read
-  methods, but only under the constraints listed in *Phase 4
-  constraints* above: mock / fixture data is the default, any real
-  adapter is opt-in, no API key, no write surface, no auto-connect to
-  the real exchange. `get_account_snapshot` must remain a skeleton in
-  Phase 3 **and** Phase 4 because authenticated account reads cannot
-  land before the limited-live phase. Real authenticated REST and the
-  user-data WebSocket stream both land with Issue #9 (Reconciliation),
-  behind the Risk Engine.
-- No Market Data Buffer (Issue #4).
+  read method raises `NotImplementedError`. Phase 4 (this PR) drives
+  the Market Data Buffer from `MockExchangeClient` only under the
+  constraints listed in *Phase 4 hard boundary* above: mock / fixture
+  data is the default, no real adapter is added, no API key, no write
+  surface, no auto-connect to the real exchange.
+  `get_account_snapshot` remains a skeleton in Phase 3 **and** Phase 4
+  because authenticated account reads cannot land before the
+  limited-live phase. Real authenticated REST and the user-data
+  WebSocket stream both land with Issue #9 (Reconciliation), behind
+  the Risk Engine.
 - No Regime / Universe / Liquidity engines (Issue #5).
 - No anomaly / confirmation / manipulation scanners (Issue #6).
 - No full Risk Engine - the Phase 1 engine still only refuses live and
-  right-tail actions (Issue #7).
+  right-tail actions. Issue #7 will read `MarketDataBuffer.is_degraded`
+  for its No-Trade Gate.
 - No Capital Flow Engine; Phase 2 ships only the **event recording**
   for it (Issue #8).
 - No real Execution FSM driver, no Reconciliation against an exchange
@@ -334,24 +485,37 @@ Everything in Issues #4 through #10. Specifically:
 
 ## Live trading risk
 
-**There is no live trading risk in Phase 3.** This PR adds:
+**There is no live trading risk in Phase 4.** This PR adds:
 
-- An abstract `ExchangeClientBase` whose four write surfaces are
-  *concrete on the base class* and **always** raise `SafeModeViolation`.
-- A `BinanceClient` skeleton that raises `NotImplementedError` on every
-  read method and refuses to accept any API credential.
-- A `MockExchangeClient` that returns deterministic in-memory data and
-  inherits the same write-surface refusal.
-- New core vocabulary (`ExchangeConnectionState`, `SafeModeViolation`,
-  `ExchangeError`, `EXCHANGE_*` event types) plus tests.
+- An in-process `MarketDataBuffer` that consumes deterministic
+  `RecentTrade`, `OrderBook`, `FundingRate`, `OpenInterest` and
+  `LiquidationEvent` value objects.
+- Pure helpers (`compute_cvd`, `compute_atr`, `CandleBuilder`,
+  `OpenInterestSnapshotState`, `FundingSnapshotState`,
+  `LiquidationFeedState`) plus a `MARKET_SNAPSHOT` /
+  `DATA_UNRELIABLE` event-emission path through the existing
+  `EventRepository`.
+- A boot-time self-check that drives the buffer through one ingest +
+  snapshot + WS disconnect / reconnect cycle using the deterministic
+  `MockExchangeClient` only.
+- 76 new unit tests on top of the 235 retained from Phase 1 / 2 / 3
+  (311 total).
 
 What this PR does NOT add:
 
 - No exchange SDK in `requirements.txt` / `pyproject.toml` (asserted
-  by `tests/unit/test_phase3_no_network.py`).
+  by `tests/unit/test_phase3_no_network.py` and
+  `tests/unit/test_phase4_no_network.py`).
+- No outbound HTTP / WebSocket client of any kind in `app/`.
 - No real `create_order` / `cancel_order` / `set_leverage` /
   `set_margin_mode` call site.
-- No outbound HTTP / WebSocket client of any kind in `app/`.
+- No `BinanceClient` implementation; every read method still raises
+  `NotImplementedError`. `get_account_snapshot` continues to refuse
+  outright with a message that mentions "skeleton", "phase 4" and
+  "api key".
+- No `api_key` / `api_secret` parameter anywhere under
+  `app/market_data/`.
+- No `market.db` (the buffer is in-memory only).
 - No Telegram bot library, no LLM client.
 - No new mode flags, no loosened safety lock.
 
