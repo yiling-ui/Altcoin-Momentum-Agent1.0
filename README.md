@@ -1,11 +1,17 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 2 - Event Sourcing and Database. **Paper mode only.**
-> This repository does **not** trade real money, does **not** connect to
-> any exchange, does **not** call any LLM, and does **not** read real API
-> keys. Phase 2 extends the SQLite substrate so future phases (Risk
-> Engine, Capital Flow, Execution FSM, Reconciliation, Reflection) have
-> a reliable, auditable, replayable event log to stand on.
+> **Phase status:** Phase 3 - Exchange Gateway Read-Only. **Paper mode only.**
+> The Exchange Gateway shipped in this branch is **read-only by construction**.
+> This repository does **not** trade real money, does **not** open any
+> outbound network socket, does **not** import any exchange SDK
+> (`ccxt`, `binance-connector`, `python-binance` are intentionally
+> absent from `requirements.txt`), does **not** call any LLM, and does
+> **not** read real API keys. Phase 3 introduces an abstract
+> `ExchangeClientBase` whose four write surfaces (`create_order`,
+> `cancel_order`, `set_leverage`, `set_margin_mode`) **always** raise
+> `SafeModeViolation`. The only concrete client wired into
+> `python -m app.main` is `MockExchangeClient`, which serves
+> deterministic in-memory data.
 
 ---
 
@@ -17,8 +23,8 @@ This is the implementation of the production specification in
 | Phase | Issue | Status | Branch / PR |
 | --- | --- | --- | --- |
 | Phase 1 - Safety Foundation | #1  | merged | `feature/phase-1-safety-foundation` (PR #11), `feature/phase-1-review-fixes` (PR #12) |
-| Phase 2 - Event Sourcing and Database | #2  | this branch | `feature/phase-2-event-sourcing-database` |
-| Phase 3 - Exchange Gateway Read-Only | #3  | open | - |
+| Phase 2 - Event Sourcing and Database | #2  | merged | `feature/phase-2-event-sourcing-database` (PR #13) |
+| Phase 3 - Exchange Gateway Read-Only | #3  | this branch | `feature/phase-3-exchange-gateway-read-only` |
 | Phase 4 - Market Data Buffer | #4  | open | - |
 | Phase 5 - Regime / Universe / Liquidity | #5  | open | - |
 | Phase 6 - Scanner / Confirmation / Manipulation | #6  | open | - |
@@ -27,63 +33,136 @@ This is the implementation of the production specification in
 | Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
 
-## Phase 2 deliverable
+## Phase 3 deliverable
 
-Phase 2 extends the Phase 1 SQLite substrate so the project has a
-production-quality event-sourcing layer. Specifically:
+Phase 3 introduces the `app/exchanges/` package - the **read-only**
+abstraction every later phase will sit on top of. Specifically:
 
-- **Five separate SQLite databases** (Spec §33.1), each opened in WAL
-  mode and migrated by an idempotent runner:
+- **`ExchangeClientBase` abstract class** (`app/exchanges/base.py`)
+  - 6 abstract read-only methods every concrete client must implement:
+    `get_symbols`, `get_orderbook`, `get_recent_trades`,
+    `get_funding_rate`, `get_open_interest`, `get_account_snapshot`.
+  - 4 **concrete** write surfaces (`create_order`, `cancel_order`,
+    `set_leverage`, `set_margin_mode`) that **always** raise
+    `SafeModeViolation`. Subclasses cannot accidentally overwrite the
+    refusal - they would have to delete the inherited method on
+    purpose, and the test suite asserts that they have not.
+  - `ExchangeHealth` value-object with state transitions (
+    `UNINITIALISED -> CONNECTED -> DEGRADED / RECONNECTING /
+    DISCONNECTED`), counters and an `is_data_trustworthy()` predicate.
+  - `WebSocketManager` skeleton (`connect / disconnect / subscribe /
+    unsubscribe`) that emits a `DATA_UNRELIABLE` event with the
+    pending subscription set on every drop. **No real socket is
+    opened in Phase 3.**
+  - Health transitions emit `EXCHANGE_CONNECTED` /
+    `EXCHANGE_DISCONNECTED` / `EXCHANGE_DEGRADED` events through
+    `EventRepository` so the Phase 2 substrate can replay the gateway
+    lifecycle.
+  - `_require_trustworthy(surface=...)` helper that refuses tier-A
+    reads with `ExchangeConnectionError` whenever the link is not
+    `CONNECTED` (Spec §14.2 + §31).
+  - `reliability_tiers` static map that documents the default
+    `DataReliability` tier each surface returns (Spec §13.3).
 
-  | DB             | Schema file                          | Phase 2 writes? |
-  | -------------- | ------------------------------------ | --------------- |
-  | `events.db`    | `app/database/schema.sql`            | yes (`EventRepository`) |
-  | `trades.db`    | `app/database/schemas/trades.sql`    | no - schema only (Issue #9) |
-  | `positions.db` | `app/database/schemas/positions.sql` | no - schema only (Issue #7) |
-  | `capital.db`   | `app/database/schemas/capital.sql`   | yes (`capital_events_index` mirror) |
-  | `incidents.db` | `app/database/schemas/incidents.sql` | no - schema only (Issue #9 / #10) |
+- **`BinanceClient` skeleton** (`app/exchanges/binance.py`)
+  - Real Binance USDT-M perpetual implementation lands later. Phase 3
+    ships the class so future phases have a stable target to extend.
+  - All 6 read methods raise `NotImplementedError` and the message of
+    each spells out the Phase 4 constraints (see *Phase 4 constraints*
+    below). `get_account_snapshot` raises a stronger message: it must
+    remain mock-only / skeleton-only in **both** Phase 3 and Phase 4
+    because a real account snapshot needs an authenticated REST call
+    and an API key, neither of which is allowed before the
+    limited-live phase.
+  - All 4 write methods inherit the base-class `SafeModeViolation`
+    refusal.
+  - The constructor **refuses** if any `api_key` / `api_secret` is
+    supplied (Spec §37 anti-leak rule). Phase 3 must not hold a real
+    key in process memory.
+  - The module imports no exchange SDK and no outbound network
+    library - asserted by `tests/unit/test_phase3_no_network.py`.
 
-- **`EventRepository`** with every method Issue #2 requires:
-  - `append_event(event)`
-  - `append_many(events)`
-  - `list_events(...)`
-  - `replay_events(...)` (lazy iterator)
-  - `count_events(...)`
-  - filters: `event_type` / `event_types` / `symbol` / `source_module`
-    / `position_id` / `order_id` / `since_ts` / `until_ts`
-    / `limit` / `offset`
-  - persistence failures are logged via `loguru` and raised as
-    `EventPersistenceError` (no silent loss)
-  - Phase 1 method names (`append`, `list`, `replay`, `count`) are
-    preserved as backwards-compatible aliases so the existing skeleton
-    callers (Risk Engine, Telegram, Execution FSM) keep working.
+- **`MockExchangeClient`** (`app/exchanges/mock.py`)
+  - Deterministic in-memory implementation used by the entrypoint and
+    the test suite. **No network**.
+  - Optional `MockExchangeSeed` lets tests inject fully predictable
+    symbol lists, order books, tapes, funding, OI, and account
+    snapshots.
+  - `simulate_disconnect` / `simulate_reconnect` /
+    `simulate_degraded` test hooks drive the Phase 4+ No-Trade Gate
+    paths.
+  - Tier-A surfaces (`get_orderbook`, `get_recent_trades`) refuse when
+    not `CONNECTED`; tier-B REST surfaces (`get_symbols`,
+    `get_account_snapshot`) remain usable when `DEGRADED` per Spec
+    §13.3. A REST-fallback book passed via `MockExchangeSeed` is
+    preserved as tier B - the mock does not silently upgrade it.
 
-- **Capital event helpers** (Spec §28.3 / Issue #2):
-  - `record_capital_deposit(amount, ...)`
-  - `record_capital_withdrawal(amount, ...)`
-  - `record_profit_harvest(amount, ...)`
-  - `record_capital_rebase(exchange_equity, withdrawn_profit, lifetime_equity, trading_capital, ...)`
-  - `record_risk_budget_recalculated(new_risk_budget, ...)`
+### Reliability tier contract (Spec §13.3)
 
-  These wrappers produce canonically-shaped `CAPITAL_*` events. Every
-  capital event written through `EventRepository` is **also mirrored**
-  into `capital.db`'s `capital_events_index` table when the repository
-  was constructed with a `capital_conn`. This lets the Capital Flow
-  Engine (Issue #8) answer "which deposit/withdrawal/harvest happened
-  in window X?" without scanning the full event log.
+Locked by `app/exchanges/base.ExchangeClientBase.reliability_tiers`
+and asserted by `tests/unit/test_exchange_base.py
+::test_reliability_tiers_contract`:
 
-- **`scripts/init_db.py`** now creates and migrates all five databases
-  in one call, prints each database's journal mode and schema file, and
-  is idempotent.
+| Surface                | Default tier | Source                              |
+| ---------------------- | ------------ | ----------------------------------- |
+| `get_recent_trades`    | A            | WS aggTrade / trade stream          |
+| `get_orderbook`        | A            | WS depth-diff maintained book       |
+| `get_funding_rate`     | B            | REST                                |
+| `get_open_interest`    | B            | REST                                |
+| `get_symbols`          | B            | REST exchangeInfo                   |
+| `get_account_snapshot` | B            | mock-only / skeleton-only in Phase 3+4 |
 
-- **`python -m app.main`** opens all five databases, migrates them,
-  emits a Phase-2 self-check audit trail (RISK_APPROVED, STATE_TRANSITION,
-  TELEGRAM_COMMAND_RECEIVED, CAPITAL_DEPOSIT marker), and exits 0.
+Adapters that fall back to a tier-B REST orderbook snapshot when the WS
+link is degraded must tag *that specific response* with
+`DataReliability.B` on the model. The default mapping above documents
+the canonical, healthy-link tier - not the worst case.
 
-- **`created_at` column** added to the `events` table per Issue #2 field
-  contract. The migration auto-upgrades a Phase 1 events.db (no
-  `created_at` column) by adding the column and backfilling from
-  `timestamp`.
+### Phase 4 constraints (declared up-front so the next PR cannot drift)
+
+Phase 4 (Issue #4 - Market Data Buffer) **must**:
+
+1. Drive the Market Data Buffer from `MockExchangeClient` / fixture
+   data **by default**.
+2. Treat any real public read-only WS / REST adapter as **opt-in**
+   (off by default) - never auto-connect to the real exchange.
+3. Require **no API key**, accept **no credentials**, expose **no
+   write surface**.
+4. Keep `get_account_snapshot` as a skeleton on `BinanceClient`. A
+   real account snapshot needs an authenticated REST call; that is
+   forbidden until the limited-live phase. The only working
+   implementation in Phase 3 and Phase 4 is
+   `MockExchangeClient.get_account_snapshot`.
+5. Inherit every Phase 1 / Phase 3 safety guarantee unchanged.
+
+Each `BinanceClient` read method raises a `NotImplementedError` whose
+message restates points 1-3 verbatim, so any traceback reminds the
+caller what the next-phase contract is. `get_account_snapshot`
+additionally restates point 4.
+
+- **Phase 3 boot self-check** in `python -m app.main`
+  - The entrypoint instantiates `MockExchangeClient`, runs
+    `assert_read_only()`, **probes every banned write surface** and
+    refuses to start unless each one raises `SafeModeViolation`.
+  - One `EXCHANGE_CONNECTED` and (on shutdown) one
+    `EXCHANGE_DISCONNECTED` + `DATA_UNRELIABLE` event are written so
+    replay tests can confirm the lifecycle.
+  - The status banner now reports
+    `exchange=<name>/<state> exchange_symbols=N exchange_connected_events=1`.
+  - The Phase 1 safety lock and `_assert_phase1_safety()` boot check
+    remain unchanged. Phase 3 adds `_assert_phase3_read_only()` *on
+    top* of them.
+
+- **New core vocabulary**
+  - `ExchangeConnectionState` enum (`UNINITIALISED / CONNECTED /
+    DEGRADED / RECONNECTING / DISCONNECTED`) with an
+    `is_trustworthy` predicate.
+  - `DataReliability.is_at_least()` helper so every later module
+    compares tiers consistently.
+  - New `EventType` values: `EXCHANGE_CONNECTED`,
+    `EXCHANGE_DISCONNECTED`, `EXCHANGE_DEGRADED`. `DATA_UNRELIABLE`
+    was already declared in Phase 1.
+  - New typed errors: `SafeModeViolation` (subclass of
+    `SafetyViolation`), `ExchangeError`, `ExchangeConnectionError`.
 
 ## Default safety guarantees (unchanged from Phase 1)
 
@@ -100,8 +179,10 @@ Settings are loaded from `app/config/defaults.yaml` and validated by
 | `exchange_live_order_enabled`    | `False`   |
 
 `app/main.py` re-asserts these flags at boot and refuses to start if any
-of them is wrong (`SafetyViolation`). Phase 2 does **not** loosen any of
-these.
+of them is wrong (`SafetyViolation`). Phase 3 does **not** loosen any
+of these. Phase 3 adds an *additional* runtime guard,
+`_assert_phase3_read_only()`, that probes every banned write surface
+and refuses to boot unless each one raises `SafeModeViolation`.
 
 ## Repository layout
 
@@ -109,6 +190,8 @@ these.
 app/
   config/         settings + YAML configs (defaults / risk / strategy)
   core/           enums, events, models, clock, errors, constants
+                  (Phase 3: ExchangeConnectionState enum, EXCHANGE_*
+                   event types, SafeModeViolation / ExchangeError)
   database/
     schema.sql              events.db DDL (with created_at)
     schemas/
@@ -119,20 +202,33 @@ app/
     connection.py           open_sqlite + DatabaseSet (5 dbs)
     migrations.py           apply_schema, migrate_database_set
     repositories.py         EventRepository (full Phase 2 API)
+  exchanges/                ## Phase 3 - read-only Exchange Gateway
+    __init__.py             public exports
+    models.py               ExchangeSymbol, OrderBook, RecentTrade,
+                            FundingRate, OpenInterest, AccountSnapshot
+    base.py                 ExchangeClientBase + ExchangeHealth +
+                            WebSocketManager + write-surface refusals
+    binance.py              BinanceClient skeleton (NotImplementedError)
+    mock.py                 MockExchangeClient (deterministic, no network)
   execution/      Execution FSM skeleton (full impl in Issue #9)
   risk/           Risk Engine skeleton (full impl in Issue #7)
   telegram/       Telegram Command Center skeleton (Issue #10)
   monitoring/     metrics + health + alerts (in-memory)
-  main.py         Phase 2 entrypoint
+  main.py         Phase 3 entrypoint with read-only self-check
 scripts/
   init_db.py      Initialise all five Phase 2 databases
 tests/
   unit/
-    test_database_set.py        Phase 2 multi-db connection + migrations
-    test_phase2_schemas.py      Schema column contract for the 4 new dbs
-    test_event_repository.py    Full repo API + capital helpers
-    test_init_db_script.py      Multi-db init + idempotency
-    test_main_entrypoint.py     End-to-end smoke test
+    test_database_set.py            multi-db connection + migrations
+    test_phase2_schemas.py          Phase 2 schema column contract
+    test_event_repository.py        EventRepository full Phase 2 API
+    test_init_db_script.py          init_db.py
+    test_main_entrypoint.py         entrypoint smoke incl. Phase 3
+    test_exchange_models.py         Phase 3 model contracts + tiers
+    test_exchange_base.py           ExchangeClientBase + WS + Health
+    test_binance_client.py          BinanceClient skeleton refusals
+    test_mock_exchange_client.py    MockExchangeClient lifecycle
+    test_phase3_no_network.py       repo-wide no-SDK / no-import scan
     ... + the Phase 1 tests (enums, models, settings, telegram, etc.)
 docs/
   AMA_RT_V1_4_Production_Spec_Kiro.md  - V1.4 production spec
@@ -141,7 +237,7 @@ docs/
 .env.example      Placeholder env vars (no real keys)
 .gitignore        Excludes .env, data/, *.db, etc.
 pyproject.toml
-requirements.txt
+requirements.txt  No exchange SDK, no HTTP client
 ```
 
 ## Running
@@ -160,15 +256,16 @@ python -m scripts.init_db
 # [ama-rt][init_db]   capital.db     journal=wal    schema=capital.sql
 # [ama-rt][init_db]   incidents.db   journal=wal    schema=incidents.sql
 
-# 3. Run the Phase 2 entrypoint - prints a status banner and exits 0:
+# 3. Run the Phase 3 entrypoint - prints a status banner and exits 0:
 python -m app.main
 # Sample output:
-# [AMA-RT] Phase 2 - Event Sourcing and Database v1.4.0a2 mode=paper \
+# [AMA-RT] Phase 3 - Exchange Gateway Read-Only v1.4.0a3 mode=paper \
 #   live_trading=False right_tail=False llm=False exchange_live_orders=False \
-#   databases=5 events_count=4 capital_events=1 \
+#   databases=5 events_count=5 capital_events=1 \
+#   exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
 #   risk_decision=True/paper_only_skeleton_approval health=ok
 
-# 4. Run the test suite:
+# 4. Run the test suite (211 tests):
 pytest
 ```
 
@@ -178,66 +275,102 @@ To override the data directory (used by tests):
 AMA_DATA_DIR=/tmp/ama python -m scripts.init_db
 ```
 
-## Programmatic usage (Phase 2 API)
+## Programmatic usage (Phase 3 read-only API)
 
 ```python
-from app.database.connection import DatabaseSet
-from app.database.migrations import migrate_database_set
-from app.database.repositories import EventRepository
-from app.core.events import Event, EventType
+from app.exchanges import MockExchangeClient
+from app.core.errors import SafeModeViolation, ExchangeConnectionError
 
-with DatabaseSet.open("./data/sqlite") as dbs:
-    migrate_database_set(dbs)
-    repo = EventRepository(dbs.events, capital_conn=dbs.capital)
+client = MockExchangeClient(autostart=True)
 
-    repo.record_capital_deposit(amount=100.0, note="seed")
-    repo.record_capital_withdrawal(amount=80.0, note="harvest")
+# Read-only surfaces:
+symbols = client.get_symbols()
+book = client.get_orderbook("BTCUSDT", depth=5)
+trades = client.get_recent_trades("BTCUSDT", limit=10)
+funding = client.get_funding_rate("BTCUSDT")
+oi = client.get_open_interest("BTCUSDT")
+account = client.get_account_snapshot()
 
-    for event in repo.replay_events(event_type=EventType.CAPITAL_WITHDRAWAL):
-        print(event.event_id, event.payload)
+# Write surfaces always refuse:
+try:
+    client.create_order(symbol="BTCUSDT", side="buy", qty=1.0)
+except SafeModeViolation as exc:
+    print("expected:", exc)
+
+# Disconnect simulation:
+client.simulate_disconnect(reason="test")
+try:
+    client.get_orderbook("BTCUSDT")
+except ExchangeConnectionError as exc:
+    print("expected:", exc)
 ```
 
 ## What is NOT here yet
 
-Everything in Issues #3 through #10. Specifically:
+Everything in Issues #4 through #10. Specifically:
 
-- No Exchange Gateway, no real WebSocket / REST adapter (Issue #3).
+- **No real exchange adapter.** `BinanceClient` is a skeleton; every
+  read method raises `NotImplementedError`. Phase 4 (Market Data
+  Buffer) is the next phase that may extend the public-data read
+  methods, but only under the constraints listed in *Phase 4
+  constraints* above: mock / fixture data is the default, any real
+  adapter is opt-in, no API key, no write surface, no auto-connect to
+  the real exchange. `get_account_snapshot` must remain a skeleton in
+  Phase 3 **and** Phase 4 because authenticated account reads cannot
+  land before the limited-live phase. Real authenticated REST and the
+  user-data WebSocket stream both land with Issue #9 (Reconciliation),
+  behind the Risk Engine.
 - No Market Data Buffer (Issue #4).
 - No Regime / Universe / Liquidity engines (Issue #5).
 - No anomaly / confirmation / manipulation scanners (Issue #6).
 - No full Risk Engine - the Phase 1 engine still only refuses live and
   right-tail actions (Issue #7).
-- No Capital Flow Engine, no Profit Harvest logic, no Rebase
-  computation. Phase 2 only ships the **event recording** for these;
-  Issue #8 implements the engine that *acts* on the events.
+- No Capital Flow Engine; Phase 2 ships only the **event recording**
+  for it (Issue #8).
 - No real Execution FSM driver, no Reconciliation against an exchange
-  (Issue #9). Phase 2 only ships the `trades.db` and `incidents.db`
-  schemas.
+  (Issue #9).
 - No LLM Interpreter, no Telegram outbound bot, no Replay diff reports,
   no Reflection (Issue #10).
 
 ## Live trading risk
 
-**There is no live trading risk in Phase 2.** This PR adds:
+**There is no live trading risk in Phase 3.** This PR adds:
 
-- Four new SQLite schemas (passive table definitions).
-- A multi-database connection helper.
-- An extended `EventRepository` API.
-- A capital event recorder (write-only audit trail; *not* a Capital
-  Flow Engine).
-- Tests.
+- An abstract `ExchangeClientBase` whose four write surfaces are
+  *concrete on the base class* and **always** raise `SafeModeViolation`.
+- A `BinanceClient` skeleton that raises `NotImplementedError` on every
+  read method and refuses to accept any API credential.
+- A `MockExchangeClient` that returns deterministic in-memory data and
+  inherits the same write-surface refusal.
+- New core vocabulary (`ExchangeConnectionState`, `SafeModeViolation`,
+  `ExchangeError`, `EXCHANGE_*` event types) plus tests.
 
 What this PR does NOT add:
 
-- No exchange SDK in dependencies.
-- No `create_order` / `cancel_order` / `set_leverage` call site.
-- No outbound HTTP client.
+- No exchange SDK in `requirements.txt` / `pyproject.toml` (asserted
+  by `tests/unit/test_phase3_no_network.py`).
+- No real `create_order` / `cancel_order` / `set_leverage` /
+  `set_margin_mode` call site.
+- No outbound HTTP / WebSocket client of any kind in `app/`.
 - No Telegram bot library, no LLM client.
 - No new mode flags, no loosened safety lock.
 
-The Phase 1 `_apply_phase1_safety_lock()` and the
-`_assert_phase1_safety()` boot-time check both remain unchanged and
-covered by the same parametrised tests.
+Defence in depth (cumulative):
+
+1. `app/config/settings.py::_apply_phase1_safety_lock()` overwrites
+   the five flags after YAML + env loading.
+2. `app/main.py::_assert_phase1_safety()` raises `SafetyViolation` at
+   boot if any flag has drifted.
+3. `app/main.py::_assert_phase3_read_only()` probes every banned
+   write surface and raises `SafeModeViolation` if any of them stops
+   refusing.
+4. `app/risk/engine.py` rejects `live_trading_required=True` and
+   `right_tail_amplify=True` requests.
+5. `app/exchanges/base.py::ExchangeClientBase.{create_order,
+   cancel_order, set_leverage, set_margin_mode}` always raise
+   `SafeModeViolation`.
+
+All five layers are unit-tested.
 
 ## License
 
