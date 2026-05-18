@@ -438,3 +438,94 @@ def test_events_table_columns_match_issue2_contract(in_memory_conn: sqlite3.Conn
         "created_at",
     }
     assert required.issubset(set(cols))
+
+
+
+# ---------------------------------------------------------------------------
+# Production-safety regression tests added during Phase 2 PR self-audit.
+#
+# These three tests guard behaviours that were claimed in commit messages /
+# code comments but were not previously asserted. They exist to make
+# Issue #8 (Capital Flow Engine) safe to build on top of Phase 2.
+# ---------------------------------------------------------------------------
+def test_capital_mirror_failure_does_not_roll_back_events(
+    events_repo_with_capital, phase2_dbs
+):
+    """If capital_events_index is corrupted, the events.db write must still succeed.
+
+    The repository's docstring promises that a capital-mirror failure is
+    logged but does NOT roll back the events.db write (the index is
+    rebuildable from events.db on demand). A regression here would mean a
+    silent data-loss path: a CAPITAL_DEPOSIT could be visible in the
+    capital index but missing from the canonical event log, OR vice
+    versa, depending on which side of the rollback failed.
+    """
+    # Drop the mirror table to force a sqlite OperationalError on the
+    # mirror INSERT. The events.db write must still go through.
+    phase2_dbs.capital.execute("DROP TABLE capital_events_index")
+    phase2_dbs.capital.commit()
+
+    ev = events_repo_with_capital.record_capital_deposit(amount=100.0)
+
+    # 1. The event was persisted into events.db.
+    assert events_repo_with_capital.count_events(
+        event_type=EventType.CAPITAL_DEPOSIT
+    ) == 1
+    [persisted] = events_repo_with_capital.list_events(
+        event_type=EventType.CAPITAL_DEPOSIT
+    )
+    assert persisted.event_id == ev.event_id
+    assert persisted.payload["amount"] == 100.0
+
+    # 2. The mirror is gone (table dropped) but the repository did not
+    # raise and did not increment failed_appends - the events write
+    # itself succeeded.
+    assert events_repo_with_capital.failed_appends == 0
+
+
+def test_capital_rebase_never_emits_withdrawal_event(events_repo_with_capital):
+    """Spec §28 hard rule: 'Withdrawal is NOT a loss; rebase resets the basis'.
+
+    The Capital Flow Engine in Issue #8 will rely on these event types
+    being distinct. A regression here (e.g. CAPITAL_REBASE accidentally
+    typed as CAPITAL_WITHDRAWAL) would cause the engine to subtract
+    rebased capital from PnL. We assert here that the rebase helper
+    emits exactly one CAPITAL_REBASE event and zero CAPITAL_WITHDRAWAL
+    events.
+    """
+    events_repo_with_capital.record_capital_rebase(
+        exchange_equity=120.0,
+        withdrawn_profit=80.0,
+        lifetime_equity=200.0,
+        trading_capital=120.0,
+        note="post_withdrawal_rebase",
+    )
+    assert events_repo_with_capital.count_events(
+        event_type=EventType.CAPITAL_REBASE
+    ) == 1
+    assert events_repo_with_capital.count_events(
+        event_type=EventType.CAPITAL_WITHDRAWAL
+    ) == 0
+    # And the rebase payload preserves the four scalars Spec §28.2 requires.
+    [rebase] = events_repo_with_capital.list_events(
+        event_type=EventType.CAPITAL_REBASE
+    )
+    assert rebase.payload["exchange_equity"] == 120.0
+    assert rebase.payload["withdrawn_profit"] == 80.0
+    assert rebase.payload["lifetime_equity"] == 200.0
+    assert rebase.payload["trading_capital"] == 120.0
+
+
+def test_withdrawal_amount_zero_is_allowed_but_negative_is_not(events_repo):
+    """Withdrawals are recorded as positive amounts; the direction is
+    encoded by event_type. A negative amount is a programming error and
+    must be rejected at the helper boundary so it cannot reach the
+    capital index.
+    """
+    # zero is allowed (e.g. a 'no-op confirmation' marker).
+    events_repo.record_capital_withdrawal(amount=0.0)
+    # negative is not.
+    with pytest.raises(ValueError):
+        events_repo.record_capital_withdrawal(amount=-1.0)
+    with pytest.raises(ValueError):
+        events_repo.record_profit_harvest(amount=-0.01)

@@ -1,7 +1,10 @@
-# AMA-RT Phase 1 Safety Foundation runtime dependencies.
-# Phase 1 intentionally avoids exchange SDKs, LLM SDKs and Telegram libraries
-# to guarantee that the safety foundation cannot accidentally connect to any
-# real exchange, LLM or messaging service.
+# AMA-RT runtime dependencies.
+#
+# Phase 2 (Event Sourcing and Database) keeps the Phase 1 dependency set
+# unchanged. We intentionally avoid exchange SDKs, LLM SDKs and Telegram
+# libraries so that the safety foundation cannot accidentally connect to
+# any real exchange, LLM or messaging service. Exchange SDK lands in
+# Issue #3, Telegram outbound lands in Issue #10, LLM lands in Issue #10.
 
 pydantic>=2.6,<3
 pydantic-settings>=2.2,<3
