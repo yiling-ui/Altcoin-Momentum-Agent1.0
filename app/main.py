@@ -1,4 +1,4 @@
-"""AMA-RT entrypoint (Phase 5 - Regime / Universe / Liquidity).
+"""AMA-RT entrypoint (Phase 6 - Scanner / Confirmation / Manipulation).
 
 Run with:
 
@@ -26,13 +26,21 @@ This entrypoint DOES NOT trade. It only:
        Liquidity Filter against the same deterministic mock + buffer.
        One ``REGIME_UPDATED`` event is written. One
        ``UNIVERSE_FILTERED`` event is written per symbol. Two
-       ``LIQUIDITY_CHECKED`` events are written per symbol (one for
-       :meth:`LiquidityFilter.evaluate`, one for
-       :meth:`LiquidityFilter.can_exit_position`). The Phase 5 hard
-       rules (SYSTEMIC_RISK -> BLOCK_ALL, degraded data -> reject,
-       insufficient depth / no exit channel -> reject) are exercised
-       in-process so the boot drill demonstrates them end-to-end.
-    7. Writes one self-check audit trail:
+       ``LIQUIDITY_CHECKED`` events are written per symbol.
+    7. Phase 6 (this PR): drives the Pre-Anomaly Scanner, the Anomaly
+       Scanner, the Real Trade Confirmation classifier, and the
+       Manipulation Detector against the same buffer. One
+       ``PRE_ANOMALY_DETECTED``, one ``ANOMALY_DETECTED``, one
+       ``TRADE_CONFIRMED`` and one ``MANIPULATION_DETECTED`` event
+       are written per symbol. The Risk Engine is then asked to
+       adjudicate one paper-mode self-check that *also* feeds it the
+       observed manipulation level and trade-confirmation level so
+       the Phase 6 hard rules (M3 -> reject all, M2 -> reject attack,
+       T0 / T1 -> reject attack) are exercised in-process. The
+       paper-mode boot drill uses ``attack_intent=False`` so a
+       conservative scanner reading does NOT block the bootstrap
+       approval.
+    8. Writes one self-check audit trail:
          RISK_APPROVED         (paper-only skeleton check)
          STATE_TRANSITION      (IDLE -> IDLE)
          TELEGRAM_COMMAND_RECEIVED (/status)
@@ -44,13 +52,17 @@ This entrypoint DOES NOT trade. It only:
          REGIME_UPDATED        (Phase 5 boot self-check)
          UNIVERSE_FILTERED     (Phase 5 boot self-check, one per symbol)
          LIQUIDITY_CHECKED     (Phase 5 boot self-check, two per symbol)
+         PRE_ANOMALY_DETECTED  (Phase 6 boot self-check, one per symbol)
+         ANOMALY_DETECTED      (Phase 6 boot self-check, one per symbol)
+         TRADE_CONFIRMED       (Phase 6 boot self-check, one per symbol)
+         MANIPULATION_DETECTED (Phase 6 boot self-check, one per symbol)
          EXCHANGE_DISCONNECTED (Phase 3 graceful shutdown)
        and prints a one-line status banner before exiting 0.
 
 It will refuse to run if the safety flags ever evaluate to a
 non-Phase-1 configuration, or if the Phase 3 read-only invariant has
-drifted. Phase 5 does NOT loosen any Phase 1 / Phase 3 / Phase 4
-safety guarantee.
+drifted. Phase 6 does NOT loosen any Phase 1 / Phase 3 / Phase 4 /
+Phase 5 safety guarantee.
 """
 
 from __future__ import annotations
@@ -78,11 +90,14 @@ from app.exchanges.mock import MockExchangeSeed  # noqa: E402
 from app.exchanges.models import RecentTrade, TradeSide  # noqa: E402
 from app.execution.fsm import ExecutionFSM  # noqa: E402
 from app.liquidity import LiquidityFilter, Side as LiquiditySide  # noqa: E402
+from app.manipulation import ManipulationDetector  # noqa: E402
 from app.market_data import MarketDataBuffer  # noqa: E402
 from app.monitoring.health import HealthChecker, HealthStatus  # noqa: E402
 from app.monitoring.metrics import MetricsRegistry  # noqa: E402
 from app.regime import RegimeEngine  # noqa: E402
 from app.risk.engine import RiskEngine, RiskRequest  # noqa: E402
+from app.scanner import AnomalyScanner, PreAnomalyScanner  # noqa: E402
+from app.confirmation import RealTradeConfirmation  # noqa: E402
 from app.telegram.bot import TelegramCommandCenter  # noqa: E402
 from app.universe import UniverseFilter  # noqa: E402
 
@@ -370,6 +385,55 @@ def run() -> int:
             )
         # ----------------------------------------------------------
 
+        # ---- Phase 6 - Scanner / Confirmation / Manipulation -----
+        # All four classifiers read from the same in-process buffer +
+        # regime snapshot. They never call a write surface, never open
+        # a socket, never import an exchange SDK, never call an LLM.
+        # Each emits ONE event of its own type per evaluation.
+        pre_anomaly_scanner = PreAnomalyScanner(event_repo=repo)
+        anomaly_scanner = AnomalyScanner(event_repo=repo)
+        confirmation = RealTradeConfirmation(event_repo=repo)
+        manipulation = ManipulationDetector(event_repo=repo)
+        observed_manipulation_level = None
+        observed_confirmation_level = None
+        for sym_meta in exchange_symbols:
+            snap = buffer.snapshot(sym_meta.symbol, emit_event=False)
+            is_degraded_view = buffer.is_degraded(sym_meta.symbol)
+            pre_anomaly_scanner.evaluate_snapshot(
+                snap,
+                regime=regime_snapshot,
+                is_data_degraded=is_degraded_view,
+            )
+            anomaly_scanner.evaluate_snapshot(
+                snap,
+                regime=regime_snapshot,
+                is_data_degraded=is_degraded_view,
+            )
+            conf_decision = confirmation.evaluate_snapshot(
+                snap,
+                regime=regime_snapshot,
+                is_data_degraded=is_degraded_view,
+            )
+            manip_decision = manipulation.evaluate_snapshot(
+                snap,
+                regime=regime_snapshot,
+                is_data_degraded=is_degraded_view,
+            )
+            # Track the worst-observed reading so the bootstrap risk
+            # check can be exercised against a real classifier output
+            # rather than a hard-coded value.
+            if observed_manipulation_level is None or (
+                manip_decision.fired_signals
+                > (observed_manipulation_level[1].fired_signals)
+            ):
+                observed_manipulation_level = (manip_decision.level, manip_decision)
+            if observed_confirmation_level is None or (
+                conf_decision.fired_signals
+                > observed_confirmation_level[1].fired_signals
+            ):
+                observed_confirmation_level = (conf_decision.level, conf_decision)
+        # ----------------------------------------------------------
+
         # Skeletons
         risk = RiskEngine(settings=settings, event_repo=repo)
         fsm = ExecutionFSM()
@@ -406,17 +470,33 @@ def run() -> int:
 
         # Demonstration that the wiring is alive: ask the Risk Engine to
         # adjudicate a trivial paper-mode action. RISK_APPROVED is written.
+        # Phase 6 hooks the observed manipulation + confirmation levels
+        # in - with attack_intent=False, the M2 / T0 / T1 attack guards
+        # do NOT fire so the bootstrap remains a clean approval.
+        bootstrap_manipulation = (
+            observed_manipulation_level[0]
+            if observed_manipulation_level is not None
+            else None
+        )
+        bootstrap_confirmation = (
+            observed_confirmation_level[0]
+            if observed_confirmation_level is not None
+            else None
+        )
         decision = risk.evaluate(
             RiskRequest(
                 source_module="bootstrap",
-                action="phase5_self_check",
+                action="phase6_self_check",
                 symbol=None,
                 live_trading_required=False,
                 right_tail_amplify=False,
+                attack_intent=False,
+                manipulation_level=bootstrap_manipulation,
+                trade_confirmation_level=bootstrap_confirmation,
             )
         )
         metrics.incr("risk_decisions_total")
-        metrics.set_gauge("phase", 5)
+        metrics.set_gauge("phase", 6)
         metrics.incr("exchange_health_probes")
         metrics.set_gauge(
             "market_data_symbols_tracked", buffer.stats().symbols_tracked
@@ -425,6 +505,10 @@ def run() -> int:
         metrics.incr("universe_evaluations", universe_filter.evaluations)
         metrics.incr("liquidity_evaluations", liquidity_filter.evaluations)
         metrics.incr("liquidity_exit_checks", liquidity_filter.exit_checks)
+        metrics.incr("pre_anomaly_evaluations", pre_anomaly_scanner.evaluations)
+        metrics.incr("anomaly_evaluations", anomaly_scanner.evaluations)
+        metrics.incr("trade_confirmation_evaluations", confirmation.evaluations)
+        metrics.incr("manipulation_evaluations", manipulation.evaluations)
 
         # STATE_TRANSITION marker so replay shows the process booted.
         repo.append_event(
@@ -434,7 +518,7 @@ def run() -> int:
                 payload={
                     "from": fsm.state.value,
                     "to": ExecutionState.IDLE.value,
-                    "reason": "phase5_boot",
+                    "reason": "phase6_boot",
                 },
             )
         )
@@ -442,7 +526,7 @@ def run() -> int:
         # Telegram skeleton: drive one /status command through the bus.
         from app.telegram.commands import Command  # local import keeps boot light
 
-        telegram.handle(Command(name="/status", user_id="phase5-bootstrap"))
+        telegram.handle(Command(name="/status", user_id="phase6-bootstrap"))
 
         # Phase 2 introduced capital event helpers. Emit a paper-mode
         # CAPITAL_DEPOSIT marker so a fresh database has at least one
@@ -451,7 +535,7 @@ def run() -> int:
         repo.record_capital_deposit(
             amount=0.0,
             source_module="bootstrap",
-            note="phase5_boot_paper_marker",
+            note="phase6_boot_paper_marker",
         )
 
         overall, _ = health.evaluate()
@@ -471,6 +555,16 @@ def run() -> int:
             1 for d in universe_decisions if d.eligible
         )
         liquidity_count = repo.count_events(event_type=EventType.LIQUIDITY_CHECKED)
+        pre_anomaly_count = repo.count_events(
+            event_type=EventType.PRE_ANOMALY_DETECTED
+        )
+        anomaly_count = repo.count_events(event_type=EventType.ANOMALY_DETECTED)
+        trade_confirmed_count = repo.count_events(
+            event_type=EventType.TRADE_CONFIRMED
+        )
+        manipulation_count = repo.count_events(
+            event_type=EventType.MANIPULATION_DETECTED
+        )
         stats = buffer.stats()
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
@@ -494,13 +588,17 @@ def run() -> int:
             f"universe={universe_eligible_count}/{len(universe_decisions)} "
             f"universe_events={universe_count} "
             f"liquidity_events={liquidity_count} "
+            f"pre_anomaly_events={pre_anomaly_count} "
+            f"anomaly_events={anomaly_count} "
+            f"trade_confirmed_events={trade_confirmed_count} "
+            f"manipulation_events={manipulation_count} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )
         # Stop the exchange cleanly so DATA_UNRELIABLE is emitted on
         # shutdown - that lets replay-based tests confirm the lifecycle
         # closed properly.
-        exchange.stop(reason="phase5_shutdown")
+        exchange.stop(reason="phase6_shutdown")
     finally:
         dbs.close()
     return 0

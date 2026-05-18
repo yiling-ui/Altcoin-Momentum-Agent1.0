@@ -1,4 +1,4 @@
-"""Risk Engine skeleton (Spec §27, Issue #1, full impl in Issue #7).
+"""Risk Engine skeleton (Spec §27, Issue #1; extended in Issue #6).
 
 Phase 1 contract
 ----------------
@@ -15,6 +15,30 @@ we ship a minimal but real implementation that:
 
 This skeleton is intentionally conservative: no thresholds, no portfolio
 heat, no circuit breaker. Those land with Issue #7.
+
+Phase 6 extension (Issue #6)
+----------------------------
+Issue #6 requires the Risk Engine to honour the manipulation level and
+the real-trade confirmation level produced by the Phase 6 classifiers:
+
+    - ManipulationLevel.M3 -> reject ALL new openings (Spec §21.3 hard
+      rule "M3 禁止交易"). M3 is a hard wall.
+    - ManipulationLevel.M2 -> reject ATTACK / RIGHT_TAIL_AMPLIFY
+      candidates (Spec §21.3 hard rule "M2 禁止进攻"). Smaller scout /
+      observe candidates may continue.
+    - TradeConfirmationLevel.T0 / T1 -> reject ATTACK candidates
+      (Issue #6 hard rule "T0/T1 不允许进攻"). T0 / T1 + scout /
+      observe is allowed; the scanner output is also captured in the
+      RISK_REJECTED audit payload regardless.
+
+The new check is gated by ``attack_intent`` so a non-attack action
+(e.g. observe, scout, exit, kill_all) is never blocked by an M2 or
+T0/T1 reading. ``right_tail_amplify=True`` always implies
+``attack_intent`` for the purposes of this gate.
+
+Issue #7 will replace these point-checks with a real No-Trade Gate.
+The Phase 6 hooks here are deliberately additive: they extend the
+Phase 1 hard rejection set without removing or weakening any of it.
 """
 
 from __future__ import annotations
@@ -23,7 +47,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config.settings import Settings, get_settings
-from app.core.enums import TradingMode
+from app.core.enums import (
+    ManipulationLevel,
+    TradeConfirmationLevel,
+    TradingMode,
+)
 from app.core.events import Event, EventType
 from app.database.repositories import EventRepository
 
@@ -44,6 +72,20 @@ class RiskRequest:
         - unknown_position:      local/exchange position state unknown.
           Spec §31.3: 'positions unknown -> trading forbidden'.
 
+    Phase 6 (Issue #6) adds three optional fields that let the engine
+    honour the manipulation level and the real-trade confirmation level
+    produced by the Phase 6 classifiers:
+
+        - manipulation_level: result of Spec §21 ManipulationDetector.
+        - trade_confirmation_level: result of Spec §20
+          RealTradeConfirmation.
+        - attack_intent: caller intends an ATTACK / RIGHT_TAIL_AMPLIFY
+          transition (or any action that opens / scales an attack
+          position). When False, the M2 / T0 / T1 attack guards do
+          NOT fire because they are size-class gates, not blanket
+          bans. Setting ``right_tail_amplify=True`` implicitly raises
+          ``attack_intent`` for the duration of the call.
+
     Issue #7 will replace these point-checks with a real No-Trade Gate.
     """
 
@@ -54,7 +96,16 @@ class RiskRequest:
     right_tail_amplify: bool = False
     stop_unconfirmed: bool = False
     unknown_position: bool = False
+    # Phase 6 hooks (Issue #6).
+    manipulation_level: ManipulationLevel | None = None
+    trade_confirmation_level: TradeConfirmationLevel | None = None
+    attack_intent: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def effective_attack_intent(self) -> bool:
+        """``right_tail_amplify=True`` always implies attack intent."""
+        return bool(self.attack_intent or self.right_tail_amplify)
 
 
 @dataclass(frozen=True)
@@ -102,6 +153,25 @@ class RiskEngine:
             # Defence in depth: trading_mode promoted but live still off.
             reasons.append("trading_mode_inconsistent")
 
+        # Phase 6 hard rules (Issue #6, Spec §21.3 + §20.4).
+        attack_intent = request.effective_attack_intent
+        if request.manipulation_level is ManipulationLevel.M3:
+            # M3 is a hard wall: no new opening, no scout, no amplify.
+            reasons.append("manipulation_m3")
+        elif (
+            request.manipulation_level is ManipulationLevel.M2
+            and attack_intent
+        ):
+            # M2: forbid attack-class candidates only.
+            reasons.append("manipulation_m2_attack")
+        if attack_intent and request.trade_confirmation_level in (
+            TradeConfirmationLevel.T0,
+            TradeConfirmationLevel.T1,
+        ):
+            reasons.append(
+                "trade_confirmation_too_low_for_attack"
+            )
+
         approved = not reasons
         if approved:
             reasons = ["paper_only_skeleton_approval"]
@@ -128,6 +198,17 @@ class RiskEngine:
                     "right_tail_amplify": decision.request.right_tail_amplify,
                     "stop_unconfirmed": decision.request.stop_unconfirmed,
                     "unknown_position": decision.request.unknown_position,
+                    "attack_intent": decision.request.effective_attack_intent,
+                    "manipulation_level": (
+                        decision.request.manipulation_level.value
+                        if decision.request.manipulation_level is not None
+                        else None
+                    ),
+                    "trade_confirmation_level": (
+                        decision.request.trade_confirmation_level.value
+                        if decision.request.trade_confirmation_level is not None
+                        else None
+                    ),
                 },
             )
         )

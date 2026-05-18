@@ -7,6 +7,253 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 6 - Scanner Confirmation Manipulation
+
+#### Added
+
+- **`app/scanner/` package** (Spec §17 / §18, Issue #6).
+  - `PreAnomalyScanner.evaluate(PreAnomalyInput)` /
+    `evaluate_snapshot(snapshot, ...)` returns a
+    :class:`PreAnomalyDecision` with `pre_anomaly_score` and
+    `reason_tags`. Six Spec §17.2 signals: volume base-expansion,
+    spread compression, buy-pressure rising, OI soft-rise,
+    funding-not-overheated, minor uptrend.
+  - `AnomalyScanner.evaluate(AnomalyInput)` returns
+    :class:`AnomalyDecision` with `anomaly_score` (Spec §18.2
+    weighted sum) and `reason_tags`. Eight Spec §18.1 signals:
+    `OI_SPIKE`, `CVD_SPIKE`, `VOLUME_SPIKE`, `ATR_EXPANSION`,
+    `FUNDING_EXTREME`, `LIQUIDATION_SPIKE`, `SWEEP`,
+    `MULTI_TIMEFRAME_BREAKOUT`. The Spec §18.2 weights live in
+    `AnomalyConfig` and sum to 1.0; sweep + multi-tf-breakout add
+    bonuses on top so a clean structural breakout is not missed
+    when the underlying spikes are not yet extreme.
+  - Emits one ``PRE_ANOMALY_DETECTED`` and one ``ANOMALY_DETECTED``
+    event per evaluation. Both event types were already declared
+    in the Phase 1 :class:`EventType` vocabulary; Phase 6
+    populates them.
+
+- **`app/confirmation/` package - Real Trade Confirmation**
+  (Spec §20, Issue #6).
+  - `RealTradeConfirmation.evaluate(ConfirmationInput)` /
+    `evaluate_snapshot(snapshot, ...)` returns a
+    :class:`ConfirmationDecision` mapping fired-signal count to a
+    :class:`TradeConfirmationLevel` (T0..T4):
+    - 0 signals  -> T0
+    - 1 signal   -> T1
+    - 2 signals  -> T2
+    - 3 signals  -> T3
+    - 4+ signals -> T4
+  - Five Spec §20.4 signals: CVD-price agreement, breakout hold
+    over N bars, large-trade follow-through, trade-efficiency
+    above mean, volume-up-price-move.
+  - Emits one ``TRADE_CONFIRMED`` event per evaluation.
+
+- **`app/manipulation/` package - Manipulation Detector**
+  (Spec §21, Issue #6).
+  - `ManipulationDetector.evaluate(ManipulationInput)` /
+    `evaluate_snapshot(snapshot, ...)` returns a
+    :class:`ManipulationDecision` mapping fired-signal count to a
+    :class:`ManipulationLevel` (M0..M3):
+    - 0 signals  -> M0
+    - 1 signal   -> M1
+    - 2 signals  -> M2
+    - 3+ signals -> M3
+  - Eight Spec §21.2 signals: CVD up + price flat (CVD-price
+    divergence), volume up + price no move, OI up + price flat,
+    funding hot + price weak, upper-wick growth, buy-pressure-
+    no-push, book-wall flicker (caller-supplied count), narrative-
+    after-pump.
+  - Emits one ``MANIPULATION_DETECTED`` event per evaluation.
+
+- **Risk Engine Phase 6 hooks** (Issue #6 hard rules).
+  - `RiskRequest` gained three optional fields:
+    - `manipulation_level: ManipulationLevel | None`
+    - `trade_confirmation_level: TradeConfirmationLevel | None`
+    - `attack_intent: bool` (default `False`)
+  - New `RiskRequest.effective_attack_intent` property:
+    `right_tail_amplify=True` always implies attack intent.
+  - Three new Phase 6 rejection rules in `RiskEngine.evaluate`:
+    - `manipulation_m3` -> reject every new opening
+      (Spec §21.3 "M3 禁止交易").
+    - `manipulation_m2_attack` -> reject ATTACK /
+      RIGHT_TAIL_AMPLIFY only (Spec §21.3 "M2 禁止进攻").
+    - `trade_confirmation_too_low_for_attack` -> reject ATTACK
+      candidates when the level is T0 / T1 (Issue #6 "T0/T1 不
+      允许进攻"). Smaller scout / observe actions remain
+      allowed; the gate is size-class, not blanket.
+  - The ``RISK_REJECTED`` / ``RISK_APPROVED`` audit payload now
+    carries `attack_intent`, `manipulation_level`,
+    `trade_confirmation_level` so Replay (Issue #10) can
+    reconstruct every Phase 6 decision from `events.db` alone.
+  - Phase 1 hard rejections (`live_trading_disabled`,
+    `right_tail_disabled`, `stop_unconfirmed`, `unknown_position`,
+    `trading_mode_inconsistent`) are unchanged. The Phase 6 rules
+    are additive.
+
+- **Reason-tag enums in `app/core/enums.py`:**
+  - `PreAnomalyReasonTag` (9 values: 6 Spec §17.2 signals +
+    `DATA_DEGRADED` / `REGIME_BLOCKED` / `INSUFFICIENT_HISTORY`).
+  - `AnomalyReasonTag` (11 values: 8 Spec §18.1 signals +
+    `DATA_DEGRADED` / `REGIME_BLOCKED` / `INSUFFICIENT_HISTORY`).
+  - `ConfirmationReasonTag` (8 values: 5 Spec §20.4 signals +
+    `DATA_DEGRADED` / `REGIME_BLOCKED` / `INSUFFICIENT_HISTORY`).
+  - `ManipulationReasonTag` (11 values: 8 Spec §21.2 signals +
+    `DATA_DEGRADED` / `REGIME_BLOCKED` / `INSUFFICIENT_HISTORY`).
+
+- **Event-emission throttle**, mirroring the Phase 5 PR #16
+  review-fix shape:
+  - Each of `PreAnomalyConfig`, `AnomalyConfig`,
+    `ConfirmationConfig`, `ManipulationConfig` exposes
+    `event_emit_enabled: bool` (default `True`).
+  - Every classifier accepts a per-call `emit_event: bool | None`
+    on its `evaluate` and `evaluate_snapshot` entry points.
+  - Resolution rule: `True` -> always emit, `False` -> always
+    skip, `None` -> follow the config flag.
+  - Each classifier exposes two counters:
+    `<event>_events_emitted` and `<event>_events_skipped`. Issue
+    #7's full Top-200 scanner can flip the config flag off and
+    confirm via the counter that the event is being skipped.
+
+- **Boot drill in `python -m app.main`:**
+  - After the Phase 5 Liquidity loop, runs all four classifiers
+    once per mock symbol (3 symbols -> 12 new events: 3
+    ``PRE_ANOMALY_DETECTED``, 3 ``ANOMALY_DETECTED``, 3
+    ``TRADE_CONFIRMED``, 3 ``MANIPULATION_DETECTED``).
+  - Tracks the worst-observed manipulation + confirmation level
+    and feeds them into the bootstrap Risk Engine self-check
+    with `attack_intent=False` so the bootstrap stays approved.
+    The resulting ``RISK_APPROVED`` audit row exercises the new
+    payload fields end-to-end.
+  - Banner extended with four new fields:
+    `pre_anomaly_events`, `anomaly_events`,
+    `trade_confirmed_events`, `manipulation_events`.
+
+#### Phase 6 hard rules (per Issue #6)
+
+1. **M2 forbids ATTACK / RIGHT_TAIL_AMPLIFY.** Risk Engine emits
+   `manipulation_m2_attack` when `attack_intent=True`.
+2. **M3 forbids any new opening.** Risk Engine emits
+   `manipulation_m3` regardless of `attack_intent`.
+3. **T0 / T1 forbid ATTACK candidates.** Risk Engine emits
+   `trade_confirmation_too_low_for_attack` when
+   `attack_intent=True`.
+4. **All four classifier outputs are persisted as events.** One
+   event per evaluation, full payload + reason-tag list, so
+   Reflection (Issue #10) and Replay can reconstruct the
+   decision from `events.db` alone.
+5. **Every reject path carries `reason_tags`.** Tuples of typed
+   enum values, never free-form strings.
+
+#### Phase 6 boundary (declared explicitly so the next PR cannot drift)
+
+1. Pre-Anomaly / Anomaly / Real-Trade Confirmation / Manipulation
+   ONLY. **No Strategy Engine, no State Machine, no LLM, no
+   Capital Flow, no Execution FSM, no Reconciliation.** Those
+   land with Issue #7 / #8 / #9 / #10.
+2. **No write surface added.** The four `SafeModeViolation`
+   refusals on `ExchangeClientBase` are unchanged.
+3. **No LLM.** No `app/scanner/`, `app/confirmation/`,
+   `app/manipulation/` source file imports `openai`, `anthropic`,
+   `deepseek`, or any other LLM client. Issue #6 forbids using an
+   LLM to decide direction or to bypass the Risk Engine.
+4. **No real Binance WebSocket and no real REST.** The boot path
+   continues to drive the deterministic `MockExchangeClient`.
+   `BinanceClient.get_*` continues to raise `NotImplementedError`.
+5. **No API key.** No source file under the three new packages
+   reads `os.environ` for a credential, accepts an `api_key`
+   keyword argument, or persists a key.
+6. **No auto-connect.** The classifiers do not own a
+   `MarketDataBuffer`, do not own an `ExchangeClientBase`, and
+   never instantiate one for themselves.
+7. **Phase 1 / 3 / 4 / 5 invariants intact.** The Phase 1 safety
+   lock, the Phase 3 read-only invariant, the Phase 4 Market Data
+   Buffer boundary, and the Phase 5 Regime / Universe / Liquidity
+   contract are unchanged.
+
+#### Tests
+
+`tests/unit/test_pre_anomaly_scanner.py`,
+`tests/unit/test_anomaly_scanner.py`,
+`tests/unit/test_real_trade_confirmation.py`,
+`tests/unit/test_manipulation_detector.py`,
+`tests/unit/test_risk_engine_phase6.py`,
+`tests/unit/test_phase6_no_network.py`,
+`tests/unit/test_phase6_boundary.py`, plus the existing
+`tests/unit/test_main_entrypoint.py` extended with the Phase 6
+banner + 4 new event-type assertions.
+
+**+117 new Phase 6 tests on top of the 457 retained from Phase
+1-5 = 574 total, all passing.**
+
+Issue #6 acceptance criteria covered:
+
+1. **mock 数据能触发 T3** -
+   `test_mock_input_triggers_t3` (3 fired signals).
+2. **mock 派发数据能触发 M2/M3** -
+   `test_distribution_mock_data_triggers_m2`,
+   `test_distribution_mock_data_triggers_m3`,
+   `test_full_distribution_with_wick_and_flicker_triggers_m3`.
+3. **M3 时 Risk Engine 必须拒绝** -
+   `test_m3_rejects_observation_request`,
+   `test_m3_rejects_attack_request`,
+   `test_m3_rejection_writes_audit_event`.
+4. **Volume Up + Price No Move 有测试** -
+   `test_volume_up_price_no_move_signal_fires`,
+   `test_volume_up_price_no_move_does_not_fire_when_price_actually_moves`.
+5. **OI Up + Price Flat 有测试** -
+   `test_oi_up_price_flat_signal_fires`,
+   `test_oi_up_price_flat_does_not_fire_when_price_moves`.
+6. **pytest 通过** - 574 passed.
+
+#### Live trading risk
+
+**None.** Phase 6 adds:
+
+- Four pure stateless classifiers (`PreAnomalyScanner`,
+  `AnomalyScanner`, `RealTradeConfirmation`,
+  `ManipulationDetector`).
+- Four reason-tag enums + four event-payload shapes.
+- Three new optional fields on `RiskRequest` and three additive
+  rejection rules in `RiskEngine.evaluate` that follow the same
+  pattern Phase 1 introduced.
+- One boot-drill loop that exercises every classifier against
+  the deterministic `MockExchangeClient`.
+- 117 new unit tests.
+
+What Phase 6 does NOT add:
+
+- No exchange SDK in `requirements.txt` / `pyproject.toml`.
+- No outbound HTTP / WebSocket client of any kind in `app/`.
+- No LLM client of any kind.
+- No `create_order` / `cancel_order` / `set_leverage` /
+  `set_margin_mode` call site.
+- No new mode flags, no loosened safety lock, no relaxed
+  read-only invariant.
+
+The `python -m app.main` boot banner continues to log all five
+safety flags every run:
+
+```
+mode=paper live_trading=False right_tail=False
+llm=False exchange_live_orders=False
+```
+
+Sample Phase 6 boot output:
+
+```
+[AMA-RT] Phase 6 - Scanner Confirmation Manipulation v1.4.0a6 \
+  mode=paper live_trading=False right_tail=False \
+  llm=False exchange_live_orders=False \
+  databases=5 events_count=31 capital_events=1 \
+  exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+  market_data=3/0 market_snapshots=3 data_unreliable=1 \
+  regime=ALT_RISK_OFF/ALLOW_SCOUT regime_events=1 \
+  universe=0/3 universe_events=3 liquidity_events=6 \
+  pre_anomaly_events=3 anomaly_events=3 trade_confirmed_events=3 \
+  manipulation_events=3 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
 ### Phase 5 - Review fixes (PR #16 review feedback)
 
 The four follow-up clarifications requested on PR #16 are documentation
