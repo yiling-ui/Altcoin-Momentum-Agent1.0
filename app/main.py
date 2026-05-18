@@ -128,8 +128,19 @@ def run() -> int:
 
         # Phase 2 introduces capital event helpers. Emit a paper-mode
         # CAPITAL_DEPOSIT marker so a fresh database has at least one
-        # capital event for replay tests. This is paper-mode bookkeeping
-        # only - no funds move.
+        # capital event for replay tests.
+        #
+        # CRITICAL - this is a *boot probe*, not an accounting entry:
+        #   * amount = 0.0 by design - it MUST NOT change initial_capital,
+        #     lifetime_equity, withdrawn_profit, trading_capital or any
+        #     performance figure produced by Issue #8 (Capital Flow
+        #     Engine). Spec §28 says "提现不是亏损 / 提现是资金基准重置";
+        #     symmetrically, this marker is not a deposit either.
+        #   * source_module = 'bootstrap' and note = 'phase2_boot_paper_marker'
+        #     so the Capital Flow Engine in Issue #8 can recognise and
+        #     skip it (the boot-marker contract is pinned by the test
+        #     test_capital_boot_marker_contract_is_safe_for_issue8).
+        #   * No funds move. Paper mode is asserted at the top of run().
         repo.record_capital_deposit(
             amount=0.0,
             source_module="bootstrap",
@@ -138,6 +149,14 @@ def run() -> int:
 
         overall, _ = health.evaluate()
         capital_count = repo.count_events(event_type=EventType.CAPITAL_DEPOSIT)
+        # `risk_decision` shows the *paper-mode boot self-check* outcome.
+        # It is NOT a real-trade approval. The reason string
+        # 'paper_only_skeleton_approval' is the only positive Phase 2
+        # outcome possible here; any genuine trade-shaped request would
+        # have to set live_trading_required=True / right_tail_amplify=True
+        # / stop_unconfirmed=True / unknown_position=True and be hard-
+        # rejected by the Risk Engine. See test_phase2_boot_risk_engine_*
+        # in tests/unit/test_main_entrypoint.py for the contract.
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
             f"mode={settings.trading_mode} "
@@ -148,7 +167,7 @@ def run() -> int:
             f"databases={len(PHASE2_DATABASES)} "
             f"events_count={repo.count_events()} "
             f"capital_events={capital_count} "
-            f"risk_decision={decision.approved}/{decision.reasons[0]} "
+            f"risk_decision={decision.approved}/{decision.reasons[0]}(paper_self_check_only) "
             f"health={overall.value}"
         )
     finally:

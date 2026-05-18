@@ -9,10 +9,22 @@
 --     One row per Rebase / Profit Harvest / external event.
 --
 --   capital_events_index
---     A denormalised index of capital-related events that already live in
---     events.db, kept here so that the Capital Flow Engine (Issue #8) can
---     answer "which deposit/withdrawal/harvest happened in window X?"
---     without scanning the whole events table.
+--     A denormalised, DERIVED index of capital-related events that already
+--     live in events.db, kept here so that the Capital Flow Engine
+--     (Issue #8) can answer "which deposit/withdrawal/harvest happened
+--     in window X?" without scanning the whole events table.
+--
+--     SOURCE OF TRUTH: events.db. capital_events_index is a rebuildable
+--     mirror; it MUST be reproducible by replaying events.db through
+--     EventRepository.replay_events(event_types=CAPITAL_EVENT_TYPES).
+--     If the mirror disagrees with events.db, events.db wins and the
+--     mirror should be rebuilt. The mirror writer in repositories.py
+--     therefore does NOT roll back the events.db write on a mirror
+--     failure - it logs and continues. See
+--     EventRepository.rebuild_capital_events_index() for the rebuild
+--     entrypoint, and the regression tests
+--       test_capital_mirror_failure_does_not_roll_back_events
+--       test_rebuild_capital_events_index_*  (Phase 2 audit)
 --
 -- Phase 2 creates the tables and ships the writer for `capital_events_index`
 -- via the EventRepository helper. Materialised snapshots are deferred to

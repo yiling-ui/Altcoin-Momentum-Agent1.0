@@ -72,6 +72,16 @@ production-quality event-sourcing layer. Specifically:
   Engine (Issue #8) answer "which deposit/withdrawal/harvest happened
   in window X?" without scanning the full event log.
 
+  > **Source of truth.** `events.db` is the canonical event log;
+  > `capital_events_index` is a *derived, rebuildable* mirror. If a
+  > mirror write fails, the repository logs the error but does NOT
+  > roll back the events.db write - that would corrupt the canonical
+  > log to protect a derived view. Use
+  > `EventRepository.rebuild_capital_events_index()` to bring a stale
+  > or wiped mirror back in sync with events.db. Issue #8 (Capital
+  > Flow Engine) is expected to call this on startup. Pinned by
+  > `test_rebuild_capital_events_index_*`.
+
 - **`scripts/init_db.py`** now creates and migrates all five databases
   in one call, prints each database's journal mode and schema file, and
   is idempotent.
@@ -79,6 +89,22 @@ production-quality event-sourcing layer. Specifically:
 - **`python -m app.main`** opens all five databases, migrates them,
   emits a Phase-2 self-check audit trail (RISK_APPROVED, STATE_TRANSITION,
   TELEGRAM_COMMAND_RECEIVED, CAPITAL_DEPOSIT marker), and exits 0.
+
+  > **Boot marker contract (Issue #8 must skip):** the boot CAPITAL_DEPOSIT
+  > has `amount=0.0`, `source_module='bootstrap'`,
+  > `payload['note']='phase2_boot_paper_marker'`. It is a *boot probe*,
+  > not an accounting entry; it MUST NOT change `initial_capital`,
+  > `lifetime_equity`, `withdrawn_profit`, `trading_capital` or any
+  > performance figure. The contract is pinned by
+  > `tests/unit/test_main_entrypoint.py::test_capital_boot_marker_contract_is_safe_for_issue8`.
+
+  > **Banner Risk decision is a self-check, not a trade approval:** the
+  > line `risk_decision=True/paper_only_skeleton_approval(paper_self_check_only)`
+  > is the paper-mode boot self-check outcome only. The same Risk Engine
+  > continues to hard-reject `live_trading_required=True`,
+  > `right_tail_amplify=True`, `stop_unconfirmed=True`,
+  > `unknown_position=True` - asserted by
+  > `test_phase2_boot_risk_engine_still_rejects_live_trading`.
 
 - **`created_at` column** added to the `events` table per Issue #2 field
   contract. The migration auto-upgrades a Phase 1 events.db (no
@@ -166,7 +192,8 @@ python -m app.main
 # [AMA-RT] Phase 2 - Event Sourcing and Database v1.4.0a2 mode=paper \
 #   live_trading=False right_tail=False llm=False exchange_live_orders=False \
 #   databases=5 events_count=4 capital_events=1 \
-#   risk_decision=True/paper_only_skeleton_approval health=ok
+#   risk_decision=True/paper_only_skeleton_approval(paper_self_check_only) \
+#   health=ok
 
 # 4. Run the test suite:
 pytest

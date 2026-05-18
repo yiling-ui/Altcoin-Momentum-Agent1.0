@@ -529,3 +529,106 @@ def test_withdrawal_amount_zero_is_allowed_but_negative_is_not(events_repo):
         events_repo.record_capital_withdrawal(amount=-1.0)
     with pytest.raises(ValueError):
         events_repo.record_profit_harvest(amount=-0.01)
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 PR self-audit (round 2) - rebuild contract for capital_events_index
+#
+# Item #2 of the audit: events.db is source of truth; capital_events_index
+# is a derived, rebuildable mirror. The repository ships an executable
+# `rebuild_capital_events_index()` so that contract is enforced by code,
+# not just by docs.
+# ---------------------------------------------------------------------------
+def test_rebuild_capital_events_index_from_events_db(
+    events_repo_with_capital, phase2_dbs
+):
+    """If capital.db is wiped, rebuild() must reproduce the index from events.db."""
+    events_repo_with_capital.record_capital_deposit(amount=100.0, note="seed")
+    events_repo_with_capital.record_capital_withdrawal(amount=80.0, note="harvest")
+    events_repo_with_capital.record_profit_harvest(amount=42.0)
+    events_repo_with_capital.record_capital_rebase(
+        exchange_equity=120.0,
+        withdrawn_profit=80.0,
+        lifetime_equity=200.0,
+        trading_capital=120.0,
+    )
+    events_repo_with_capital.record_risk_budget_recalculated(new_risk_budget=120.0)
+
+    # Wipe the mirror (simulates capital.db restored from older backup).
+    phase2_dbs.capital.execute("DELETE FROM capital_events_index")
+    phase2_dbs.capital.commit()
+    assert phase2_dbs.capital.execute(
+        "SELECT COUNT(*) FROM capital_events_index"
+    ).fetchone()[0] == 0
+
+    # Rebuild from events.db (source of truth).
+    written = events_repo_with_capital.rebuild_capital_events_index()
+    assert written == 5
+
+    types = [
+        r["event_type"]
+        for r in phase2_dbs.capital.execute(
+            "SELECT event_type FROM capital_events_index "
+            "ORDER BY timestamp ASC, event_id ASC"
+        ).fetchall()
+    ]
+    assert set(types) == {
+        "CAPITAL_DEPOSIT",
+        "CAPITAL_WITHDRAWAL",
+        "PROFIT_HARVEST",
+        "CAPITAL_REBASE",
+        "RISK_BUDGET_RECALCULATED",
+    }
+
+
+def test_rebuild_capital_events_index_is_idempotent(events_repo_with_capital, phase2_dbs):
+    events_repo_with_capital.record_capital_deposit(amount=10.0)
+    events_repo_with_capital.record_capital_withdrawal(amount=3.0)
+
+    first = events_repo_with_capital.rebuild_capital_events_index()
+    second = events_repo_with_capital.rebuild_capital_events_index()
+    assert first == second == 2
+    assert phase2_dbs.capital.execute(
+        "SELECT COUNT(*) FROM capital_events_index"
+    ).fetchone()[0] == 2
+
+
+def test_rebuild_capital_events_index_no_capital_conn_returns_zero(events_repo):
+    """An EventRepository without `capital_conn` cannot rebuild but must not crash."""
+    assert events_repo.rebuild_capital_events_index() == 0
+
+
+def test_rebuild_after_mirror_failure_recovers_full_index(
+    events_repo_with_capital, phase2_dbs
+):
+    """End-to-end: a logged-but-skipped mirror failure can be recovered later."""
+    # Drop the mirror table to force a write failure on the next CAPITAL_*.
+    phase2_dbs.capital.execute("DROP TABLE capital_events_index")
+    phase2_dbs.capital.commit()
+
+    # Two capital events go into events.db; mirror writes are silently
+    # logged-and-skipped (the table is gone). Use explicit timestamps so
+    # the rebuild's `ORDER BY timestamp, event_id` is deterministic and
+    # does not fall back to UUID4 tie-breaker.
+    events_repo_with_capital.record_capital_deposit(amount=100.0, timestamp=1000)
+    events_repo_with_capital.record_capital_withdrawal(amount=80.0, timestamp=2000)
+
+    # Operator notices and re-creates capital.db from the schema.
+    from app.database.migrations import migrate_database
+    from app.core.constants import DB_CAPITAL
+    migrate_database(DB_CAPITAL, phase2_dbs.capital)
+    assert phase2_dbs.capital.execute(
+        "SELECT COUNT(*) FROM capital_events_index"
+    ).fetchone()[0] == 0
+
+    # Rebuild reproduces the index in full from events.db (source of truth).
+    written = events_repo_with_capital.rebuild_capital_events_index()
+    assert written == 2
+    rows = phase2_dbs.capital.execute(
+        "SELECT event_type, amount FROM capital_events_index ORDER BY timestamp ASC"
+    ).fetchall()
+    assert [(r["event_type"], r["amount"]) for r in rows] == [
+        ("CAPITAL_DEPOSIT", 100.0),
+        ("CAPITAL_WITHDRAWAL", 80.0),
+    ]

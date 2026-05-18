@@ -97,6 +97,48 @@ def test_phase2_does_not_create_market_db(tmp_path):
         dbs.close()
 
 
+# Phase-2 audit pin: each deferred database is tied to a named later Issue.
+# This is deliberate scope control - if Phase 2 ever starts creating any of
+# these, the test below fails and the operator is reminded that they are
+# overstepping into Issue #3 / #4 / #9 / #10 territory.
+DEFERRED_DATABASES = {
+    "market.db":     "Issue #3 (Exchange Gateway, read-only) and Issue #4 (Market Data Buffer)",
+    "orders.db":     "Issue #9 (Execution FSM / Reconciliation)",
+    "reflection.db": "Issue #10 (Reflection)",
+    "llm_cache.db":  "Issue #10 (LLM Interpreter)",
+}
+
+
+def test_phase2_deferred_databases_have_named_owner_issues(tmp_path):
+    """Make Phase 2 scope control auditable: each deferred database file
+    must NOT be created by Phase 2, and must have a named owning Issue."""
+    sqlite_dir = tmp_path / "sqlite"
+    dbs = DatabaseSet.open(sqlite_dir)
+    try:
+        for name, owner in DEFERRED_DATABASES.items():
+            assert not (sqlite_dir / name).exists(), (
+                f"{name} was created by Phase 2 but is owned by {owner}. "
+                "Phase 2 must not create it. See README and CHANGELOG."
+            )
+            # Sanity check on the owner string so we cannot silently
+            # forget to update it: every owner mentions a phase number.
+            assert "Issue #" in owner
+    finally:
+        dbs.close()
+
+
+def test_phase2_databases_constant_excludes_deferred(tmp_path):
+    """`PHASE2_DATABASES` is the single source of truth for which databases
+    Phase 2 opens. Verify it does NOT contain any deferred database."""
+    from app.database.connection import PHASE2_DATABASES as p2
+
+    deferred = set(DEFERRED_DATABASES.keys())
+    assert deferred.isdisjoint(set(p2)), (
+        f"PHASE2_DATABASES leaks deferred databases: "
+        f"{deferred & set(p2)}. Remove them - they belong to a later phase."
+    )
+
+
 def test_phase2_event_types_required_by_issue2_present():
     """Issue #2 mandates this exact set of event types in the vocabulary."""
     required = {

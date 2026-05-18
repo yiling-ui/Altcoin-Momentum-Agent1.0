@@ -7,6 +7,65 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 2 PR self-audit (round 2)
+
+In response to four review items raised on PR #13:
+
+#### Added
+- **`EventRepository.rebuild_capital_events_index()`** - executable
+  rebuild path so the contract "events.db is source of truth;
+  capital_events_index is a derived, rebuildable mirror" is enforced
+  by code, not just by docs. Truncates and re-populates the index from
+  events.db. Idempotent. Raises `EventPersistenceError` on sqlite
+  failure. Returns 0 if no `capital_conn` was wired.
+- **9 new audit tests** (119 total, was 110):
+  - `tests/unit/test_event_repository.py`:
+    - `test_rebuild_capital_events_index_from_events_db`
+    - `test_rebuild_capital_events_index_is_idempotent`
+    - `test_rebuild_capital_events_index_no_capital_conn_returns_zero`
+    - `test_rebuild_after_mirror_failure_recovers_full_index`
+  - `tests/unit/test_main_entrypoint.py`:
+    - `test_capital_boot_marker_contract_is_safe_for_issue8` - pins
+      the boot CAPITAL_DEPOSIT marker contract: `amount=0.0`,
+      `source_module='bootstrap'`,
+      `payload['note']='phase2_boot_paper_marker'`. Issue #8 must
+      skip events matching this triple.
+    - `test_phase2_boot_risk_engine_still_rejects_live_trading` - the
+      same RiskEngine + Settings used at boot must hard-reject each
+      of `live_trading_required`, `right_tail_amplify`,
+      `stop_unconfirmed`, `unknown_position`.
+    - `test_phase2_boot_banner_says_paper_self_check_not_trade_approval`
+      - the banner must say `(paper_self_check_only)`.
+  - `tests/unit/test_phase2_schemas.py`:
+    - `test_phase2_deferred_databases_have_named_owner_issues` -
+      enumerates the four deferred database files and asserts each has
+      a named owning Issue (#3/#4/#9/#10). Phase 2 must not create
+      any of them.
+    - `test_phase2_databases_constant_excludes_deferred` - guards
+      `PHASE2_DATABASES` against accidentally including a deferred db.
+
+#### Changed
+- **`app/main.py` boot banner**: the Risk decision is now formatted as
+  `risk_decision=True/paper_only_skeleton_approval(paper_self_check_only)`
+  so it can never be misread as a real-trade approval. Also added an
+  explicit comment block above the banner naming the contract test.
+- **`app/main.py` CAPITAL_DEPOSIT marker comment**: expanded to
+  explicitly list the four scalars Issue #8 must NOT update from this
+  marker (`initial_capital`, `lifetime_equity`, `withdrawn_profit`,
+  `trading_capital`) and reference the pinning test.
+- **`app/database/repositories.py`** docstring: added a "SOURCE OF
+  TRUTH" section naming events.db as canonical and pointing at
+  `rebuild_capital_events_index()` as the recovery entrypoint. Also
+  expanded the inline comment at the cross-DB write site.
+- **`app/database/schemas/capital.sql`**: clarified in the header
+  comment that `capital_events_index` is derived and rebuildable, and
+  named the regression tests that pin the contract.
+- **`README.md`**: added "Source of truth" note under the capital event
+  helpers and updated the sample banner output.
+
+No production behaviour changed beyond the cosmetic banner string and
+the new (additive-only) `rebuild_capital_events_index()` method.
+
 ### Phase 2 - Event Sourcing and Database
 
 #### Added

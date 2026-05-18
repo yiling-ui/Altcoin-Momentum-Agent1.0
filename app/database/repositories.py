@@ -14,6 +14,20 @@ cross-database write surface in Phase 2: every CAPITAL_* event appended
 to `events.db` is also indexed there so that Issue #8 has a fast lookup
 table to start from.
 
+SOURCE OF TRUTH
+---------------
+`events.db` is the canonical event log. `capital_events_index` is a
+rebuildable mirror derived from it - never the other way around. If the
+two ever disagree (e.g. mirror write failed and was logged, or the
+capital.db file was lost / corrupted), `events.db` wins and the mirror
+is rebuilt by `EventRepository.rebuild_capital_events_index()`. The
+mirror writer therefore does NOT roll back the events.db write on a
+mirror failure: it logs and continues. This is pinned by:
+
+    test_capital_mirror_failure_does_not_roll_back_events
+    test_rebuild_capital_events_index_from_events_db
+    test_rebuild_capital_events_index_is_idempotent
+
 Issue #2 mandates the following API:
 
     append_event(event)                    write one event
@@ -145,11 +159,17 @@ class EventRepository:
                             capital_rows,
                         )
                 except sqlite3.Error as exc:
-                    # Capital index is a denormalised mirror; log loudly
-                    # but do NOT roll back the events write. Issue #8
-                    # rebuilds the index from events.db on demand.
+                    # Capital index is a denormalised, REBUILDABLE mirror
+                    # of events.db. events.db is source of truth.
+                    # Logging loudly here gives ops a signal; we
+                    # intentionally do NOT roll back the events.db write
+                    # because that would corrupt the canonical log to
+                    # protect a derived view. Issue #8's startup path
+                    # calls EventRepository.rebuild_capital_events_index()
+                    # to bring the mirror back in sync with events.db.
                     logger.error(
-                        "capital_events_index write failed: {} ({} rows)",
+                        "capital_events_index write failed (events.db is "
+                        "source of truth; mirror can be rebuilt): {} ({} rows)",
                         exc,
                         len(capital_rows),
                     )
@@ -461,6 +481,64 @@ class EventRepository:
             payload=payload,
             timestamp=timestamp,
         )
+
+    # ------------------------------------------------------------------
+    # Capital events index rebuild (events.db is source of truth).
+    #
+    # If `capital_events_index` is ever out of sync with events.db -
+    # e.g. a mirror write was logged-but-skipped due to a transient
+    # sqlite error, capital.db was restored from an older backup, or
+    # the table was DROPped during ops work - this method rebuilds the
+    # index by replaying every CAPITAL_* event from events.db.
+    #
+    # Issue #8 (Capital Flow Engine) is expected to call this on
+    # startup as a safety check, but it is exposed in Phase 2 so the
+    # contract "events.db is source of truth, mirror is derived" is
+    # executable code, not just documentation.
+    # ------------------------------------------------------------------
+    def rebuild_capital_events_index(self) -> int:
+        """Rebuild capital_events_index from events.db.
+
+        Truncates the index table and re-populates it from the canonical
+        CAPITAL_* events in events.db. Returns the number of rows
+        written. Idempotent. Raises `EventPersistenceError` on sqlite
+        failure. Does nothing and returns 0 if no `capital_conn` was
+        wired.
+        """
+        if self.capital_conn is None:
+            return 0
+        try:
+            with self.capital_conn:
+                self.capital_conn.execute("DELETE FROM capital_events_index")
+                rows: list[tuple] = []
+                for ev in self.replay_events(event_types=CAPITAL_EVENT_TYPES):
+                    rows.append(
+                        (
+                            ev.event_id,
+                            ev.timestamp,
+                            ev.event_type.value,
+                            float(ev.payload.get("amount", 0.0) or 0.0),
+                            str(ev.payload.get("currency", "USDT")),
+                            json.dumps(ev.payload, separators=(",", ":"), sort_keys=True),
+                        )
+                    )
+                if rows:
+                    self.capital_conn.executemany(
+                        """
+                        INSERT INTO capital_events_index (
+                            event_id, timestamp, event_type,
+                            amount, currency, payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        rows,
+                    )
+            logger.info("capital_events_index rebuilt: {} rows", len(rows))
+            return len(rows)
+        except sqlite3.Error as exc:
+            logger.error("capital_events_index rebuild failed: {}", exc)
+            raise EventPersistenceError(
+                f"rebuild_capital_events_index failed: {exc}"
+            ) from exc
 
     def _append_event_with_payload(
         self,
