@@ -1,4 +1,4 @@
-"""AMA-RT entrypoint (Phase 4 - Market Data Buffer).
+"""AMA-RT entrypoint (Phase 5 - Regime / Universe / Liquidity).
 
 Run with:
 
@@ -22,7 +22,17 @@ This entrypoint DOES NOT trade. It only:
        through one degraded transition (WebSocket disconnect) and one
        recovery transition so the audit trail in `events.db` shows the
        full lifecycle.
-    6. Writes one self-check audit trail:
+    6. Phase 5: drives the Regime Engine, the Universe Filter and the
+       Liquidity Filter against the same deterministic mock + buffer.
+       One ``REGIME_UPDATED`` event is written. One
+       ``UNIVERSE_FILTERED`` event is written per symbol. Two
+       ``LIQUIDITY_CHECKED`` events are written per symbol (one for
+       :meth:`LiquidityFilter.evaluate`, one for
+       :meth:`LiquidityFilter.can_exit_position`). The Phase 5 hard
+       rules (SYSTEMIC_RISK -> BLOCK_ALL, degraded data -> reject,
+       insufficient depth / no exit channel -> reject) are exercised
+       in-process so the boot drill demonstrates them end-to-end.
+    7. Writes one self-check audit trail:
          RISK_APPROVED         (paper-only skeleton check)
          STATE_TRANSITION      (IDLE -> IDLE)
          TELEGRAM_COMMAND_RECEIVED (/status)
@@ -31,13 +41,16 @@ This entrypoint DOES NOT trade. It only:
          EXCHANGE_CONNECTED    (Phase 3 boot self-check)
          MARKET_SNAPSHOT       (Phase 4 boot self-check, one per symbol)
          DATA_UNRELIABLE       (Phase 4 boot self-check, one disconnect)
+         REGIME_UPDATED        (Phase 5 boot self-check)
+         UNIVERSE_FILTERED     (Phase 5 boot self-check, one per symbol)
+         LIQUIDITY_CHECKED     (Phase 5 boot self-check, two per symbol)
          EXCHANGE_DISCONNECTED (Phase 3 graceful shutdown)
        and prints a one-line status banner before exiting 0.
 
 It will refuse to run if the safety flags ever evaluate to a
 non-Phase-1 configuration, or if the Phase 3 read-only invariant has
-drifted. Phase 4 does NOT loosen any Phase 1 / Phase 3 safety
-guarantee.
+drifted. Phase 5 does NOT loosen any Phase 1 / Phase 3 / Phase 4
+safety guarantee.
 """
 
 from __future__ import annotations
@@ -64,11 +77,14 @@ from app.exchanges.base import WRITE_SURFACE_METHODS  # noqa: E402
 from app.exchanges.mock import MockExchangeSeed  # noqa: E402
 from app.exchanges.models import RecentTrade, TradeSide  # noqa: E402
 from app.execution.fsm import ExecutionFSM  # noqa: E402
+from app.liquidity import LiquidityFilter, Side as LiquiditySide  # noqa: E402
 from app.market_data import MarketDataBuffer  # noqa: E402
 from app.monitoring.health import HealthChecker, HealthStatus  # noqa: E402
 from app.monitoring.metrics import MetricsRegistry  # noqa: E402
+from app.regime import RegimeEngine  # noqa: E402
 from app.risk.engine import RiskEngine, RiskRequest  # noqa: E402
 from app.telegram.bot import TelegramCommandCenter  # noqa: E402
+from app.universe import UniverseFilter  # noqa: E402
 
 
 # Phase 4 keeps the same safety invariant Phase 1 introduced. Issues #2,
@@ -212,6 +228,34 @@ def _build_phase4_boot_seed() -> MockExchangeSeed:
     )
 
 
+def _build_liquidity_input_for_boot(
+    *,
+    symbol: str,
+    book,
+    snap,
+    is_data_degraded: bool,
+    regime,
+):
+    """Construct a deterministic Phase 5 :class:`LiquidityInput` for the
+    boot drill. Kept out of :func:`run` so the call site stays readable.
+    """
+    from app.liquidity import LiquidityInput, Side
+
+    return LiquidityInput(
+        symbol=symbol,
+        side=Side.LONG,
+        planned_qty=0.001,
+        last_price=snap.last_price,
+        spread_pct=snap.spread_pct,
+        orderbook=book,
+        volume_5m=snap.volume_5m,
+        is_data_degraded=is_data_degraded,
+        market_regime=regime.market_regime,
+        risk_permission=regime.risk_permission,
+        timestamp=snap.timestamp,
+    )
+
+
 def run() -> int:
     settings = get_settings()
     _assert_phase1_safety(settings)
@@ -264,6 +308,68 @@ def run() -> int:
         buffer.on_websocket_reconnect(reason="phase4_boot_reconnect_probe")
         # ----------------------------------------------------------
 
+        # ---- Phase 5 - Regime / Universe / Liquidity boot self-check ----
+        # All three engines read from the same in-process buffer and
+        # deterministic mock; they NEVER call a write surface, NEVER
+        # open a socket, NEVER import an exchange SDK. Each engine
+        # writes exactly the events Issue #5 requires.
+        regime_engine = RegimeEngine(event_repo=repo)
+        # Use BTCUSDT as the BTC reference; alt symbols are everything
+        # else the mock exposes. The buffer is fully populated above
+        # so the convenience helper has live data to read.
+        alt_symbols = [s.symbol for s in exchange_symbols if s.symbol != "BTCUSDT"]
+        regime_snapshot = regime_engine.evaluate_from_buffer(
+            buffer,
+            btc_symbol="BTCUSDT",
+            alt_symbols=alt_symbols,
+        )
+
+        universe_filter = UniverseFilter(event_repo=repo)
+        universe_decisions = []
+        for sym_meta in exchange_symbols:
+            snap = buffer.snapshot(sym_meta.symbol, emit_event=False)
+            decision = universe_filter.evaluate_snapshot(
+                snap,
+                symbol_meta=sym_meta,
+                regime=regime_snapshot,
+                is_data_degraded=buffer.is_degraded(sym_meta.symbol),
+            )
+            universe_decisions.append(decision)
+
+        liquidity_filter = LiquidityFilter(event_repo=repo)
+        # Drive Liquidity once per symbol with a tiny planned qty so
+        # the boot drill exercises both the evaluate path AND the
+        # can_exit_position path. Phase 5 uses planned_qty = 0.001 (the
+        # mock symbols all have qty_step >= 0.001) so the deterministic
+        # mock book is always deep enough to clear the path.
+        for sym_meta in exchange_symbols:
+            snap = buffer.snapshot(sym_meta.symbol, emit_event=False)
+            book = buffer._state_for(sym_meta.symbol).orderbook
+            liquidity_filter.evaluate(
+                _build_liquidity_input_for_boot(
+                    symbol=sym_meta.symbol,
+                    book=book,
+                    snap=snap,
+                    is_data_degraded=buffer.is_degraded(sym_meta.symbol),
+                    regime=regime_snapshot,
+                )
+            )
+            liquidity_filter.can_exit_position(
+                sym_meta.symbol,
+                qty=0.001,
+                max_slippage_pct=0.01,
+                max_seconds=60.0,
+                side=LiquiditySide.LONG,
+                orderbook=book,
+                volume_5m=snap.volume_5m,
+                last_price=snap.last_price,
+                is_data_degraded=buffer.is_degraded(sym_meta.symbol),
+                risk_permission=regime_snapshot.risk_permission,
+                market_regime=regime_snapshot.market_regime,
+                spread_pct=snap.spread_pct,
+            )
+        # ----------------------------------------------------------
+
         # Skeletons
         risk = RiskEngine(settings=settings, event_repo=repo)
         fsm = ExecutionFSM()
@@ -286,24 +392,39 @@ def run() -> int:
             if buffer.stats().symbols_degraded == 0
             else HealthStatus.DEGRADED,
         )
+        # Phase 5: the regime gate is a first-class probe. SYSTEMIC_RISK
+        # is the only state that must show DEGRADED so monitoring sees
+        # a hard block.
+        from app.core.enums import RiskPermission as _RiskPermission
+
+        health.register(
+            "regime_gate",
+            lambda: HealthStatus.OK
+            if regime_snapshot.risk_permission is not _RiskPermission.BLOCK_ALL
+            else HealthStatus.DEGRADED,
+        )
 
         # Demonstration that the wiring is alive: ask the Risk Engine to
         # adjudicate a trivial paper-mode action. RISK_APPROVED is written.
         decision = risk.evaluate(
             RiskRequest(
                 source_module="bootstrap",
-                action="phase4_self_check",
+                action="phase5_self_check",
                 symbol=None,
                 live_trading_required=False,
                 right_tail_amplify=False,
             )
         )
         metrics.incr("risk_decisions_total")
-        metrics.set_gauge("phase", 4)
+        metrics.set_gauge("phase", 5)
         metrics.incr("exchange_health_probes")
         metrics.set_gauge(
             "market_data_symbols_tracked", buffer.stats().symbols_tracked
         )
+        metrics.incr("regime_evaluations", regime_engine.evaluations)
+        metrics.incr("universe_evaluations", universe_filter.evaluations)
+        metrics.incr("liquidity_evaluations", liquidity_filter.evaluations)
+        metrics.incr("liquidity_exit_checks", liquidity_filter.exit_checks)
 
         # STATE_TRANSITION marker so replay shows the process booted.
         repo.append_event(
@@ -313,7 +434,7 @@ def run() -> int:
                 payload={
                     "from": fsm.state.value,
                     "to": ExecutionState.IDLE.value,
-                    "reason": "phase4_boot",
+                    "reason": "phase5_boot",
                 },
             )
         )
@@ -321,7 +442,7 @@ def run() -> int:
         # Telegram skeleton: drive one /status command through the bus.
         from app.telegram.commands import Command  # local import keeps boot light
 
-        telegram.handle(Command(name="/status", user_id="phase4-bootstrap"))
+        telegram.handle(Command(name="/status", user_id="phase5-bootstrap"))
 
         # Phase 2 introduced capital event helpers. Emit a paper-mode
         # CAPITAL_DEPOSIT marker so a fresh database has at least one
@@ -330,7 +451,7 @@ def run() -> int:
         repo.record_capital_deposit(
             amount=0.0,
             source_module="bootstrap",
-            note="phase4_boot_paper_marker",
+            note="phase5_boot_paper_marker",
         )
 
         overall, _ = health.evaluate()
@@ -344,6 +465,12 @@ def run() -> int:
         data_unreliable_count = repo.count_events(
             event_type=EventType.DATA_UNRELIABLE
         )
+        regime_count = repo.count_events(event_type=EventType.REGIME_UPDATED)
+        universe_count = repo.count_events(event_type=EventType.UNIVERSE_FILTERED)
+        universe_eligible_count = sum(
+            1 for d in universe_decisions if d.eligible
+        )
+        liquidity_count = repo.count_events(event_type=EventType.LIQUIDITY_CHECKED)
         stats = buffer.stats()
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
@@ -361,13 +488,19 @@ def run() -> int:
             f"market_data={stats.symbols_tracked}/{stats.symbols_degraded} "
             f"market_snapshots={market_snapshot_count} "
             f"data_unreliable={data_unreliable_count} "
+            f"regime={regime_snapshot.market_regime.value}/"
+            f"{regime_snapshot.risk_permission.value} "
+            f"regime_events={regime_count} "
+            f"universe={universe_eligible_count}/{len(universe_decisions)} "
+            f"universe_events={universe_count} "
+            f"liquidity_events={liquidity_count} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )
         # Stop the exchange cleanly so DATA_UNRELIABLE is emitted on
         # shutdown - that lets replay-based tests confirm the lifecycle
         # closed properly.
-        exchange.stop(reason="phase4_shutdown")
+        exchange.stop(reason="phase5_shutdown")
     finally:
         dbs.close()
     return 0

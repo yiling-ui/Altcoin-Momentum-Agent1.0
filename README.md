@@ -1,20 +1,20 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 4 - Market Data Buffer. **Paper mode only.**
-> The Market Data Buffer added in this branch is fed by
-> `MockExchangeClient` / fixture data only. This repository does
-> **not** trade real money, does **not** open any outbound network
-> socket, does **not** import any exchange SDK (`ccxt`,
-> `binance-connector`, `python-binance` are intentionally absent
-> from `requirements.txt`), does **not** call any LLM, and does
-> **not** read real API keys. The four write surfaces on
+> **Phase status:** Phase 5 - Regime / Universe / Liquidity. **Paper
+> mode only.** The Regime Engine, the Universe Filter and the
+> Liquidity Filter added in this branch are pure classifiers that
+> read from `MockExchangeClient` / the in-process `MarketDataBuffer`.
+> This repository does **not** trade real money, does **not** open
+> any outbound network socket, does **not** import any exchange SDK
+> (`ccxt`, `binance-connector`, `python-binance` are intentionally
+> absent from `requirements.txt`), does **not** call any LLM, and
+> does **not** read real API keys. The four write surfaces on
 > `ExchangeClientBase` (`create_order`, `cancel_order`,
 > `set_leverage`, `set_margin_mode`) continue to raise
 > `SafeModeViolation` from the base class. The only concrete client
 > wired into `python -m app.main` is `MockExchangeClient`, which
-> serves deterministic in-memory data. Phase 4 adds an in-process
-> `MarketDataBuffer` that reads from that mock - no real Binance
-> WebSocket, no real REST, no API key, no write surface, no
+> serves deterministic in-memory data. Phase 5 adds only three pure
+> classifiers - no real adapter, no API key, no write surface, no
 > auto-connect.
 
 ---
@@ -29,13 +29,222 @@ This is the implementation of the production specification in
 | Phase 1 - Safety Foundation | #1  | merged | `feature/phase-1-safety-foundation` (PR #11), `feature/phase-1-review-fixes` (PR #12) |
 | Phase 2 - Event Sourcing and Database | #2  | merged | `feature/phase-2-event-sourcing-database` (PR #13) |
 | Phase 3 - Exchange Gateway Read-Only | #3  | merged | `feature/phase-3-exchange-gateway-read-only` (PR #14) |
-| Phase 4 - Market Data Buffer | #4  | this branch | `feature/phase-4-market-data-buffer` |
-| Phase 5 - Regime / Universe / Liquidity | #5  | open | - |
+| Phase 4 - Market Data Buffer | #4  | merged | `feature/phase-4-market-data-buffer` (PR #15) |
+| Phase 5 - Regime / Universe / Liquidity | #5  | this branch | `feature/phase-5-regime-universe-liquidity` |
 | Phase 6 - Scanner / Confirmation / Manipulation | #6  | open | - |
 | Phase 7 - State Machine / Risk Engine | #7  | open | - |
 | Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | open | - |
 | Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+
+## Phase 5 deliverable
+
+Phase 5 introduces three pure classifiers that consume the Phase 4
+:class:`MarketDataBuffer` and the Phase 3 :class:`ExchangeClientBase`
+and produce typed decisions plus persisted events. None of them
+trade. None of them open a socket. None of them touch a credential.
+
+- **`app/regime/` - Regime Engine** (Spec §15)
+  - `RegimeEngine.evaluate(request=...)` /
+    `evaluate_from_buffer(buffer, btc_symbol=, alt_symbols=)`.
+  - Output schema (`RegimeSnapshot`): `market_regime`, `btc_trend`,
+    `btc_volatility`, `alt_liquidity`, `risk_permission`,
+    `reason_tags`. Spec §15.1.
+  - Five regimes: `MEME_RISK_ON`, `SECTOR_ROTATION`,
+    `BTC_ABSORPTION`, `ALT_RISK_OFF`, `SYSTEMIC_RISK`. Spec §15.2.
+  - `REGIME_TO_RISK_PERMISSION` (Spec §15.3) is the source-of-truth
+    map every later phase consults:
+
+    | Regime | Risk permission |
+    |---|---|
+    | `MEME_RISK_ON`     | `ALLOW_ATTACK` |
+    | `SECTOR_ROTATION`  | `ALLOW_ATTACK` |
+    | `BTC_ABSORPTION`   | `OBSERVE_ONLY` |
+    | `ALT_RISK_OFF`     | `ALLOW_SCOUT`  |
+    | `SYSTEMIC_RISK`    | `BLOCK_ALL`    |
+
+  - Emits one ``REGIME_UPDATED`` event per evaluation.
+
+- **`app/universe/` - Universe Filter** (Spec §16)
+  - `UniverseFilter.evaluate(UniverseInput)` /
+    `evaluate_snapshot(snapshot, symbol_meta=, regime=, ...)`.
+  - 9 reject conditions (typed enum values, full reason list
+    returned):
+    `REGIME_BLOCKED`, `DATA_DEGRADED`, `ABNORMAL_DATA_FLAG`,
+    `DATA_RELIABILITY_TOO_LOW`, `CONTRACT_NOT_TRADING`,
+    `SPREAD_TOO_WIDE`, `DEPTH_INSUFFICIENT`, `TRADE_DISCONTINUOUS`,
+    `VOLUME_BELOW_MINIMUM`.
+  - Emits one ``UNIVERSE_FILTERED`` event per evaluated symbol,
+    eligible or rejected.
+
+- **`app/liquidity/` - Liquidity Filter + can_exit_position**
+  (Spec §19)
+  - `LiquidityFilter.evaluate(LiquidityInput)` returns a
+    `LiquidityDecision` with `spread_score`, `depth_score`,
+    `estimated_slippage_pct`, `estimated_exit_seconds`, an
+    `ExitPlan`, and the full reject-reason list.
+  - **`LiquidityFilter.can_exit_position(symbol, qty,
+    max_slippage_pct, max_seconds, ...)`** (Spec §19.2 - mandatory
+    function): returns an `ExitPlan` describing whether the
+    position can be flattened within `max_seconds` at <=
+    `max_slippage_pct` given the current book and rolling
+    5-minute throughput. `feasible=False` is the binary the Risk
+    Engine (Issue #7) will consult through the No-Trade Gate.
+  - Module-level `can_exit_position(...)` free function so
+    Issue #7 can call it without instantiating a filter.
+  - 8 reject reasons: `REGIME_BLOCKED`, `DATA_DEGRADED`,
+    `BOOK_MISSING`, `SPREAD_TOO_WIDE`, `DEPTH_INSUFFICIENT`,
+    `SLIPPAGE_TOO_HIGH`, `NO_EXIT_CHANNEL`, `EXIT_TOO_SLOW`.
+  - Emits one ``LIQUIDITY_CHECKED`` event per call, tagged
+    `check="evaluate"` or `check="can_exit_position"`.
+  - Pure helpers in `app/liquidity/slippage.py`:
+    `estimate_book_walk(book, qty=, side=)`,
+    `estimated_slippage_pct(book, qty=, side=)`,
+    `walk_book_for_quote_notional(book, quote_notional=, side=)`.
+    All stateless, no IO, no events.
+
+### Phase 5 hard rules (per Issue #5)
+
+1. **SYSTEMIC_RISK -> reject every new opening.** The regime maps to
+   `RiskPermission.BLOCK_ALL`, which is in the
+   `blocking_risk_permissions` set of both Universe and Liquidity
+   configs.
+2. **Insufficient liquidity -> reject with reasons.** Every threshold
+   violation produces a typed reject-reason enum value.
+3. **No exit channel -> reject the attack candidate.** Book walk
+   exhaustion maps to `NO_EXIT_CHANNEL`.
+4. **Data degraded -> reject / downgrade.** `is_degraded(symbol)`
+   flows into both filters as `is_data_degraded=True`.
+5. **Every reject carries `reject_reasons`.** Tuples of typed enum
+   values, never free-form strings (free-form `notes` are a
+   secondary advisory channel).
+6. **Every reject is persisted as one event** through
+   :class:`EventRepository`.
+
+### Phase 5 boundary (declared explicitly to avoid drift)
+
+1. Regime / Universe / Liquidity ONLY. No Scanner, no Confirmation,
+   no Manipulation, no Strategy, no State Machine.
+2. Reads only. **No write surface added.** The four
+   `SafeModeViolation` refusals on `ExchangeClientBase` are
+   unchanged.
+3. **No real Binance WebSocket and no real REST.** The boot path
+   continues to drive the deterministic `MockExchangeClient`.
+4. **No API key.** No file under `app/regime/`, `app/universe/`,
+   `app/liquidity/` reads `os.environ` for a credential, accepts an
+   `api_key` keyword argument, or persists a key.
+5. **No auto-connect.** The three engines do not own a
+   `MarketDataBuffer`, do not own an `ExchangeClientBase`, and
+   never instantiate one for themselves.
+6. **Tests do not depend on real network.**
+   `test_phase5_no_network.py` enforces this at the source-tree
+   level and cooperates with the existing
+   `test_phase3_no_network.py` and `test_phase4_no_network.py`.
+
+### Phase 5 boot self-check in `python -m app.main`
+
+- One `RegimeEngine` is instantiated and evaluated against the
+  Phase 4 buffer + the deterministic mock seed. One
+  ``REGIME_UPDATED`` event is written.
+- One `UniverseFilter` evaluation is run per symbol the mock
+  exposes. One ``UNIVERSE_FILTERED`` event is written per call. The
+  default mock book is intentionally shallow, so the boot drill
+  exercises the rejection path end-to-end.
+- One `LiquidityFilter.evaluate(...)` call is made per symbol, and
+  one `can_exit_position(...)` call. Two ``LIQUIDITY_CHECKED``
+  events per symbol, tagged `check="evaluate"` and
+  `check="can_exit_position"`.
+- A `regime_gate` health probe is registered. It reports
+  `DEGRADED` only when `risk_permission=BLOCK_ALL`.
+- The Phase 4 + Phase 3 self-checks (read-only assertion,
+  market-data-buffer lifecycle) are unchanged.
+
+Sample boot output:
+
+```
+[AMA-RT] Phase 5 - Regime Universe Liquidity v1.4.0a5 mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  databases=5 events_count=19 capital_events=1 \
+  exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+  market_data=3/0 market_snapshots=3 data_unreliable=1 \
+  regime=ALT_RISK_OFF/ALLOW_SCOUT regime_events=1 \
+  universe=0/3 universe_events=3 liquidity_events=6 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+### Phase 5 review-fix observability (PR #16 review feedback)
+
+Four follow-up clarifications were added on top of the original
+Phase 5 PR. Documentation + observability only - no behaviour
+change, no loosened safety guarantee.
+
+1. **`RiskPermission` is a regime-cycle gate, NOT a trade
+   approval.** The `RiskPermission` enum docstring now spells out
+   the eight-step conjunctive ladder a real opening has to clear
+   in Phase 7+: regime gate → universe → liquidity → can_exit →
+   pre-anomaly / anomaly → real-trade confirmation T2+ → no-
+   manipulation → Risk Engine final approval → Execution FSM
+   transition. `ALLOW_ATTACK` is "regime is risk-on", nothing
+   more.
+
+2. **`ALT_RISK_OFF -> ALLOW_SCOUT` permits OBSERVE or a tiny
+   SCOUT candidate only.** Issue #7 MUST further restrict this
+   path: NO ATTACK, NO RIGHT_TAIL_AMPLIFY, SCOUT size capped at
+   the per-trade scout budget. `right_tail_enabled` remains
+   locked False through the limited-live phase regardless of
+   what the regime gate says.
+
+3. **`can_exit_position` throughput estimate is an UPPER BOUND.**
+   The `volume_5m / 300s` fallback assumes the next 5 minutes
+   will print at the same pace as the previous 5 minutes, that
+   our outflow does not crowd its own exit price, and that ATR /
+   OI do not expand into the exit window. None of these hold in
+   a thinning or panicking tape. The 5x `min_depth_multiplier`
+   cushion is what makes Phase 5 safe under normal regimes; the
+   throughput value itself is permissive. **Issue #7's Risk
+   Engine MUST apply a conservative discount on top** before
+   sizing an attack candidate (recommended directions: ATR-scaled
+   divisor, fraction-of-average cap, post-discount feasibility
+   re-check). Degraded data already maps to
+   `LiquidityRejectReason.DATA_DEGRADED` and forces
+   `feasible=False`; callers MUST pass
+   `MarketDataBuffer.is_degraded(symbol)` through and never
+   invert the result.
+
+4. **Construct-time event throttle for high-frequency scans.**
+   Phase 5 emits one `UNIVERSE_FILTERED` per evaluated symbol
+   and two `LIQUIDITY_CHECKED` per evaluated symbol (one
+   `check="evaluate"` + one `check="can_exit_position"`). At
+   Top-200 scan rate that is 600 events per tick - too noisy
+   for events.db. Two new construct-time flags now mirror the
+   Phase 4 PR #15 review-fix shape:
+
+   - `UniverseConfig.event_emit_enabled` (default `True`)
+   - `LiquidityConfig.event_emit_enabled` (default `True`)
+
+   Issue #6's full Top-200 scanner can flip these to `False` to
+   stop bloating events.db while still receiving every
+   `UniverseDecision` / `LiquidityDecision` / `ExitPlan` return
+   value. Per-call `emit_event=True` overrides remain available
+   for monitoring / on-demand audit-trail entries; per-call
+   `emit_event=False` overrides remain available for tests. The
+   resolution rule:
+
+   ```text
+   emit_event=True   -> always emit (per-call override)
+   emit_event=False  -> always skip (per-call override)
+   emit_event=None   -> follow config.event_emit_enabled
+   ```
+
+   Two new counters confirm the throttle is doing its job:
+
+   - `UniverseFilter.universe_filtered_events_skipped`
+   - `LiquidityFilter.liquidity_checked_events_skipped`
+
+   Both increment whenever a decision was suppressed by either
+   the per-call override or the config flag.
+
+   Pinned by `tests/unit/test_phase5_review_fixes.py`.
 
 ## Phase 4 deliverable
 
