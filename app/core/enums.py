@@ -247,6 +247,110 @@ class LiquidityRejectReason(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 - Pre-Anomaly Scanner reason tags (Issue #6, Spec §17.3)
+# ---------------------------------------------------------------------------
+class PreAnomalyReasonTag(str, Enum):
+    """Reasons that contributed to a Pre-Anomaly score (Spec §17.2).
+
+    The Pre-Anomaly Scanner emits ONE ``PRE_ANOMALY_DETECTED`` event per
+    evaluation; the event's payload carries the full reason-tag list so
+    Reflection (Issue #10) and Replay can rebuild the decision from
+    events.db alone. Unlike the Phase 5 reject enums, these labels do
+    not gate trading by themselves; the Risk Engine consults them
+    indirectly through the score.
+
+    Phase 6 ships a deterministic, additive scoring rule so a future
+    YAML pull-through can adjust weights without renaming the tags.
+    """
+
+    VOLUME_BASE_EXPANSION = "volume_base_expansion"
+    SPREAD_COMPRESSION = "spread_compression"
+    BUY_PRESSURE_RISING = "buy_pressure_rising"
+    OI_SOFT_RISE = "oi_soft_rise"
+    FUNDING_NOT_OVERHEATED = "funding_not_overheated"
+    MINOR_UPTREND = "minor_uptrend"
+    DATA_DEGRADED = "data_degraded"
+    REGIME_BLOCKED = "regime_blocked"
+    INSUFFICIENT_HISTORY = "insufficient_history"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 - Anomaly Scanner reason tags (Issue #6, Spec §18.1)
+# ---------------------------------------------------------------------------
+class AnomalyReasonTag(str, Enum):
+    """Reasons that contributed to an Anomaly score (Spec §18.1).
+
+    Same persistence story as :class:`PreAnomalyReasonTag`: the full
+    list is recorded on the ``ANOMALY_DETECTED`` event. The Spec §18.2
+    weighted-sum formula is applied AFTER the tags are decided so the
+    weights are tunable without changing the tag vocabulary.
+    """
+
+    OI_SPIKE = "oi_spike"
+    CVD_SPIKE = "cvd_spike"
+    VOLUME_SPIKE = "volume_spike"
+    ATR_EXPANSION = "atr_expansion"
+    FUNDING_EXTREME = "funding_extreme"
+    LIQUIDATION_SPIKE = "liquidation_spike"
+    SWEEP = "sweep"
+    MULTI_TIMEFRAME_BREAKOUT = "multi_timeframe_breakout"
+    DATA_DEGRADED = "data_degraded"
+    REGIME_BLOCKED = "regime_blocked"
+    INSUFFICIENT_HISTORY = "insufficient_history"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 - Real Trade Confirmation reason tags (Issue #6, Spec §20.4)
+# ---------------------------------------------------------------------------
+class ConfirmationReasonTag(str, Enum):
+    """Reasons attached to a :class:`TradeConfirmationLevel` decision
+    (Spec §20.4).
+
+    Each fired tag contributes one signal toward the T-tier mapping
+    (more signals -> stronger tier). The concrete mapping lives in
+    :class:`app.confirmation.real_trade.RealTradeConfirmation`.
+    """
+
+    CVD_PRICE_AGREEMENT = "cvd_price_agreement"
+    BREAKOUT_HELD = "breakout_held"
+    LARGE_TRADE_FOLLOW_THROUGH = "large_trade_follow_through"
+    TRADE_EFFICIENCY_HIGH = "trade_efficiency_high"
+    VOLUME_UP_PRICE_MOVE = "volume_up_price_move"
+    DATA_DEGRADED = "data_degraded"
+    REGIME_BLOCKED = "regime_blocked"
+    INSUFFICIENT_HISTORY = "insufficient_history"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 - Manipulation Detector reason tags (Issue #6, Spec §21.2)
+# ---------------------------------------------------------------------------
+class ManipulationReasonTag(str, Enum):
+    """Reasons attached to a :class:`ManipulationLevel` decision
+    (Spec §21.2).
+
+    Each fired tag contributes one signal toward the M-tier mapping;
+    the more tags fire the higher the manipulation level. Phase 6 hard
+    rules (Issue #6):
+
+      - M2 forbids ATTACK / RIGHT_TAIL_AMPLIFY (Risk Engine enforces
+        this in :meth:`RiskEngine.evaluate`).
+      - M3 forbids any new opening (Risk Engine enforces this).
+    """
+
+    CVD_UP_PRICE_FLAT = "cvd_up_price_flat"
+    VOLUME_UP_PRICE_NO_MOVE = "volume_up_price_no_move"
+    OI_UP_PRICE_FLAT = "oi_up_price_flat"
+    FUNDING_HOT_PRICE_WEAK = "funding_hot_price_weak"
+    UPPER_WICK_GROWTH = "upper_wick_growth"
+    BUY_PRESSURE_NO_PUSH = "buy_pressure_no_push"
+    BOOK_WALL_FLICKER = "book_wall_flicker"
+    NARRATIVE_AFTER_PUMP = "narrative_after_pump"
+    DATA_DEGRADED = "data_degraded"
+    REGIME_BLOCKED = "regime_blocked"
+    INSUFFICIENT_HISTORY = "insufficient_history"
+
+
+# ---------------------------------------------------------------------------
 # Account life tier (Spec §27.4)
 # ---------------------------------------------------------------------------
 class AccountLifeTier(str, Enum):

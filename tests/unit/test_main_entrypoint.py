@@ -15,6 +15,9 @@ The boot routine must:
       emit one REGIME_UPDATED, one UNIVERSE_FILTERED per symbol, and
       two LIQUIDITY_CHECKED per symbol (one ``check="evaluate"`` and
       one ``check="can_exit_position"``).
+    - exercise the Phase 6 Pre-Anomaly / Anomaly / Confirmation /
+      Manipulation classifiers: emit one of each event type per
+      symbol.
     - emit a DATA_UNRELIABLE + EXCHANGE_DISCONNECTED event on shutdown
 """
 
@@ -49,8 +52,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 5 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 5 - Regime Universe Liquidity" in captured
+    # Phase 6 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 6 - Scanner Confirmation Manipulation" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -72,6 +75,11 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "universe=" in captured
     assert "universe_events=" in captured
     assert "liquidity_events=" in captured
+    # Phase 6 fields
+    assert "pre_anomaly_events=" in captured
+    assert "anomaly_events=" in captured
+    assert "trade_confirmed_events=" in captured
+    assert "manipulation_events=" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -133,5 +141,28 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         check_tags = {ev.payload.get("check") for ev in liquidity_events}
         assert "evaluate" in check_tags
         assert "can_exit_position" in check_tags
+        # Phase 6: each of the four classifiers emits at least one event.
+        pre_anomaly_events = repo.list_events(
+            event_type=EventType.PRE_ANOMALY_DETECTED
+        )
+        assert len(pre_anomaly_events) >= 1
+        for ev in pre_anomaly_events:
+            assert "pre_anomaly_score" in ev.payload
+            assert "reason_tags" in ev.payload
+        anomaly_events = repo.list_events(event_type=EventType.ANOMALY_DETECTED)
+        assert len(anomaly_events) >= 1
+        for ev in anomaly_events:
+            assert "anomaly_score" in ev.payload
+            assert "component_scores" in ev.payload
+        trade_confirmed = repo.list_events(event_type=EventType.TRADE_CONFIRMED)
+        assert len(trade_confirmed) >= 1
+        for ev in trade_confirmed:
+            assert "level" in ev.payload
+            assert ev.payload["level"] in ("T0", "T1", "T2", "T3", "T4")
+        manipulation = repo.list_events(event_type=EventType.MANIPULATION_DETECTED)
+        assert len(manipulation) >= 1
+        for ev in manipulation:
+            assert "level" in ev.payload
+            assert ev.payload["level"] in ("M0", "M1", "M2", "M3")
     finally:
         conn.close()
