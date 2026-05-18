@@ -16,6 +16,18 @@ the final score is scaled to [0, 100]. ``Sweep`` and
 sum so a clean breakout cannot be missed when the underlying spikes
 are not yet extreme.
 
+**``anomaly_score`` is an ANOMALY INDICATOR only, NOT an entry
+signal.** A high score does NOT authorise opening a position. The
+scanner returns an :class:`AnomalyDecision` (`anomaly_score` +
+`reason_tags` + `notes`) and optionally emits a single
+``ANOMALY_DETECTED`` event - that is its complete public contract.
+It NEVER constructs an :class:`app.core.models.TradeDecision`,
+NEVER enqueues an order, NEVER mutates any position. Real openings
+remain gated by the Phase 5 regime / universe / liquidity contract,
+the Phase 6 confirmation tier (T2+ for ATTACK), the Phase 6
+manipulation tier (M0 / M1 for ATTACK), the Phase 7 Risk Engine and
+No-Trade Gate, and the Phase 9 Execution FSM.
+
 Phase 6 boundary: same as :class:`PreAnomalyScanner`. Stateless, no
 network, no orders, no LLM. One event per evaluation.
 """

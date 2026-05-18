@@ -93,9 +93,33 @@ call an LLM. None of them touch a credential.
 The Risk Engine (`app/risk/engine.py`) enforces these in
 `RiskEngine.evaluate`:
 
-1. **`manipulation_level == M3` -> reject every new opening.**
-   Reason `manipulation_m3`. Hard wall regardless of
+1. **`manipulation_level == M3` -> reject every NEW opening.**
+   Reason `manipulation_m3`. Hard wall on new openings regardless of
    `attack_intent`. Spec §21.3 "M3 禁止交易".
+
+   **Important - Phase 6 only ships the new-opening protection
+   semantic.** Phase 7 (full Risk Engine + State Machine) and Phase 9
+   (Execution FSM + Reconciliation) MUST preserve protective-exit
+   and reduce-only closing flows under M3:
+
+   - `LOCK_PROFIT`, `FORCED_EXIT`, `DISTRIBUTION_ALERT` exit paths
+     must remain allowed - refusing them under M3 would trap a live
+     position when manipulation is detected (P0 incident).
+   - `kill_all` and reduce-only closing orders must remain allowed
+     regardless of `manipulation_level` because they shrink
+     exposure, never grow it.
+   - Reconciliation must remain allowed to read / re-attach
+     stop-loss state under M3.
+
+   Phase 7 will add an explicit `is_protective_exit=True` (or
+   equivalent) flag on `RiskRequest` so the M3 branch can
+   distinguish "open" from "close / reduce / protect". Phase 6 does
+   NOT ship that flag because Phase 6 has no exit path of its own;
+   every Phase 6 caller is a non-attack self-check or a
+   forward-looking opening adjudication. The caveat is pinned next
+   to the inline M3 branch in `app/risk/engine.py` and asserted by
+   `tests/unit/test_phase6_non_generation_invariant.py`.
+
 2. **`manipulation_level == M2` AND `attack_intent=True` -> reject.**
    Reason `manipulation_m2_attack`. SCOUT / OBSERVE actions remain
    allowed. Spec §21.3 "M2 禁止进攻".
@@ -117,6 +141,61 @@ The Phase 1 hard rejections (`live_trading_disabled`,
 `right_tail_disabled`, `stop_unconfirmed`, `unknown_position`,
 `trading_mode_inconsistent`) are unchanged. The Phase 6 rules are
 **additive**.
+
+### Phase 6 classifier contract: indicators / levels only, NEVER trade approval
+
+A common failure mode of momentum systems is silently treating a
+high anomaly score or a strong confirmation tier as authorisation
+to open a position. **Phase 6 explicitly forbids this.** The four
+classifiers in this PR are passive scorers / level mappers:
+
+- **`pre_anomaly_score` and `anomaly_score` are CANDIDATE and
+  ANOMALY INDICATORS only - NOT entry signals.** A high score does
+  NOT authorise opening a position. `PreAnomalyScanner` and
+  `AnomalyScanner` return :class:`PreAnomalyDecision` /
+  :class:`AnomalyDecision` value objects (score + reason_tags +
+  notes) and emit one event each. They never construct an
+  :class:`app.core.models.TradeDecision`, never enqueue an order,
+  never mutate a position.
+- **T3 / T4 is a trade-confirmation LEVEL only - NOT a trade
+  approval.** `RealTradeConfirmation` returns a
+  :class:`ConfirmationDecision` (level + reason_tags + notes).
+  Whether a real opening is permitted is the conjunction of:
+  - the Phase 5 regime gate (`RegimeSnapshot.risk_permission`);
+  - the Phase 5 universe / liquidity decisions
+    (`UniverseDecision.eligible`, `LiquidityDecision.passed`,
+    `can_exit_position(...).feasible`);
+  - the Phase 6 confirmation tier (T2+ for ATTACK candidates);
+  - the Phase 6 manipulation tier (M0 / M1 for ATTACK candidates);
+  - the Phase 7 No-Trade Gate + Risk Engine final adjudication; and
+  - the Phase 9 Execution FSM transition.
+
+  A T4 reading on its own authorises nothing. Phase 7's Risk
+  Engine / State Machine / No-Trade Gate, working with Liquidity,
+  Manipulation, and Regime, makes the actual opening decision.
+- **M-tier is a manipulation LEVEL only - NOT a trade approval.**
+  Same shape as T-tier above. The detector returns a
+  :class:`ManipulationDecision` (level + reason_tags + notes).
+
+The non-generation invariant is pinned by
+`tests/unit/test_phase6_non_generation_invariant.py`:
+
+- The four decision value-objects expose only score / level +
+  reason_tags + notes + timestamp - no `direction`, `entry_zone`,
+  `qty`, `stop_price`, `position_id`, `order_id`,
+  `take_profit_plan` (per-class field-set assertions).
+- A live evaluation of each classifier returns a
+  `<X>Decision`, NEVER a :class:`TradeDecision`
+  (`isinstance` assertions).
+- No source file under `app/scanner/`, `app/confirmation/`,
+  `app/manipulation/` imports `TradeDecision`, instantiates one,
+  or imports any `app.execution.order_manager` /
+  `app.execution.stop_manager` / `app.positions.*` /
+  `app.reconciliation` module (source-tree scan).
+- The package and class docstrings carry the "indicators only" /
+  "level only" / "NOT an entry signal" / "NOT a trade approval"
+  wording so a future Phase 7 PR cannot misread the boundary
+  (docstring assertions).
 
 ### Phase 6 boundary (declared explicitly to avoid drift)
 

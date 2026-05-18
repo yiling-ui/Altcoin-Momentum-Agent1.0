@@ -20,6 +20,17 @@ Spec §20.4 lists T3 example conditions:
 Phase 6 ships the classifier; the Risk Engine (this Phase) reads
 :class:`TradeConfirmationLevel` and refuses to authorise an attack
 candidate when the level is T0 / T1.
+
+**T3 / T4 is a trade-confirmation LEVEL only, NOT a trade approval.**
+This class is pure: it consumes :class:`ConfirmationInput`, returns a
+:class:`ConfirmationDecision`, optionally writes a single
+``TRADE_CONFIRMED`` event through :class:`EventRepository`, and stops
+there. It NEVER constructs an :class:`app.core.models.TradeDecision`,
+NEVER enqueues an order, NEVER mutates a position. The opening
+decision is the conjunction of the Phase 5 regime / universe /
+liquidity gates, the Phase 6 manipulation tier, the Phase 7 Risk
+Engine, and the Phase 9 Execution FSM. A T4 reading by itself
+authorises nothing.
 """
 
 from __future__ import annotations

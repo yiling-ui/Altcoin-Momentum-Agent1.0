@@ -4,6 +4,17 @@ Goal (Spec §17.1): "发现还没刷屏但正在变强的标的." -- find symbol
 that are gathering momentum but have not yet fully exploded. Each
 fired reason adds points; the final score is bounded at 100.
 
+**``pre_anomaly_score`` is a CANDIDATE INDICATOR only, NOT an entry
+signal.** A high score does NOT authorise opening a position. The
+classifier is pure: it consumes :class:`PreAnomalyInput`, returns a
+:class:`PreAnomalyDecision`, optionally writes one
+``PRE_ANOMALY_DETECTED`` event, and stops. It NEVER constructs an
+:class:`app.core.models.TradeDecision`, NEVER enqueues an order,
+NEVER mutates any position. The opening decision is the conjunction
+of regime / universe / liquidity (Phase 5), confirmation T2+ +
+manipulation M0/M1 (Phase 6), Risk Engine + No-Trade Gate
+(Phase 7), and Execution FSM (Phase 9).
+
 Phase 6 boundary
 ----------------
 

@@ -21,8 +21,32 @@ Phase 6 extension (Issue #6)
 Issue #6 requires the Risk Engine to honour the manipulation level and
 the real-trade confirmation level produced by the Phase 6 classifiers:
 
-    - ManipulationLevel.M3 -> reject ALL new openings (Spec §21.3 hard
-      rule "M3 禁止交易"). M3 is a hard wall.
+    - ManipulationLevel.M3 -> reject ALL **new** openings (Spec §21.3
+      hard rule "M3 禁止交易"). M3 is a hard wall on new openings.
+
+      **IMPORTANT - Phase 6 only implements the new-opening
+      protection semantic.** Phase 7 (State Machine + full Risk
+      Engine) and Phase 9 (Execution FSM + Reconciliation) MUST
+      preserve protective-exit and reduce-only closing flows under
+      M3:
+
+        * `LOCK_PROFIT`, `FORCED_EXIT`, `DISTRIBUTION_ALERT` -> exit
+          transitions and stop-confirmation routing must remain
+          allowed when manipulation_level=M3. Refusing them would
+          trap a live position when manipulation is detected and is
+          a P0 incident, not a safety win.
+        * `kill_all` and reduce-only closing orders must remain
+          allowed regardless of manipulation_level - they shrink
+          exposure, never grow it.
+        * Reconciliation (Issue #9) must be allowed to read /
+          re-attach stop-loss state under M3.
+
+      Phase 7 will add an explicit `is_protective_exit=True` (or
+      equivalent) flag on `RiskRequest` so the M3 branch can
+      distinguish "open" from "close / reduce / protect". Phase 6
+      does NOT ship that flag because Phase 6 has no exit path of
+      its own - every Phase 6 caller is a non-attack self-check or
+      a forward-looking opening adjudication.
     - ManipulationLevel.M2 -> reject ATTACK / RIGHT_TAIL_AMPLIFY
       candidates (Spec §21.3 hard rule "M2 禁止进攻"). Smaller scout /
       observe candidates may continue.
@@ -154,6 +178,16 @@ class RiskEngine:
             reasons.append("trading_mode_inconsistent")
 
         # Phase 6 hard rules (Issue #6, Spec §21.3 + §20.4).
+        # IMPORTANT: the M3 branch below blocks NEW openings only.
+        # Phase 7 (State Machine + full Risk Engine) and Phase 9
+        # (Execution FSM + Reconciliation) MUST preserve protective
+        # exit and reduce-only closing flows under M3 - LOCK_PROFIT,
+        # FORCED_EXIT, DISTRIBUTION_ALERT, kill_all, and stop-loss
+        # re-attachment paths must remain allowed when
+        # manipulation_level=M3. Phase 6 ships only the new-opening
+        # protection semantic; Phase 7 will add an explicit flag on
+        # RiskRequest so the M3 branch can distinguish "open" from
+        # "close / reduce / protect".
         attack_intent = request.effective_attack_intent
         if request.manipulation_level is ManipulationLevel.M3:
             # M3 is a hard wall: no new opening, no scout, no amplify.
