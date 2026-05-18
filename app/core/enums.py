@@ -103,6 +103,104 @@ class MarketRegime(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Phase 5 - Regime Engine sub-states (Spec §15.1, §15.2)
+# ---------------------------------------------------------------------------
+class BtcTrend(str, Enum):
+    """Coarse BTC trend label produced by the Regime Engine.
+
+    Phase 5 only ships the three macro labels Spec §15 actually uses to
+    decide ALLOW / BLOCK; finer-grained labels (e.g. SLOW_GRIND vs
+    PARABOLIC) belong to Issue #6 / #7 risk-tier work and are not in
+    scope here.
+    """
+
+    UP = "UP"
+    SIDEWAYS = "SIDEWAYS"
+    DOWN = "DOWN"
+    UNKNOWN = "UNKNOWN"
+
+
+class BtcVolatility(str, Enum):
+    """Coarse BTC realised-volatility bucket produced by the Regime Engine."""
+
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+    EXTREME = "EXTREME"
+    UNKNOWN = "UNKNOWN"
+
+
+class AltLiquidity(str, Enum):
+    """Coarse altcoin-liquidity bucket produced by the Regime Engine."""
+
+    EXPANDING = "EXPANDING"
+    STABLE = "STABLE"
+    CONTRACTING = "CONTRACTING"
+    DRY = "DRY"
+    UNKNOWN = "UNKNOWN"
+
+
+class RiskPermission(str, Enum):
+    """The single permission bit Regime/Universe/Liquidity hand to the
+    rest of the system. Spec §15.3 maps every regime label to one of
+    these values; Phase 7's Risk Engine will read this through the
+    No-Trade Gate.
+
+    Phase 5 ships the labels and the mapping. Phase 7 will translate
+    them into concrete TradeState / lever changes; Phase 5 does NOT
+    take any trading action on its own.
+    """
+
+    ALLOW_ATTACK = "ALLOW_ATTACK"
+    ALLOW_SCOUT = "ALLOW_SCOUT"
+    OBSERVE_ONLY = "OBSERVE_ONLY"
+    BLOCK_ALL = "BLOCK_ALL"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 - Universe Filter reject reasons (Issue #5 acceptance criterion 4)
+# ---------------------------------------------------------------------------
+class UniverseRejectReason(str, Enum):
+    """Why a symbol failed the Universe Filter.
+
+    A rejected symbol has at least one of these reasons attached. The
+    full reject_reasons list is recorded on the UNIVERSE_FILTERED event
+    so Issue #6 / #7 / #10 (Reflection) can reproduce the decision from
+    events.db alone.
+    """
+
+    SPREAD_TOO_WIDE = "spread_too_wide"
+    DEPTH_INSUFFICIENT = "depth_insufficient"
+    TRADE_DISCONTINUOUS = "trade_discontinuous"
+    CONTRACT_NOT_TRADING = "contract_not_trading"
+    DATA_RELIABILITY_TOO_LOW = "data_reliability_too_low"
+    DATA_DEGRADED = "data_degraded"
+    VOLUME_BELOW_MINIMUM = "volume_below_minimum"
+    ABNORMAL_DATA_FLAG = "abnormal_data_flag"
+    REGIME_BLOCKED = "regime_blocked"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 - Liquidity Filter reject reasons
+# ---------------------------------------------------------------------------
+class LiquidityRejectReason(str, Enum):
+    """Why a symbol / order failed the Liquidity Filter.
+
+    Same persistence story as UniverseRejectReason: the full list is
+    recorded on the LIQUIDITY_CHECKED event.
+    """
+
+    SPREAD_TOO_WIDE = "spread_too_wide"
+    DEPTH_INSUFFICIENT = "depth_insufficient"
+    SLIPPAGE_TOO_HIGH = "slippage_too_high"
+    NO_EXIT_CHANNEL = "no_exit_channel"
+    EXIT_TOO_SLOW = "exit_too_slow"
+    BOOK_MISSING = "book_missing"
+    DATA_DEGRADED = "data_degraded"
+    REGIME_BLOCKED = "regime_blocked"
+
+
+# ---------------------------------------------------------------------------
 # Account life tier (Spec §27.4)
 # ---------------------------------------------------------------------------
 class AccountLifeTier(str, Enum):

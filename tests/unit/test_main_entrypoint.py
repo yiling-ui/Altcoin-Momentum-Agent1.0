@@ -11,6 +11,10 @@ The boot routine must:
       mock exposes, produce one MARKET_SNAPSHOT per symbol, and emit
       at least one DATA_UNRELIABLE event for the boot WS-disconnect
       probe.
+    - exercise the Phase 5 Regime / Universe / Liquidity engines:
+      emit one REGIME_UPDATED, one UNIVERSE_FILTERED per symbol, and
+      two LIQUIDITY_CHECKED per symbol (one ``check="evaluate"`` and
+      one ``check="can_exit_position"``).
     - emit a DATA_UNRELIABLE + EXCHANGE_DISCONNECTED event on shutdown
 """
 
@@ -45,8 +49,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 4 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 4 - Market Data Buffer" in captured
+    # Phase 5 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 5 - Regime Universe Liquidity" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -62,6 +66,12 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "market_data=" in captured
     assert "market_snapshots=" in captured
     assert "data_unreliable=" in captured
+    # Phase 5 fields
+    assert "regime=" in captured
+    assert "regime_events=1" in captured
+    assert "universe=" in captured
+    assert "universe_events=" in captured
+    assert "liquidity_events=" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -97,5 +107,31 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         assert any(
             e.payload.get("trigger") == "websocket_disconnect" for e in all_symbol_drops
         )
+        # Phase 5: the regime engine fires once at boot.
+        regime_events = repo.list_events(event_type=EventType.REGIME_UPDATED)
+        assert len(regime_events) == 1
+        regime_payload = regime_events[0].payload
+        for key in (
+            "market_regime",
+            "btc_trend",
+            "btc_volatility",
+            "alt_liquidity",
+            "risk_permission",
+            "reason_tags",
+        ):
+            assert key in regime_payload
+        # Phase 5: one UNIVERSE_FILTERED per tracked symbol.
+        universe_events = repo.list_events(event_type=EventType.UNIVERSE_FILTERED)
+        assert len(universe_events) >= 1
+        for ev in universe_events:
+            assert "eligible" in ev.payload
+            assert "reject_reasons" in ev.payload
+        # Phase 5: two LIQUIDITY_CHECKED events per symbol (evaluate +
+        # can_exit_position).
+        liquidity_events = repo.list_events(event_type=EventType.LIQUIDITY_CHECKED)
+        assert len(liquidity_events) >= 2
+        check_tags = {ev.payload.get("check") for ev in liquidity_events}
+        assert "evaluate" in check_tags
+        assert "can_exit_position" in check_tags
     finally:
         conn.close()

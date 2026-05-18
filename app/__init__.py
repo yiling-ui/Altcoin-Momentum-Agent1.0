@@ -1,10 +1,11 @@
 """AMA-RT Altcoin Momentum Agent - Right Tail Edition.
 
-Phase 4: Market Data Buffer.
+Phase 5: Regime / Universe / Liquidity.
 This package is paper-mode by default and contains NO live trading code.
-The Phase 1 safety lock and the Phase 3 read-only Exchange Gateway
-contract remain in force - see app.config.settings and app.exchanges.base.
+The Phase 1 safety lock, the Phase 3 read-only Exchange Gateway
+contract, and the Phase 4 Market Data Buffer boundary remain in force -
+see app.config.settings, app.exchanges.base, and app.market_data.
 """
 
-__version__ = "1.4.0a4"
-__phase__ = "Phase 4 - Market Data Buffer"
+__version__ = "1.4.0a5"
+__phase__ = "Phase 5 - Regime Universe Liquidity"
