@@ -312,6 +312,8 @@ def test_reliability_tiers_contract():
       get_open_interest     B
       get_symbols           B
       get_account_snapshot  B (mock-only / skeleton-only in Phase 3+4)
+
+    See `docs/PHASE_3_CONTRACT.md` for the source of truth.
     """
     client = _FakeReadOnlyClient()
     tiers = client.reliability_tiers
@@ -322,6 +324,72 @@ def test_reliability_tiers_contract():
         "get_funding_rate": DataReliability.B,
         "get_open_interest": DataReliability.B,
         "get_account_snapshot": DataReliability.B,
+    }
+
+
+# Per-surface tier assertions (Issue #3 second review fix).
+# Each surface gets its own named test so a failure points directly at
+# the misclassified surface and so a casual reader of the test list can
+# see at a glance that BOTH `get_orderbook` and `get_recent_trades`
+# are tier A.
+def test_get_recent_trades_is_tier_a():
+    client = _FakeReadOnlyClient()
+    assert client.reliability_tiers["get_recent_trades"] is DataReliability.A
+
+
+def test_get_orderbook_is_tier_a():
+    client = _FakeReadOnlyClient()
+    assert client.reliability_tiers["get_orderbook"] is DataReliability.A
+
+
+def test_get_funding_rate_is_tier_b():
+    client = _FakeReadOnlyClient()
+    assert client.reliability_tiers["get_funding_rate"] is DataReliability.B
+
+
+def test_get_open_interest_is_tier_b():
+    client = _FakeReadOnlyClient()
+    assert client.reliability_tiers["get_open_interest"] is DataReliability.B
+
+
+def test_get_symbols_is_tier_b():
+    client = _FakeReadOnlyClient()
+    assert client.reliability_tiers["get_symbols"] is DataReliability.B
+
+
+def test_get_account_snapshot_is_tier_b():
+    client = _FakeReadOnlyClient()
+    assert client.reliability_tiers["get_account_snapshot"] is DataReliability.B
+
+
+def test_both_tier_a_surfaces_named_explicitly():
+    """Belt-and-braces: enumerate every tier-A entry and confirm the
+    set is exactly {get_orderbook, get_recent_trades}. Catches the
+    case where someone silently demotes one of them and the dict-
+    equality assertion above is reordered to compensate.
+    """
+    client = _FakeReadOnlyClient()
+    tier_a = {
+        name
+        for name, tier in client.reliability_tiers.items()
+        if tier is DataReliability.A
+    }
+    assert tier_a == {"get_orderbook", "get_recent_trades"}
+
+
+def test_tier_b_surfaces_named_explicitly():
+    """Mirror of `test_both_tier_a_surfaces_named_explicitly` for tier B."""
+    client = _FakeReadOnlyClient()
+    tier_b = {
+        name
+        for name, tier in client.reliability_tiers.items()
+        if tier is DataReliability.B
+    }
+    assert tier_b == {
+        "get_symbols",
+        "get_funding_rate",
+        "get_open_interest",
+        "get_account_snapshot",
     }
 
 

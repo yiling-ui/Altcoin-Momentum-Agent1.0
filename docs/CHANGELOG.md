@@ -43,8 +43,8 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
   read-only WS / REST adapter must be opt-in (off by default),
   require no API key, expose no write surface, and not auto-connect
   to the real exchange. `WebSocketManager`'s docstring is reworded
-  for the same reason - it no longer claims Phase 4 will plug in a
-  real `aiohttp` / `websockets` client. New test
+  for the same reason - it no longer claims Phase 4 will adopt any
+  particular network library. New test
   `test_binance_real_market_data_methods_message_is_explicit_about_phase4_constraints`
   asserts every public-data `NotImplementedError` message contains
   the four constraint phrases ("opt-in", "off by default", "no API
