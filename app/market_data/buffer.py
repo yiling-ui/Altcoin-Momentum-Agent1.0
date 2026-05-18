@@ -212,6 +212,7 @@ class MarketDataBuffer:
         self._symbols: dict[str, _SymbolState] = {}
         self._data_unreliable_emitted: int = 0
         self._market_snapshot_emitted: int = 0
+        self._market_snapshot_skipped: int = 0
         self._rest_ws_conflicts: int = 0
         # When > 0, ingest_* methods skip per-call _refresh_degraded
         # emission. The caller is then responsible for calling
@@ -244,8 +245,28 @@ class MarketDataBuffer:
         return self._market_snapshot_emitted
 
     @property
+    def market_snapshot_events_skipped(self) -> int:
+        """Snapshots produced while the per-call or config-level
+        ``emit_event`` flag was off. Useful for confirming the Phase 4
+        throttle hook is doing what it claims to do."""
+        return self._market_snapshot_skipped
+
+    @property
     def rest_ws_conflicts_total(self) -> int:
         return self._rest_ws_conflicts
+
+    @property
+    def late_trades_dropped_total(self) -> int:
+        """Trades that the per-symbol :class:`CandleBuilder` rejected
+        because their bucket had already closed. Spec §14.2 forbids
+        silent back-filling, so the buffer drops them; a non-zero value
+        is a leading indicator of an out-of-order tape and the
+        future Issue #5 / #6 monitoring will alert on it.
+        """
+        return sum(
+            st.candle_1m.dropped_late_trades + st.candle_5m.dropped_late_trades
+            for st in self._symbols.values()
+        )
 
     # ------------------------------------------------------------------
     # Symbol registration
@@ -457,7 +478,7 @@ class MarketDataBuffer:
         self,
         symbol: str,
         *,
-        emit_event: bool = True,
+        emit_event: bool | None = None,
         timestamp_override: int | None = None,
     ) -> MarketSnapshot:
         """Build a Spec §11.1 :class:`MarketSnapshot` for one symbol.
@@ -465,9 +486,25 @@ class MarketDataBuffer:
         Always succeeds: degraded symbols still get a snapshot, but
         callers should consult :meth:`is_degraded` first if they intend
         to act on it. The snapshot is appended as a ``MARKET_SNAPSHOT``
-        event when ``emit_event=True`` and an :class:`EventRepository`
-        is wired in.
+        event when (a) an :class:`EventRepository` is wired in, AND
+        (b) ``emit_event`` resolves to ``True``.
+
+        ``emit_event`` resolution rules (Phase 4 review fix):
+
+          - explicit ``True``  -> always emit
+          - explicit ``False`` -> never emit (skip counter increments)
+          - ``None`` (default) -> use
+            ``MarketDataBufferConfig.market_snapshot_event_emit_enabled``
+
+        Phase 4 callers (boot self-check, ad-hoc tests) snapshot at most
+        a handful of times so the default is "emit". Phase 5+ consumers
+        that snapshot at high cadence (anomaly scanner, regime engine)
+        should either pass ``emit_event=False`` per call OR construct
+        the buffer with the config flag set to ``False`` - this prevents
+        ``events.db`` from growing unbounded.
         """
+        if emit_event is None:
+            emit_event = self._config.market_snapshot_event_emit_enabled
         st = self._state_for(symbol)
         ts = timestamp_override if timestamp_override is not None else now_ms()
         last_price = self._latest_price(st)
@@ -522,6 +559,10 @@ class MarketDataBuffer:
                 )
             )
             self._market_snapshot_emitted += 1
+        elif self._event_repo is not None:
+            # Tracked separately so observability can confirm the
+            # throttle is doing what it claims to do.
+            self._market_snapshot_skipped += 1
         return snapshot
 
     def cvd_15m(self, symbol: str) -> float:
@@ -534,7 +575,9 @@ class MarketDataBuffer:
             symbols_degraded=len(self.degraded_symbols()),
             data_unreliable_events_emitted=self._data_unreliable_emitted,
             market_snapshot_events_emitted=self._market_snapshot_emitted,
+            market_snapshot_events_skipped=self._market_snapshot_skipped,
             rest_ws_conflicts_total=self._rest_ws_conflicts,
+            late_trades_dropped_total=self.late_trades_dropped_total,
         )
 
     # ------------------------------------------------------------------
@@ -549,12 +592,28 @@ class MarketDataBuffer:
         """Pull a deterministic snapshot of (trades, book, funding, OI)
         from the attached exchange client.
 
-        Phase 4 only ever attaches a :class:`MockExchangeClient`. The
-        Phase 3 read-only invariant prevents a real network call: the
-        ``BinanceClient`` skeleton's read methods raise
-        ``NotImplementedError``, so even if a caller mistakenly wired a
-        ``BinanceClient`` here, the call would surface as an explicit
-        error rather than silently going to the network.
+        Phase 4 hard rule (declared in Issue #4 + the user-facing
+        review of PR #14 + the Phase 4 review of this PR):
+
+          - The default and ONLY supported caller for this helper is
+            :class:`MockExchangeClient` / a fixture-driven client.
+          - **Phase 4 does NOT allow auto-connecting to a real public
+            adapter.** Any real public read-only WS / REST adapter must
+            be opt-in (off by default), require no API key, expose no
+            write surface (no write surface, period), and not be wired
+            here without an explicit review checkpoint.
+          - **Tests must NOT depend on real network.** The repo-wide
+            ``test_phase3_no_network.py`` and ``test_phase4_no_network``
+            scans enforce this by reading every ``app/`` source file
+            and rejecting forbidden imports.
+
+        Defence-in-depth: if a future caller mistakenly wires a real
+        :class:`BinanceClient` here, the underlying
+        ``NotImplementedError`` from each Phase 3 read method propagates
+        out of this helper rather than being silently swallowed - the
+        Phase 3 test suite asserts that contract and
+        ``test_refresh_from_exchange_propagates_notimplementederror_from_binance``
+        confirms this helper preserves it.
         """
         if self._exchange is None:
             raise RuntimeError(

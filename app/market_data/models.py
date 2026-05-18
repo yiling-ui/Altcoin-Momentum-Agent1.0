@@ -141,6 +141,18 @@ class MarketDataBufferConfig(_Frozen):
     # Liquidation history retained for downstream consumers.
     liquidation_history_size: int = 256
 
+    # Whether ``MarketDataBuffer.snapshot()`` should APPEND a
+    # ``MARKET_SNAPSHOT`` event to ``events.db`` by default. Phase 4
+    # callers (boot self-check, ad-hoc tests) snapshot at most a handful
+    # of times so the default is True. Phase 5+ consumers (anomaly
+    # scanner, regime engine) may call ``snapshot()`` at a high cadence;
+    # they should either pass ``emit_event=False`` per call OR construct
+    # the buffer with this flag set to False. This is the throttle hook
+    # the Phase 4 review asked for - it lets ``events.db`` stay
+    # bounded under high-frequency snapshotting without changing the
+    # MarketSnapshot return type.
+    market_snapshot_event_emit_enabled: bool = True
+
     staleness: MarketDataStalenessConfig = Field(
         default_factory=MarketDataStalenessConfig
     )
@@ -181,4 +193,12 @@ class BufferStats(_Frozen):
     symbols_degraded: int = 0
     data_unreliable_events_emitted: int = 0
     market_snapshot_events_emitted: int = 0
+    market_snapshot_events_skipped: int = 0
     rest_ws_conflicts_total: int = 0
+    # Cumulative count of trades the CandleBuilder rejected because
+    # their bucket had already closed. Spec §14.2 forbids silent
+    # back-filling; a non-zero value here is a leading indicator of an
+    # out-of-order tape (mis-ordered REST replay, inverted aggTrade
+    # delivery, or a clock-skew bug in the producer). Issue #5 / #6
+    # monitoring will alert on this.
+    late_trades_dropped_total: int = 0

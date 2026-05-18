@@ -107,13 +107,33 @@ socket, never reads a credential, never adds a write surface.
   6. **No auto-connect.** `MarketDataBuffer` opens no socket; it
      only receives data via `ingest_*` calls or via
      `refresh_from_exchange` against a deterministic
-     `MockExchangeClient`.
+     `MockExchangeClient`. **The
+     `MarketDataBuffer.refresh_from_exchange` docstring restates this
+     boundary verbatim and `test_market_data_buffer_review_fixes.py
+     ::test_refresh_from_exchange_docstring_declares_phase4_boundary`
+     pins it.**
   7. **Tests do not depend on real network**
      (`test_phase3_no_network.py`, `test_phase4_no_network.py`).
   8. **`BinanceClient.get_account_snapshot` remains mock-only /
      skeleton-only in both Phase 3 and Phase 4.** Real account
      snapshots require an authenticated REST call and an API key,
      forbidden until the limited-live phase.
+
+- **Phase 4 review-fix observability** (PR #15 review)
+
+  - `MarketDataBufferConfig.market_snapshot_event_emit_enabled` (default
+    `True`) is the construct-time throttle for `MARKET_SNAPSHOT`
+    events. Phase 5+ high-frequency consumers (anomaly scanner, regime
+    engine) can flip it to `False` to stop bloating `events.db` while
+    still receiving every `MarketSnapshot` return value. Per-call
+    `emit_event=True` / `emit_event=False` overrides the config.
+  - `MarketDataBuffer.late_trades_dropped_total` (also exposed via
+    `BufferStats.late_trades_dropped_total`) sums the
+    `CandleBuilder.dropped_late_trades` counter across every tracked
+    symbol. A non-zero value is a leading indicator of an out-of-order
+    tape (mis-ordered REST replay, inverted aggTrade delivery,
+    clock-skew on the producer) and Issue #5 / #6 monitoring will
+    alert on it.
 
 - **Phase 4 boot self-check** in `python -m app.main`
   - Constructs a deterministic in-process boot tape via
@@ -359,6 +379,10 @@ tests/
     test_market_data_oi_funding_liquidation.py  OI / funding / liq state
     test_market_data_buffer.py      MarketDataBuffer + acceptance #3, #4
     test_phase4_no_network.py       Phase 4 no-network / no-API-key scan
+    test_market_data_buffer_review_fixes.py  PR #15 review fixes:
+                                    snapshot() throttle + late-trade
+                                    counter + refresh_from_exchange
+                                    docstring boundary
     ... + the Phase 1 tests (enums, models, settings, telegram, etc.)
 docs/
   AMA_RT_V1_4_Production_Spec_Kiro.md  - V1.4 production spec
@@ -396,7 +420,7 @@ python -m app.main
 #   market_data=3/0 market_snapshots=3 data_unreliable=1 \
 #   risk_decision=True/paper_only_skeleton_approval health=ok
 
-# 4. Run the test suite (311 tests):
+# 4. Run the test suite (319 tests):
 pytest
 ```
 
@@ -450,6 +474,19 @@ buffer.refresh_from_exchange("BTCUSDT")          # uses the mock only
 
 snapshot = buffer.snapshot("BTCUSDT", emit_event=False)
 print(snapshot.cvd_1m, snapshot.atr_1m, snapshot.volume_1m)
+
+# Out-of-order tape detection: the CandleBuilder drops late trades
+# (Spec section 14.2 forbids silent rewrites) and BufferStats surfaces
+# the cumulative count so monitoring can alert on it.
+print(buffer.stats().late_trades_dropped_total)
+
+# Phase 5+ high-frequency callers should construct the buffer with the
+# throttle hook off so events.db does not bloat:
+#   from app.market_data.models import MarketDataBufferConfig
+#   cfg = MarketDataBufferConfig(market_snapshot_event_emit_enabled=False)
+#   buffer = MarketDataBuffer(exchange=client, config=cfg)
+# An on-demand audit-trail entry is still possible via
+# ``buffer.snapshot(symbol, emit_event=True)``.
 
 # WS disconnect drives DATA_UNRELIABLE through to consumers.
 buffer.on_websocket_disconnect(reason="test")

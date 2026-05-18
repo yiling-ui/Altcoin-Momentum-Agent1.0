@@ -7,6 +7,68 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 4 - Review fixes (PR #15 review feedback)
+
+#### Added
+
+- **`MarketDataBufferConfig.market_snapshot_event_emit_enabled`**
+  (default `True`) - construct-time throttle for `MARKET_SNAPSHOT`
+  events. Phase 4 keeps the existing per-call
+  ``snapshot(symbol, emit_event=...)`` override; this config flag
+  lets a Phase 5+ high-frequency consumer (anomaly scanner, regime
+  engine) flip the default once instead of having to remember
+  ``emit_event=False`` at every call site. The MarketSnapshot return
+  value is unchanged - only the events.db append is suppressed -
+  so downstream code stays event-shape-stable.
+- **`MarketDataBuffer.market_snapshot_events_skipped`** property +
+  **`BufferStats.market_snapshot_events_skipped`** field. Confirms
+  that the throttle is actually doing what it claims to do.
+- **`MarketDataBuffer.late_trades_dropped_total`** property +
+  **`BufferStats.late_trades_dropped_total`** field. Aggregates
+  `CandleBuilder.dropped_late_trades` across every tracked symbol
+  so an out-of-order tape (mis-ordered REST replay, inverted aggTrade
+  delivery, producer clock skew) is observable from a single counter.
+  Issue #5 / #6 monitoring will alert on this.
+- **`refresh_from_exchange` docstring rewritten** to declare the
+  Phase 4 boundary verbatim: mock-only / fixture-driven by default,
+  no auto-connect to a real public adapter, opt-in only with no API
+  key and no write surface, tests must not depend on real network.
+  The contract is pinned by
+  `tests/unit/test_market_data_buffer_review_fixes.py
+  ::test_refresh_from_exchange_docstring_declares_phase4_boundary`.
+- **8 new unit tests**
+  (`tests/unit/test_market_data_buffer_review_fixes.py`):
+  - `test_default_emits_market_snapshot_event`
+  - `test_explicit_emit_false_skips_event`
+  - `test_config_flag_disables_emit_by_default`
+  - `test_config_flag_off_but_explicit_true_still_emits`
+  - `test_late_trades_dropped_counter_starts_at_zero`
+  - `test_late_trades_dropped_counter_increments_on_out_of_order_tape`
+  - `test_late_trades_dropped_counter_isolates_per_symbol_aggregate`
+  - `test_refresh_from_exchange_docstring_declares_phase4_boundary`
+
+#### Changed
+
+- `MarketDataBuffer.snapshot()` parameter `emit_event` is now
+  `bool | None` (default `None`); `None` resolves to the new config
+  flag. `True` / `False` overrides remain available per call. This is
+  source-compatible: every existing call site that passed
+  `emit_event=True` / `emit_event=False` keeps its old behaviour
+  exactly.
+
+#### Tests
+
+**+8 review-fix tests on top of 311 = 319 total. Full suite: 319
+passed in 2.21s.**
+
+#### Live trading risk
+
+None. The review fixes only add observability counters, a
+construct-time throttle for an existing event emission, and tighten
+the docstring of an existing helper. No new mode flag, no loosened
+safety lock, no new dependency, no new write surface, no new
+network surface.
+
 ### Phase 4 - Market Data Buffer
 
 #### Added
