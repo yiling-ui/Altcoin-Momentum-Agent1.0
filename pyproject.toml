@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ama-rt"
-version = "1.4.0a1"
-description = "AMA-RT Altcoin Momentum Agent - Right Tail Edition. Phase 1 Safety Foundation only. Paper mode by default. NOT a live trading system."
+version = "1.4.0a4"
+description = "AMA-RT Altcoin Momentum Agent - Right Tail Edition. Phase 4 Market Data Buffer. Paper mode by default. NOT a live trading system."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }

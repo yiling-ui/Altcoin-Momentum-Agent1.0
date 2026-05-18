@@ -7,6 +7,10 @@ The boot routine must:
     - exercise the Phase 3 read-only Exchange Gateway: emit one
       EXCHANGE_CONNECTED event, prove `assert_read_only()` passes, and
       refuse all four write surfaces.
+    - exercise the Phase 4 Market Data Buffer: track every symbol the
+      mock exposes, produce one MARKET_SNAPSHOT per symbol, and emit
+      at least one DATA_UNRELIABLE event for the boot WS-disconnect
+      probe.
     - emit a DATA_UNRELIABLE + EXCHANGE_DISCONNECTED event on shutdown
 """
 
@@ -41,8 +45,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 3 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 3 - Exchange Gateway Read-Only" in captured
+    # Phase 4 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 4 - Market Data Buffer" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -54,6 +58,10 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "exchange=mock/connected" in captured
     assert "exchange_symbols=" in captured
     assert "exchange_connected_events=1" in captured
+    # Phase 4 fields
+    assert "market_data=" in captured
+    assert "market_snapshots=" in captured
+    assert "data_unreliable=" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -77,5 +85,17 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         # corresponding shutdown events.
         assert EventType.EXCHANGE_DISCONNECTED in types
         assert EventType.DATA_UNRELIABLE in types
+        # Phase 4: a MARKET_SNAPSHOT was produced for every tracked symbol.
+        market_snapshots = repo.list_events(event_type=EventType.MARKET_SNAPSHOT)
+        assert len(market_snapshots) >= 1
+        # Phase 4 boot drives a WS disconnect probe through the buffer,
+        # which writes a batched DATA_UNRELIABLE event with scope=all_symbols.
+        data_unreliables = repo.list_events(event_type=EventType.DATA_UNRELIABLE)
+        all_symbol_drops = [
+            e for e in data_unreliables if e.payload.get("scope") == "all_symbols"
+        ]
+        assert any(
+            e.payload.get("trigger") == "websocket_disconnect" for e in all_symbol_drops
+        )
     finally:
         conn.close()
