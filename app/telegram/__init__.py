@@ -6,6 +6,7 @@ Issue #10 plug in the real `python-telegram-bot` adapter without touching
 callers.
 """
 
+from app.telegram import formatter as formatter
 from app.telegram.bot import TelegramCommandCenter
 from app.telegram.commands import (
     AVAILABLE_COMMANDS,
@@ -20,4 +21,5 @@ __all__ = [
     "CommandResult",
     "CommandStatus",
     "AVAILABLE_COMMANDS",
+    "formatter",
 ]

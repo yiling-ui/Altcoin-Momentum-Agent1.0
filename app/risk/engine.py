@@ -30,13 +30,30 @@ from app.database.repositories import EventRepository
 
 @dataclass(frozen=True)
 class RiskRequest:
-    """Request submitted to the Risk Engine for adjudication."""
+    """Request submitted to the Risk Engine for adjudication.
+
+    The Phase 1 skeleton recognises four hard-rejection flags drawn from
+    Spec §27.2 (No-Trade Gate) and Spec §31.3 (Reconciliation):
+
+        - live_trading_required: caller wants a real exchange order.
+          Always rejected in Phase 1 (live_trading_enabled=False).
+        - right_tail_amplify:    caller wants right-tail amplification.
+          Always rejected in Phase 1 (right_tail_enabled=False).
+        - stop_unconfirmed:      stop-loss state is not confirmed.
+          Spec §4.2 + §27.2: forbid new positions until confirmed.
+        - unknown_position:      local/exchange position state unknown.
+          Spec §31.3: 'positions unknown -> trading forbidden'.
+
+    Issue #7 will replace these point-checks with a real No-Trade Gate.
+    """
 
     source_module: str
     action: str
     symbol: str | None = None
     live_trading_required: bool = False
     right_tail_amplify: bool = False
+    stop_unconfirmed: bool = False
+    unknown_position: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -73,6 +90,12 @@ class RiskEngine:
             reasons.append("live_trading_disabled")
         if request.right_tail_amplify and not self._settings.right_tail_enabled:
             reasons.append("right_tail_disabled")
+        if request.stop_unconfirmed:
+            # Spec §4.2 + §27.2: do not open new positions while stop is unconfirmed.
+            reasons.append("stop_unconfirmed")
+        if request.unknown_position:
+            # Spec §31.3: position state unknown -> trading forbidden.
+            reasons.append("unknown_position")
         if self._settings.trading_mode != TradingMode.PAPER.value and not (
             self._settings.live_trading_enabled
         ):
@@ -103,6 +126,8 @@ class RiskEngine:
                     "reasons": list(decision.reasons),
                     "live_trading_required": decision.request.live_trading_required,
                     "right_tail_amplify": decision.request.right_tail_amplify,
+                    "stop_unconfirmed": decision.request.stop_unconfirmed,
+                    "unknown_position": decision.request.unknown_position,
                 },
             )
         )

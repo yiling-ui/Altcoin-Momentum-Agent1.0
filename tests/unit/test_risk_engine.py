@@ -51,3 +51,59 @@ def test_event_repo_optional(phase1_settings):
     engine = RiskEngine(settings=phase1_settings)
     decision = engine.evaluate(RiskRequest(source_module="x", action="observe"))
     assert decision.approved is True
+
+
+def test_stop_unconfirmed_request_is_rejected(events_repo, phase1_settings):
+    """Spec §4.2 + §27.2: no new positions while stop is unconfirmed."""
+    engine = RiskEngine(settings=phase1_settings, event_repo=events_repo)
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="execution_fsm",
+            action="open_position",
+            symbol="ETHUSDT",
+            stop_unconfirmed=True,
+        )
+    )
+    assert decision.approved is False
+    assert "stop_unconfirmed" in decision.reasons
+    [event] = events_repo.list(event_type=EventType.RISK_REJECTED)
+    assert event.payload["stop_unconfirmed"] is True
+
+
+def test_unknown_position_request_is_rejected(events_repo, phase1_settings):
+    """Spec §31.3: position state unknown -> trading forbidden."""
+    engine = RiskEngine(settings=phase1_settings, event_repo=events_repo)
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="reconciliation",
+            action="open_position",
+            symbol="SOLUSDT",
+            unknown_position=True,
+        )
+    )
+    assert decision.approved is False
+    assert "unknown_position" in decision.reasons
+
+
+def test_multiple_rejection_reasons_accumulate(events_repo, phase1_settings):
+    """All applicable rejection reasons should appear together."""
+    engine = RiskEngine(settings=phase1_settings, event_repo=events_repo)
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="amplify",
+            symbol="PEPEUSDT",
+            live_trading_required=True,
+            right_tail_amplify=True,
+            stop_unconfirmed=True,
+            unknown_position=True,
+        )
+    )
+    assert decision.approved is False
+    for r in (
+        "live_trading_disabled",
+        "right_tail_disabled",
+        "stop_unconfirmed",
+        "unknown_position",
+    ):
+        assert r in decision.reasons
