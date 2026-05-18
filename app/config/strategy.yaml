@@ -1,5 +1,0 @@
-# AMA-RT strategy configuration (Phase 1 placeholder).
-# Phase 1 ships NO strategies; this file reserves the structure.
-
-strategies:
-  enabled: []   # Phase 1: empty. Phase 6+ will populate.
