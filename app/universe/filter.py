@@ -80,6 +80,7 @@ class UniverseFilter:
         self._accepted: int = 0
         self._rejected: int = 0
         self._universe_filtered_emitted: int = 0
+        self._universe_filtered_skipped: int = 0
 
     # ------------------------------------------------------------------
     # Public properties
@@ -104,11 +105,20 @@ class UniverseFilter:
     def universe_filtered_events_emitted(self) -> int:
         return self._universe_filtered_emitted
 
+    @property
+    def universe_filtered_events_skipped(self) -> int:
+        """Number of decisions that were NOT persisted because the
+        per-call override or the :attr:`UniverseConfig.event_emit_enabled`
+        config flag suppressed them. Phase 4 PR #15 review fix shape:
+        observability for the throttle itself.
+        """
+        return self._universe_filtered_skipped
+
     # ------------------------------------------------------------------
     # Evaluate
     # ------------------------------------------------------------------
     def evaluate(
-        self, request: UniverseInput, *, emit_event: bool = True
+        self, request: UniverseInput, *, emit_event: bool | None = None
     ) -> UniverseDecision:
         cfg = self._config
         reasons: list[UniverseRejectReason] = []
@@ -214,8 +224,15 @@ class UniverseFilter:
             self._accepted += 1
         else:
             self._rejected += 1
-        if emit_event:
+        # Resolve event-emission policy:
+        #   emit_event=True  -> always emit (per-call override)
+        #   emit_event=False -> always skip (per-call override)
+        #   emit_event=None  -> follow self._config.event_emit_enabled
+        should_emit = emit_event if emit_event is not None else self._config.event_emit_enabled
+        if should_emit:
             self._record(decision, request)
+        else:
+            self._universe_filtered_skipped += 1
         return decision
 
     # ------------------------------------------------------------------
@@ -231,7 +248,7 @@ class UniverseFilter:
         abnormal_data_flag: bool = False,
         reliability: DataReliability = DataReliability.A,
         trade_count_5m: int | None = None,
-        emit_event: bool = True,
+        emit_event: bool | None = None,
     ) -> UniverseDecision:
         """Build a :class:`UniverseInput` from Phase 4 outputs and call
         :meth:`evaluate`. Tests also use this to keep call sites tidy.
@@ -259,7 +276,7 @@ class UniverseFilter:
         return self.evaluate(request, emit_event=emit_event)
 
     def evaluate_many(
-        self, requests: Iterable[UniverseInput], *, emit_event: bool = True
+        self, requests: Iterable[UniverseInput], *, emit_event: bool | None = None
     ) -> list[UniverseDecision]:
         return [self.evaluate(r, emit_event=emit_event) for r in requests]
 

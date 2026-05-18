@@ -7,6 +7,151 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 5 - Review fixes (PR #16 review feedback)
+
+The four follow-up clarifications requested on PR #16 are documentation
++ observability only. No mode flag is loosened, no safety lock is
+relaxed, no new dependency, no new write surface, no new network
+surface. The Phase 1 safety lock and the Phase 3 read-only invariant
+are unchanged.
+
+#### Added
+
+- **`UniverseConfig.event_emit_enabled`** (default `True`) -
+  construct-time throttle for `UNIVERSE_FILTERED` events. Phase 5's
+  boot drill, replay, and reflection paths still observe every
+  decision; Issue #6's full Top-200 scanner can flip this to `False`
+  to avoid bloating events.db at scan rate. The per-call
+  `emit_event=True` override on
+  `UniverseFilter.evaluate` / `evaluate_snapshot` / `evaluate_many`
+  still lets monitoring write an on-demand audit-trail entry.
+  Mirrors Phase 4's
+  `MarketDataBufferConfig.market_snapshot_event_emit_enabled`.
+- **`LiquidityConfig.event_emit_enabled`** (default `True`) - the
+  same construct-time throttle for `LIQUIDITY_CHECKED` events. Two
+  events per symbol per tick (one `check="evaluate"` + one
+  `check="can_exit_position"`) at Top-200 scan rate would mean
+  ~400 events/tick; Issue #6 / #7 high-frequency consumers will flip
+  this to `False`.
+- **`UniverseFilter.universe_filtered_events_skipped`** property -
+  counts decisions that were NOT persisted because either the
+  per-call override or the config flag suppressed them. Confirms
+  the throttle is doing what it claims.
+- **`LiquidityFilter.liquidity_checked_events_skipped`** property -
+  the same counter for the Liquidity Filter. Both `evaluate` and
+  `can_exit_position` increment it.
+- **`emit_event` resolution policy** (mirrors the Phase 4 review
+  fix on `MarketDataBuffer.snapshot()`):
+
+  ```text
+  emit_event=True   -> always emit (per-call override)
+  emit_event=False  -> always skip (per-call override)
+  emit_event=None   -> follow config.event_emit_enabled (default)
+  ```
+
+  applied on `UniverseFilter.evaluate`,
+  `UniverseFilter.evaluate_snapshot`,
+  `UniverseFilter.evaluate_many`,
+  `LiquidityFilter.evaluate`,
+  `LiquidityFilter.evaluate_with_buffer`,
+  `LiquidityFilter.can_exit_position`, and the module-level
+  `app.liquidity.filter.can_exit_position` free function.
+
+- **`RiskPermission` docstring rewritten** to make the
+  regime-cycle-gate vs. trade-approval distinction explicit
+  (review items 1 + 2). Key clarifications now part of the
+  source:
+  1. `ALLOW_ATTACK` is a market-cycle permission, NOT a trade
+     approval. A real opening still requires Universe.eligible,
+     Liquidity.passed, can_exit_position.feasible, Issue #6 scanners
+     (Pre-Anomaly / Anomaly / Real-Trade Confirmation /
+     Manipulation), and the Issue #7 Risk Engine's final word.
+     The eight-step conjunctive ladder is enumerated in the
+     docstring.
+  2. `ALLOW_SCOUT` (the `ALT_RISK_OFF` fallback and the unknown-
+     inputs default) permits only OBSERVE or a tiny SCOUT
+     candidate. Issue #7 MUST further restrict: NO ATTACK, NO
+     RIGHT_TAIL_AMPLIFY, SCOUT size capped at the per-trade scout
+     budget. The `right_tail_enabled` flag is locked False through
+     the limited-live phase regardless.
+  3. `OBSERVE_ONLY` blocks new openings; existing positions
+     remain managed.
+  4. `BLOCK_ALL` is SYSTEMIC_RISK; no new opening of any kind.
+
+- **`REGIME_TO_RISK_PERMISSION` map docstring** in
+  `app/regime/models.py` echoes the same warning so anyone reading
+  the source-of-truth dict sees the regime-gate vs.
+  trade-approval distinction without having to chase the enum.
+
+- **`RegimeSnapshot.risk_permission` docstring warning** -
+  pointed at `RiskPermission` for the full ladder. The first
+  reader of a `RegimeSnapshot` value will not silently treat
+  `ALLOW_ATTACK` as authorisation.
+
+- **`LiquidityFilter.can_exit_position` docstring rewritten** to
+  cover the throughput-discount contract (review item 3):
+  - The `volume_5m / 300s` fallback is documented as an UPPER
+    BOUND, not a conservative estimate. Three reasons are listed
+    (calm-tape extrapolation, no-crowding assumption, no ATR / OI
+    discount).
+  - Issue #7's Risk Engine MUST apply a conservative discount on
+    top. Three recommended directions are documented (ATR-scaled
+    divisor, fraction-of-average cap, post-discount feasibility
+    re-check). Phase 5 ships the gate; sizing decisions are
+    Issue #7's job.
+  - Degraded-data contract pinned: callers in Phase 7+ MUST pass
+    `MarketDataBuffer.is_degraded(symbol)` through, never invert
+    `feasible=False`, never feed a stale book with
+    `is_data_degraded=False`. The buffer's degraded view is the
+    single source of truth.
+- **`_VOLUME_WINDOW_5M_SECONDS` module constant** in
+  `app/liquidity/filter.py` got its own warning comment block
+  describing the same upper-bound assumption set so a future
+  reader of the constant does not need to chase the docstring.
+- **Free-function `can_exit_position`** docstring restates the
+  same throughput-and-degraded contract with a pointer back to
+  the method form.
+
+#### Tests
+
+`tests/unit/test_phase5_review_fixes.py` (NEW) covers:
+- The two new config flags exist with correct defaults.
+- The `*_events_skipped` counters are exposed and start at zero.
+- `event_emit_enabled=False` + `emit_event=None` -> emits 0,
+  skipped += 1 (Universe and Liquidity).
+- `event_emit_enabled=False` + `emit_event=True` -> still emits
+  (per-call override beats config).
+- `event_emit_enabled=True` + `emit_event=False` -> still skips
+  (per-call override beats config).
+- `can_exit_position` (both method and free function) honours
+  the same `bool | None` resolution rules.
+- `RiskPermission` docstring contains the
+  "regime-cycle permission" + "NOT a trade approval" wording so
+  the regime-gate vs. trade-approval distinction cannot drift.
+- `REGIME_TO_RISK_PERMISSION` map docstring contains the same
+  warning so a future map mutation cannot silently weaken the
+  contract.
+- `LiquidityFilter.can_exit_position` docstring contains the
+  upper-bound + Issue #7-discount + degraded-data wording.
+
+#### Live trading risk
+
+**None.** This commit only:
+
+- Adds two construct-time throttle flags that default to today's
+  behaviour (emit every event).
+- Adds two skipped-event counters for monitoring.
+- Rewrites three docstrings (`RiskPermission`,
+  `REGIME_TO_RISK_PERMISSION`, `RegimeSnapshot.risk_permission`,
+  `LiquidityFilter.can_exit_position`) and one constant comment
+  (`_VOLUME_WINDOW_5M_SECONDS`).
+- Adds one test file pinning the new flags + the docstring
+  boundary phrases.
+
+The Phase 1 safety lock, the Phase 3 read-only invariant, the
+Phase 4 Market Data Buffer boundary, and the original Phase 5
+classifier behaviour are all unchanged.
+
 ### Phase 5 - Regime Universe Liquidity
 
 #### Added

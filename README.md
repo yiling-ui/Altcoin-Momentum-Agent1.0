@@ -172,6 +172,80 @@ Sample boot output:
   risk_decision=True/paper_only_skeleton_approval health=ok
 ```
 
+### Phase 5 review-fix observability (PR #16 review feedback)
+
+Four follow-up clarifications were added on top of the original
+Phase 5 PR. Documentation + observability only - no behaviour
+change, no loosened safety guarantee.
+
+1. **`RiskPermission` is a regime-cycle gate, NOT a trade
+   approval.** The `RiskPermission` enum docstring now spells out
+   the eight-step conjunctive ladder a real opening has to clear
+   in Phase 7+: regime gate → universe → liquidity → can_exit →
+   pre-anomaly / anomaly → real-trade confirmation T2+ → no-
+   manipulation → Risk Engine final approval → Execution FSM
+   transition. `ALLOW_ATTACK` is "regime is risk-on", nothing
+   more.
+
+2. **`ALT_RISK_OFF -> ALLOW_SCOUT` permits OBSERVE or a tiny
+   SCOUT candidate only.** Issue #7 MUST further restrict this
+   path: NO ATTACK, NO RIGHT_TAIL_AMPLIFY, SCOUT size capped at
+   the per-trade scout budget. `right_tail_enabled` remains
+   locked False through the limited-live phase regardless of
+   what the regime gate says.
+
+3. **`can_exit_position` throughput estimate is an UPPER BOUND.**
+   The `volume_5m / 300s` fallback assumes the next 5 minutes
+   will print at the same pace as the previous 5 minutes, that
+   our outflow does not crowd its own exit price, and that ATR /
+   OI do not expand into the exit window. None of these hold in
+   a thinning or panicking tape. The 5x `min_depth_multiplier`
+   cushion is what makes Phase 5 safe under normal regimes; the
+   throughput value itself is permissive. **Issue #7's Risk
+   Engine MUST apply a conservative discount on top** before
+   sizing an attack candidate (recommended directions: ATR-scaled
+   divisor, fraction-of-average cap, post-discount feasibility
+   re-check). Degraded data already maps to
+   `LiquidityRejectReason.DATA_DEGRADED` and forces
+   `feasible=False`; callers MUST pass
+   `MarketDataBuffer.is_degraded(symbol)` through and never
+   invert the result.
+
+4. **Construct-time event throttle for high-frequency scans.**
+   Phase 5 emits one `UNIVERSE_FILTERED` per evaluated symbol
+   and two `LIQUIDITY_CHECKED` per evaluated symbol (one
+   `check="evaluate"` + one `check="can_exit_position"`). At
+   Top-200 scan rate that is 600 events per tick - too noisy
+   for events.db. Two new construct-time flags now mirror the
+   Phase 4 PR #15 review-fix shape:
+
+   - `UniverseConfig.event_emit_enabled` (default `True`)
+   - `LiquidityConfig.event_emit_enabled` (default `True`)
+
+   Issue #6's full Top-200 scanner can flip these to `False` to
+   stop bloating events.db while still receiving every
+   `UniverseDecision` / `LiquidityDecision` / `ExitPlan` return
+   value. Per-call `emit_event=True` overrides remain available
+   for monitoring / on-demand audit-trail entries; per-call
+   `emit_event=False` overrides remain available for tests. The
+   resolution rule:
+
+   ```text
+   emit_event=True   -> always emit (per-call override)
+   emit_event=False  -> always skip (per-call override)
+   emit_event=None   -> follow config.event_emit_enabled
+   ```
+
+   Two new counters confirm the throttle is doing its job:
+
+   - `UniverseFilter.universe_filtered_events_skipped`
+   - `LiquidityFilter.liquidity_checked_events_skipped`
+
+   Both increment whenever a decision was suppressed by either
+   the per-call override or the config flag.
+
+   Pinned by `tests/unit/test_phase5_review_fixes.py`.
+
 ## Phase 4 deliverable
 
 Phase 4 introduces the `app/market_data/` package - the in-process

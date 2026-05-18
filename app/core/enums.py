@@ -141,14 +141,60 @@ class AltLiquidity(str, Enum):
 
 
 class RiskPermission(str, Enum):
-    """The single permission bit Regime/Universe/Liquidity hand to the
-    rest of the system. Spec §15.3 maps every regime label to one of
-    these values; Phase 7's Risk Engine will read this through the
-    No-Trade Gate.
+    """**Regime-cycle permission bit. NOT a trade approval.**
 
-    Phase 5 ships the labels and the mapping. Phase 7 will translate
-    them into concrete TradeState / lever changes; Phase 5 does NOT
-    take any trading action on its own.
+    These four values are the *single permission bit Regime / Universe /
+    Liquidity hand to the rest of the system*. They describe what the
+    market *cycle* permits at the macro level, nothing more.
+
+    A real opening decision in Phase 7+ MUST be the conjunction of:
+
+      1. ``RegimeSnapshot.risk_permission`` (this enum, Spec §15.3)
+      2. ``UniverseDecision.eligible`` (Spec §16)
+      3. ``LiquidityDecision.passed`` and
+         ``can_exit_position(...).feasible`` (Spec §19)
+      4. Pre-anomaly / Anomaly score (Issue #6, Spec §17 / §18)
+      5. Real-trade confirmation tier T2+ (Issue #6, Spec §20)
+      6. Manipulation level <= M1 / M0 (Issue #6, Spec §21)
+      7. ``RiskEngine.evaluate(...)`` final approval (Issue #7, Spec §27)
+      8. ``ExecutionFSM`` valid-transition gate (Issue #9, Spec §30)
+
+    A non-blocking value here is a NECESSARY but **NOT sufficient**
+    condition. Phase 5 modules MUST NOT treat any of these labels as
+    a trade authorisation.
+
+    Semantic ladder (strict, do not collapse):
+
+      - ``ALLOW_ATTACK``
+        Macro cycle is risk-on. Higher tiers MAY graduate a candidate
+        to a SCOUT or ATTACK trade state - subject to (2)-(8) above.
+        Does NOT itself authorise an attack-sized position; does NOT
+        authorise right-tail amplification (right_tail_enabled is
+        locked False until Issue #7 + the Go/No-Go checklist clears).
+
+      - ``ALLOW_SCOUT``
+        Macro cycle is risk-off-with-survivors. Only OBSERVE or a
+        very small SCOUT candidate is admissible. Phase 7's Risk
+        Engine MUST further restrict: NO ATTACK, NO RIGHT_TAIL_AMPLIFY,
+        and SCOUT size capped at the per-trade scout budget. The
+        ``ALT_RISK_OFF -> ALLOW_SCOUT`` path is the same: it permits
+        observation / minimal scouting, NOT attack-sizing.
+
+      - ``OBSERVE_ONLY``
+        No new opening. Existing positions may continue to be managed
+        (LOCK_PROFIT / FORCED_EXIT) but no new SCOUT / ATTACK.
+
+      - ``BLOCK_ALL``
+        SYSTEMIC_RISK. No new opening of any kind. Reconciliation,
+        kill_all and stop-management are still allowed. Phase 5's
+        UniverseFilter and LiquidityFilter both list this in their
+        ``blocking_risk_permissions`` set by default; Issue #7 will
+        additionally route every trade-state transition to
+        ``NO_TRADE``.
+
+    Phase 5 ships the labels and the mapping. Phase 7+ translates
+    them into concrete TradeState transitions and lever changes;
+    Phase 5 does NOT take any trading action on its own.
     """
 
     ALLOW_ATTACK = "ALLOW_ATTACK"

@@ -37,6 +37,24 @@ from app.regime.models import RegimeSnapshot
 # Length of the Phase 4 5-minute volume window in seconds. Used as
 # the denominator for the throughput-from-volume fallback in
 # can_exit_position.
+#
+# IMPORTANT: ``volume_5m / _VOLUME_WINDOW_5M_SECONDS`` is the *upper
+# bound* on instantaneous capacity, not a conservative estimate. It
+# assumes:
+#   1. The next 5 minutes will print at the same pace as the previous
+#      5 minutes.
+#   2. Every realised trade in that window is interchangeable with our
+#      own outflow (i.e. the rest of the tape will not crowd our exit
+#      price).
+#   3. ATR / OI / volatility do not expand into our exit window.
+#
+# None of these assumptions hold in a thinning or panicking tape. The
+# 5x ``min_depth_multiplier`` cushion in :class:`LiquidityConfig` is
+# what keeps this safe under normal regimes; the throughput value
+# itself is permissive. **Issue #7's Risk Engine MUST apply a
+# conservative discount** on top of any value derived from this
+# constant before sizing an attack candidate. See the can_exit_position
+# docstring for the recommended discount directions.
 _VOLUME_WINDOW_5M_SECONDS = 5 * 60
 
 
@@ -56,6 +74,7 @@ class LiquidityFilter:
         self._evaluations: int = 0
         self._exit_checks: int = 0
         self._liquidity_checked_emitted: int = 0
+        self._liquidity_checked_skipped: int = 0
 
     # ------------------------------------------------------------------
     # Public properties
@@ -76,11 +95,20 @@ class LiquidityFilter:
     def liquidity_checked_events_emitted(self) -> int:
         return self._liquidity_checked_emitted
 
+    @property
+    def liquidity_checked_events_skipped(self) -> int:
+        """Number of decisions that were NOT persisted because the
+        per-call override or the :attr:`LiquidityConfig.event_emit_enabled`
+        config flag suppressed them. Phase 4 PR #15 review fix shape:
+        observability for the throttle itself.
+        """
+        return self._liquidity_checked_skipped
+
     # ------------------------------------------------------------------
     # evaluate (Spec §19.1)
     # ------------------------------------------------------------------
     def evaluate(
-        self, request: LiquidityInput, *, emit_event: bool = True
+        self, request: LiquidityInput, *, emit_event: bool | None = None
     ) -> LiquidityDecision:
         cfg = self._config
         reasons: list[LiquidityRejectReason] = []
@@ -218,7 +246,7 @@ class LiquidityFilter:
         risk_permission: RiskPermission | None = None,
         market_regime: MarketRegime | None = None,
         spread_pct: float | None = None,
-        emit_event: bool = True,
+        emit_event: bool | None = None,
     ) -> ExitPlan:
         """Spec §19.2 mandatory function.
 
@@ -230,6 +258,68 @@ class LiquidityFilter:
 
         ``max_slippage_pct`` and ``max_seconds`` default to the
         configured ceilings.
+
+        Throughput estimate
+        -------------------
+
+        When the caller does not pass ``throughput_qty_per_sec``, the
+        function falls back to ``volume_5m / 300`` (i.e. realised base
+        volume averaged over the rolling 5-minute window from
+        :class:`MarketDataBuffer`). This is the **upper bound** on
+        instantaneous capacity, not a conservative estimate:
+
+          - It assumes the next 5 minutes will print at the same pace
+            as the previous 5 minutes - a reasonable default in a
+            calm tape, fragile in a thinning one.
+          - It counts every realised trade against our own outflow
+            even though our flatten order will compete with the rest
+            of the tape; the 5x ``min_depth_multiplier`` cushion in
+            :class:`LiquidityConfig` is what makes this safe in normal
+            regimes, not the throughput estimate itself.
+          - It does NOT discount for ATR expansion, OI flush, or
+            crowding around our exit price. A spike in the next 5
+            minutes can collapse realised liquidity faster than this
+            estimate degrades.
+
+        Issue #7's Risk Engine MUST therefore apply a conservative
+        discount on top of the value returned here before sizing an
+        attack candidate. Recommended directions for that discount
+        (left for Issue #7 to pin down; Phase 5 does NOT make sizing
+        decisions):
+
+          - scale by an ATR-expansion factor (worse vol -> bigger
+            divisor),
+          - cap at a configured fraction of recent average volume,
+          - and require ``feasible=True`` to remain ``feasible=True``
+            after the discounted re-check.
+
+        Degraded data
+        -------------
+
+        ``is_data_degraded=True`` already maps to
+        ``LiquidityRejectReason.DATA_DEGRADED`` and forces
+        ``feasible=False`` in the returned :class:`ExitPlan`. Callers
+        in Phase 7+ MUST therefore:
+
+          1. Read ``MarketDataBuffer.is_degraded(symbol)`` for every
+             can_exit_position check, and pass the result through.
+          2. Treat a missing or stale order book identically: an
+             explicit ``orderbook=None`` already maps to
+             ``LiquidityRejectReason.BOOK_MISSING`` /
+             ``feasible=False``, but a *stale* book that the buffer
+             has flagged DEGRADED but happens to still be in memory
+             must NOT be passed in with ``is_data_degraded=False``.
+             The buffer's degraded view is the single source of
+             truth.
+          3. Never invert the result. If ``feasible=False`` for any
+             reason - degraded data, slippage, no-exit-channel,
+             exit-too-slow, or regime block - Issue #7's No-Trade
+             Gate MUST refuse the attack candidate.
+
+        The per-symbol DATA_DEGRADED + can_exit_position interaction
+        is exercised by
+        ``tests/unit/test_can_exit_position.py
+        ::test_can_exit_position_rejects_when_data_degraded``.
         """
         cfg = self._config
         max_slip = max_slippage_pct if max_slippage_pct is not None else cfg.max_slippage_pct
@@ -253,7 +343,12 @@ class LiquidityFilter:
             max_seconds=max_secs,
         )
         self._exit_checks += 1
-        if emit_event and self._event_repo is not None:
+        # Resolve event-emission policy:
+        #   emit_event=True  -> always emit (per-call override)
+        #   emit_event=False -> always skip (per-call override)
+        #   emit_event=None  -> follow self._config.event_emit_enabled
+        should_emit = emit_event if emit_event is not None else self._config.event_emit_enabled
+        if should_emit and self._event_repo is not None:
             payload: dict[str, object] = {
                 "symbol": plan.symbol,
                 "side": plan.side.value,
@@ -279,6 +374,8 @@ class LiquidityFilter:
                 )
             )
             self._liquidity_checked_emitted += 1
+        else:
+            self._liquidity_checked_skipped += 1
         return plan
 
     # ------------------------------------------------------------------
@@ -292,7 +389,7 @@ class LiquidityFilter:
         planned_qty: float,
         market_data_buffer,
         regime: RegimeSnapshot | None = None,
-        emit_event: bool = True,
+        emit_event: bool | None = None,
     ) -> LiquidityDecision:
         """Build a :class:`LiquidityInput` from the Phase 4 buffer."""
         snap = market_data_buffer.snapshot(symbol, emit_event=False)
@@ -457,7 +554,7 @@ class LiquidityFilter:
         slippage_pct: float | None,
         exit_seconds: float | None,
         exit_plan: ExitPlan | None,
-        emit_event: bool,
+        emit_event: bool | None,
         forced_passed: bool | None = None,
     ) -> LiquidityDecision:
         # Deduplicate while preserving insertion order.
@@ -483,7 +580,12 @@ class LiquidityFilter:
             timestamp=request.timestamp if request.timestamp is not None else now_ms(),
         )
         self._evaluations += 1
-        if emit_event and self._event_repo is not None:
+        # Resolve event-emission policy (mirrors can_exit_position):
+        #   emit_event=True  -> always emit (per-call override)
+        #   emit_event=False -> always skip (per-call override)
+        #   emit_event=None  -> follow self._config.event_emit_enabled
+        should_emit = emit_event if emit_event is not None else self._config.event_emit_enabled
+        if should_emit and self._event_repo is not None:
             payload: dict[str, object] = {
                 "symbol": decision.symbol,
                 "side": decision.side.value,
@@ -515,6 +617,8 @@ class LiquidityFilter:
                 )
             )
             self._liquidity_checked_emitted += 1
+        else:
+            self._liquidity_checked_skipped += 1
         return decision
 
 
@@ -538,13 +642,21 @@ def can_exit_position(
     spread_pct: float | None = None,
     config: LiquidityConfig | None = None,
     event_repo: EventRepository | None = None,
-    emit_event: bool = False,
+    emit_event: bool | None = False,
 ) -> ExitPlan:
     """Stateless alternative to :meth:`LiquidityFilter.can_exit_position`.
 
     Tests use this for the bulk of the can_exit_position cases and
     Issue #7's No-Trade Gate calls it without keeping a filter
     instance around.
+
+    Same throughput-estimate caveats as the method form: when the
+    caller does not pass ``throughput_qty_per_sec``, the underlying
+    helper falls back to ``volume_5m / 300``, which is an UPPER
+    BOUND. **Issue #7 MUST apply a conservative discount on top.**
+    A degraded data view (``is_data_degraded=True``) already forces
+    ``feasible=False`` with reason ``DATA_DEGRADED``. See
+    :meth:`LiquidityFilter.can_exit_position` for the full contract.
     """
     f = LiquidityFilter(config=config, event_repo=event_repo)
     return f.can_exit_position(

@@ -35,6 +35,33 @@ class _Mutable(BaseModel):
 # This is the source of truth that Phase 7's Risk Engine and the
 # Universe / Liquidity filters all consult. We expose it as a frozen
 # dict at module level so tests can assert it directly.
+#
+# IMPORTANT - regime semantics, NOT trade authorisation. The values
+# below describe what the *market cycle* permits at the macro level.
+# They are NECESSARY but NOT sufficient for a real opening:
+#
+#   - ALLOW_ATTACK is a regime label, not a trade approval. A real
+#     attack-sized opening still requires Universe.eligible=True,
+#     Liquidity.passed=True, can_exit_position.feasible=True, T2+
+#     real-trade confirmation (Issue #6 Spec §20), Manipulation <= M1
+#     (Issue #6 Spec §21), and the Risk Engine's final word
+#     (Issue #7 Spec §27). Phase 5 ships only the gate; the trade
+#     decision is conjunctive across all later phases.
+#
+#   - ALLOW_SCOUT is the conservative fallback for ALT_RISK_OFF and
+#     for unknown inputs. It permits observation or a very small
+#     SCOUT candidate, NOT an attack-sized position and NOT right-tail
+#     amplification (right_tail_enabled is locked False through the
+#     limited-live phase). Issue #7 MUST further restrict this path:
+#     no ATTACK transition, no RIGHT_TAIL_AMPLIFY transition, scout
+#     size capped at the per-trade scout budget.
+#
+#   - OBSERVE_ONLY blocks all new openings; existing positions remain
+#     managed by Issue #9's Execution FSM.
+#
+#   - BLOCK_ALL is SYSTEMIC_RISK. No new opening of any kind.
+#
+# See ``app.core.enums.RiskPermission`` for the full semantic ladder.
 # ---------------------------------------------------------------------------
 REGIME_TO_RISK_PERMISSION: dict[MarketRegime, RiskPermission] = {
     MarketRegime.MEME_RISK_ON: RiskPermission.ALLOW_ATTACK,
@@ -126,6 +153,18 @@ class RegimeSnapshot(_Frozen):
         - alt_liquidity
         - risk_permission
         - reason_tags
+
+    .. warning::
+        ``risk_permission`` here is a **regime-cycle gate**, NOT a
+        trade authorisation. ``ALLOW_ATTACK`` only states that the
+        macro cycle is risk-on; a real opening still depends on the
+        Universe Filter, the Liquidity Filter, the can_exit_position
+        check, the Phase 6 scanners (Pre-Anomaly / Anomaly /
+        Real-Trade Confirmation / Manipulation), and the Phase 7
+        Risk Engine's final approval. ``ALLOW_SCOUT`` permits only
+        observation or a tiny SCOUT candidate; it does NOT authorise
+        ATTACK or RIGHT_TAIL_AMPLIFY transitions. See
+        :class:`app.core.enums.RiskPermission` for the full ladder.
     """
 
     market_regime: MarketRegime

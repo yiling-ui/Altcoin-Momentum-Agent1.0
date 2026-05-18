@@ -67,6 +67,17 @@ class LiquidityConfig(_Mutable):
     blocking_risk_permissions: tuple[RiskPermission, ...] = (
         RiskPermission.BLOCK_ALL,
     )
+    # Construct-time throttle for ``LIQUIDITY_CHECKED`` events. Defaults
+    # to ``True`` so Phase 5's boot drill, replay, and reflection paths
+    # observe every decision. Issue #6 / #7 high-frequency consumers
+    # (Top-200 scanner sweeping evaluate + can_exit_position twice per
+    # symbol per tick) will flip this to ``False`` to avoid bloating
+    # events.db at scan rate; a per-call ``emit_event=True`` override
+    # on :meth:`LiquidityFilter.evaluate` and
+    # :meth:`LiquidityFilter.can_exit_position` still lets monitoring
+    # write an on-demand audit-trail entry. Mirrors Phase 4's
+    # ``MarketDataBufferConfig.market_snapshot_event_emit_enabled``.
+    event_emit_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
