@@ -7,6 +7,158 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 3 - Exchange Gateway Read-Only
+
+#### Added
+- **`app/exchanges/` package** introducing the read-only Exchange Gateway
+  abstraction. The package never imports an exchange SDK and never opens
+  an outbound socket; this is asserted by
+  `tests/unit/test_phase3_no_network.py`.
+- **`ExchangeClientBase` abstract class** (`app/exchanges/base.py`):
+  - 6 abstract read-only methods: `get_symbols`, `get_orderbook`,
+    `get_recent_trades`, `get_funding_rate`, `get_open_interest`,
+    `get_account_snapshot`.
+  - 4 **concrete** write surfaces (`create_order`, `cancel_order`,
+    `set_leverage`, `set_margin_mode`) that **always** raise
+    `SafeModeViolation`. Subclasses inherit the refusal.
+  - `ExchangeHealth` value-object with state transitions
+    (`UNINITIALISED -> CONNECTED -> DEGRADED / RECONNECTING /
+    DISCONNECTED`), counters and an `is_data_trustworthy()` predicate.
+  - `WebSocketManager` skeleton (`connect / disconnect / subscribe /
+    unsubscribe`) that emits `DATA_UNRELIABLE` with the pending
+    subscription set on every drop. **No real socket is opened in
+    Phase 3.**
+  - Health transitions emit `EXCHANGE_CONNECTED` /
+    `EXCHANGE_DISCONNECTED` / `EXCHANGE_DEGRADED` events through
+    `EventRepository`.
+  - `_require_trustworthy(surface=...)` helper raises
+    `ExchangeConnectionError` whenever the link is not `CONNECTED`
+    (Spec §14.2 + §31).
+  - `READ_ONLY_METHODS` and `WRITE_SURFACE_METHODS` module-level
+    tuples used by the entrypoint and the test suite to assert the
+    Phase 3 contract.
+  - `assert_read_only()` boot-time guard.
+  - `reliability_tiers` static map documenting the default
+    `DataReliability` tier each surface returns (Spec §13.3).
+- **`BinanceClient` skeleton** (`app/exchanges/binance.py`):
+  - All 6 read methods raise `NotImplementedError` pointing at the
+    later phase that owns the real adapter (Phase 4 / 8 / 9).
+  - All 4 write methods inherit `SafeModeViolation` from the base
+    class (asserted by tests; the skeleton must NOT override them).
+  - Constructor refuses any `api_key` / `api_secret` (Spec §37 anti-leak).
+- **`MockExchangeClient`** (`app/exchanges/mock.py`):
+  - Deterministic in-memory implementation used by the entrypoint and
+    the test suite. **No network**.
+  - Optional `MockExchangeSeed` for fully predictable test fixtures.
+  - `simulate_disconnect` / `simulate_reconnect` /
+    `simulate_degraded` test hooks drive the No-Trade Gate paths.
+  - Tier-A surfaces refuse when not `CONNECTED`; tier-B REST surfaces
+    (`get_symbols`, `get_account_snapshot`) remain usable when
+    `DEGRADED` per Spec §13.3.
+- **Read-only data models** (`app/exchanges/models.py`): Pydantic v2
+  frozen models `ExchangeSymbol`, `OrderBook` (+ `OrderBookLevel`,
+  with bid/ask sort validation), `RecentTrade`, `FundingRate`,
+  `OpenInterest`, `AccountSnapshot`. Each carries an explicit
+  `reliability: DataReliability` field with the default tier per
+  surface.
+- **New core vocabulary**:
+  - `app/core/enums.ExchangeConnectionState` enum (`UNINITIALISED /
+    CONNECTED / DEGRADED / RECONNECTING / DISCONNECTED`) with an
+    `is_trustworthy` property.
+  - `app/core/enums.DataReliability.is_at_least()` helper for
+    consistent tier comparisons (Spec §13.3).
+  - `app/core/events.EventType.{EXCHANGE_CONNECTED,
+    EXCHANGE_DISCONNECTED, EXCHANGE_DEGRADED}`. `DATA_UNRELIABLE` was
+    already declared in Phase 1.
+  - `app/core/errors.SafeModeViolation` (subclass of
+    `SafetyViolation`).
+  - `app/core/errors.ExchangeError` and
+    `app/core/errors.ExchangeConnectionError`.
+- **Phase 3 boot self-check** in `python -m app.main`:
+  - Instantiates `MockExchangeClient(event_repo=repo, autostart=True)`,
+    runs `assert_read_only()`, **probes every banned write surface**
+    and refuses to start unless each one raises `SafeModeViolation`.
+  - Calls `get_symbols()` to prove the read path works.
+  - Registers an `exchange_link` health probe.
+  - Emits `EXCHANGE_CONNECTED` on start and
+    `EXCHANGE_DISCONNECTED` + `DATA_UNRELIABLE` on shutdown so
+    replay-based tests can confirm the lifecycle closed.
+  - Status banner now reports
+    `exchange=<name>/<state> exchange_symbols=N exchange_connected_events=1`.
+- **97 new unit tests**:
+  - `tests/unit/test_exchange_models.py` (15) - `DataReliability`
+    ordering (A>B>C>D), `is_at_least` helper,
+    `ExchangeConnectionState.is_trustworthy`, `OrderBook` sort
+    validation, frozen models, default reliability tiers per model.
+  - `tests/unit/test_exchange_base.py` (20) - cannot instantiate the
+    ABC directly; `READ_ONLY_METHODS == __abstractmethods__`; write
+    surfaces are concrete on the base class; `SafeModeViolation`
+    IS-A `SafetyViolation`; `ExchangeError` IS-A `AMARTError` and is
+    NOT a `SafetyViolation`; `assert_read_only` refuses when
+    `_live_orders_enabled=True`; `WebSocketManager` connect /
+    disconnect lifecycle and the `DATA_UNRELIABLE` event payload;
+    `ExchangeHealth` counters; `start` / `stop` / `_mark_degraded`
+    emit the matching events through `EventRepository`;
+    `_require_trustworthy` refuses when uninitialised / disconnected;
+    `reliability_tiers` contract; no network library imports.
+  - `tests/unit/test_binance_client.py` (20) - `name='binance'`;
+    refuses any `api_key` / `api_secret`; every read method raises
+    `NotImplementedError`; every write surface refuses with
+    `SafeModeViolation`; every read method is overridden on
+    `BinanceClient` itself; write surfaces NOT overridden (inherit
+    base refusal); module imports no network library.
+  - `tests/unit/test_mock_exchange_client.py` (28) - `autostart`
+    emits `EXCHANGE_CONNECTED`; default seed has BTCUSDT, ETHUSDT,
+    PEPEUSDT; orderbook / trades / funding / OI / account read
+    paths; `MockExchangeSeed` determinism; `simulate_disconnect`
+    emits `EXCHANGE_DISCONNECTED` + `DATA_UNRELIABLE`; tier-A
+    surfaces refused when `DEGRADED`; tier-B surfaces (symbols,
+    account_snapshot) ALLOWED when `DEGRADED`; both refused when
+    `DISCONNECTED`; `simulate_reconnect` restores trust + new
+    `EXCHANGE_CONNECTED`; write surfaces refuse; mock does NOT
+    override write surfaces; lifecycle smoke; no network library
+    imports.
+  - `tests/unit/test_phase3_no_network.py` (3) - `requirements.txt`
+    and `pyproject.toml` contain no exchange SDK / HTTP client; no
+    file under `app/` issues an `import` for any forbidden token.
+  - Existing `tests/unit/test_main_entrypoint.py` extended to assert
+    the Phase 3 banner fields and the new `EXCHANGE_CONNECTED` /
+    `EXCHANGE_DISCONNECTED` / `DATA_UNRELIABLE` events.
+
+#### Changed
+- `app/__init__.py` - `__phase__` is now `Phase 3 - Exchange Gateway
+  Read-Only`; `__version__` is `1.4.0a3`.
+- `app/main.py` - new `_assert_phase3_read_only(client)` guard that
+  probes every entry in `WRITE_SURFACE_METHODS` and raises
+  `SafeModeViolation` if any of them stops refusing. The existing
+  `_assert_phase1_safety()` check is unchanged. Banner extended with
+  `exchange=<name>/<state>`, `exchange_symbols=N`,
+  `exchange_connected_events=1`. `STATE_TRANSITION` reason updated to
+  `phase3_boot`. The exchange is stopped cleanly on shutdown
+  (`reason="phase3_shutdown"`), which emits `DATA_UNRELIABLE` +
+  `EXCHANGE_DISCONNECTED`.
+
+#### Not in Phase 3 (deferred)
+- Issue #4 - real Market Data Buffer; `BinanceClient` read methods
+  remain `NotImplementedError` until then.
+- Issue #5 - Regime / Universe / Liquidity engines.
+- Issue #6 - Pre-anomaly / Anomaly / Confirmation / Manipulation
+  scanners.
+- Issue #7 - full Risk Engine.
+- Issue #8 - Capital Flow Engine.
+- Issue #9 - real Execution FSM + Reconciliation; first place a real
+  `create_order` is *allowed* to exist, behind the Risk Engine.
+- Issue #10 - LLM, Telegram outbound, Replay diff reports, Reflection.
+
+#### Live trading risk
+**None.** Phase 3 ships only an abstract read-only gateway plus a
+deterministic in-memory mock. The four write surfaces always raise
+`SafeModeViolation`; the Phase 1 safety lock is unchanged; no exchange
+SDK / HTTP / WebSocket library is installed; no real API key is
+accepted by `BinanceClient`. Five layers of defence (config lock, boot
+assertion, Phase 3 read-only assertion, Risk Engine refusal, base-class
+write-surface refusal) are all unit-tested.
+
 ### Phase 2 - Event Sourcing and Database
 
 #### Added

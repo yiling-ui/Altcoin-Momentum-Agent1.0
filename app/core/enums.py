@@ -123,6 +123,58 @@ class DataReliability(str, Enum):
     C = "C"  # third-party aggregator
     D = "D"  # text / community / LLM inference
 
+    def is_at_least(self, threshold: "DataReliability") -> bool:
+        """Return True if this tier is >= the given threshold.
+
+        A is the strongest, D is the weakest. Spec §13.3 forbids using a
+        weak-tier signal alone to trigger an attack-grade decision; the
+        Risk Engine in Issue #7 calls this helper when adjudicating.
+        Phase 3 ships the helper next to the enum so all later phases
+        compare tiers consistently.
+        """
+        order = {
+            DataReliability.A: 4,
+            DataReliability.B: 3,
+            DataReliability.C: 2,
+            DataReliability.D: 1,
+        }
+        return order[self] >= order[threshold]
+
+
+# ---------------------------------------------------------------------------
+# Exchange connection state (Spec §14.2 - WebSocket / REST health)
+# ---------------------------------------------------------------------------
+class ExchangeConnectionState(str, Enum):
+    """Health of the WebSocket / REST link maintained by an ExchangeClient.
+
+    Phase 3 (Issue #3) introduces this enum. The state is used by:
+      - `ExchangeClientBase.health` to expose a single read-only health
+        snapshot to upstream modules.
+      - `MarketDataBuffer` (Issue #4) to mark data as `DATA_UNRELIABLE`
+        when the connection drops below CONNECTED.
+      - `RiskEngine` (Issue #7) as a No-Trade Gate input.
+
+    Mapping to data reliability (Spec §13.3):
+      CONNECTED      -> WebSocket originated data may be tier A
+      DEGRADED       -> only REST tier B is trustworthy
+      DISCONNECTED   -> no exchange data is trustworthy at all
+      RECONNECTING   -> data is stale until CONNECTED is regained
+      UNINITIALISED  -> client has never been started
+    """
+
+    UNINITIALISED = "uninitialised"
+    CONNECTED = "connected"
+    DEGRADED = "degraded"
+    RECONNECTING = "reconnecting"
+    DISCONNECTED = "disconnected"
+
+    @property
+    def is_trustworthy(self) -> bool:
+        """True if data sourced through this state can be considered
+        reliable enough to feed downstream decisioning. Only CONNECTED
+        is trustworthy in Phase 3."""
+        return self is ExchangeConnectionState.CONNECTED
+
 
 # ---------------------------------------------------------------------------
 # Incident level (Spec §38.1, §46.6)

@@ -32,7 +32,12 @@ from app.core.clock import now_ms
 class EventType(str, Enum):
     # ---- Market data ------------------------------------------------------
     MARKET_SNAPSHOT = "MARKET_SNAPSHOT"
-    DATA_UNRELIABLE = "DATA_UNRELIABLE"  # Issue #4 - Phase 4 concern, declared early
+    DATA_UNRELIABLE = "DATA_UNRELIABLE"  # Issue #4 - declared early; emitted from Phase 3 onward
+
+    # ---- Exchange Gateway (Phase 3 - Issue #3) ---------------------------
+    EXCHANGE_CONNECTED = "EXCHANGE_CONNECTED"
+    EXCHANGE_DISCONNECTED = "EXCHANGE_DISCONNECTED"
+    EXCHANGE_DEGRADED = "EXCHANGE_DEGRADED"
 
     # ---- Regime / Universe ------------------------------------------------
     REGIME_UPDATED = "REGIME_UPDATED"

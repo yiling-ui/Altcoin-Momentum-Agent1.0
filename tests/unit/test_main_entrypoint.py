@@ -4,6 +4,10 @@ The boot routine must:
     - run to completion (exit code 0)
     - never enable any safety flag
     - leave at least one event in the events.db
+    - exercise the Phase 3 read-only Exchange Gateway: emit one
+      EXCHANGE_CONNECTED event, prove `assert_read_only()` passes, and
+      refuse all four write surfaces.
+    - emit a DATA_UNRELIABLE + EXCHANGE_DISCONNECTED event on shutdown
 """
 
 from __future__ import annotations
@@ -37,8 +41,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 2 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 2 - Event Sourcing and Database" in captured
+    # Phase 3 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 3 - Exchange Gateway Read-Only" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -46,6 +50,10 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "exchange_live_orders=False" in captured
     assert "databases=5" in captured
     assert "capital_events=" in captured
+    # Phase 3 fields
+    assert "exchange=mock/connected" in captured
+    assert "exchange_symbols=" in captured
+    assert "exchange_connected_events=1" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -63,5 +71,11 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         assert EventType.TELEGRAM_COMMAND_RECEIVED in types
         # Phase 2: a paper-mode CAPITAL_DEPOSIT marker is emitted.
         assert EventType.CAPITAL_DEPOSIT in types
+        # Phase 3: the exchange lifecycle is logged.
+        assert EventType.EXCHANGE_CONNECTED in types
+        # The entrypoint stops the exchange cleanly, which emits the
+        # corresponding shutdown events.
+        assert EventType.EXCHANGE_DISCONNECTED in types
+        assert EventType.DATA_UNRELIABLE in types
     finally:
         conn.close()
