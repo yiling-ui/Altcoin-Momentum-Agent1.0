@@ -1,0 +1,108 @@
+"""Risk Engine skeleton (Spec §27, Issue #1, full impl in Issue #7).
+
+Phase 1 contract
+----------------
+The Risk Engine has *final authority*. No module may bypass it. In Phase 1
+we ship a minimal but real implementation that:
+
+    1. Refuses any action whose `live_trading_required` flag is True while
+       the system is not in a live mode (always the case in Phase 1).
+    2. Refuses any action requesting `right_tail_amplify=True` while
+       `right_tail_enabled` is False (always the case in Phase 1).
+    3. Approves anything else with a `paper_only` annotation, and writes
+       a `RISK_APPROVED` or `RISK_REJECTED` event when an `EventRepository`
+       is supplied.
+
+This skeleton is intentionally conservative: no thresholds, no portfolio
+heat, no circuit breaker. Those land with Issue #7.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.config.settings import Settings, get_settings
+from app.core.enums import TradingMode
+from app.core.events import Event, EventType
+from app.database.repositories import EventRepository
+
+
+@dataclass(frozen=True)
+class RiskRequest:
+    """Request submitted to the Risk Engine for adjudication."""
+
+    source_module: str
+    action: str
+    symbol: str | None = None
+    live_trading_required: bool = False
+    right_tail_amplify: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RiskDecision:
+    approved: bool
+    reasons: list[str]
+    request: RiskRequest
+
+    @property
+    def rejected(self) -> bool:
+        return not self.approved
+
+
+class RiskEngine:
+    """Phase 1 skeleton with hard-coded safety checks."""
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        event_repo: EventRepository | None = None,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self._event_repo = event_repo
+
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
+    def evaluate(self, request: RiskRequest) -> RiskDecision:
+        reasons: list[str] = []
+
+        if request.live_trading_required and not self._settings.live_trading_enabled:
+            reasons.append("live_trading_disabled")
+        if request.right_tail_amplify and not self._settings.right_tail_enabled:
+            reasons.append("right_tail_disabled")
+        if self._settings.trading_mode != TradingMode.PAPER.value and not (
+            self._settings.live_trading_enabled
+        ):
+            # Defence in depth: trading_mode promoted but live still off.
+            reasons.append("trading_mode_inconsistent")
+
+        approved = not reasons
+        if approved:
+            reasons = ["paper_only_skeleton_approval"]
+
+        decision = RiskDecision(approved=approved, reasons=reasons, request=request)
+        self._record(decision)
+        return decision
+
+    # ------------------------------------------------------------------
+    def _record(self, decision: RiskDecision) -> None:
+        if self._event_repo is None:
+            return
+        ev_type = EventType.RISK_APPROVED if decision.approved else EventType.RISK_REJECTED
+        self._event_repo.append(
+            Event(
+                event_type=ev_type,
+                source_module="risk_engine",
+                symbol=decision.request.symbol,
+                payload={
+                    "action": decision.request.action,
+                    "source_module": decision.request.source_module,
+                    "reasons": list(decision.reasons),
+                    "live_trading_required": decision.request.live_trading_required,
+                    "right_tail_amplify": decision.request.right_tail_amplify,
+                },
+            )
+        )

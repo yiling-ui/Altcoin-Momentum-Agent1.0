@@ -1,0 +1,44 @@
+# AMA-RT default configuration (Phase 1 - Safety Foundation).
+#
+# These values are loaded by app/config/settings.py and validated against the
+# Pydantic schema in app/config/schema.py. Any environment variables prefixed
+# with AMA_ override the matching key. Phase 1 hard-codes the four safety
+# flags below to their safe values regardless of input.
+
+mode:
+  trading_mode: paper            # paper | live_limited | live  (Phase 1: forced to paper)
+  live_trading_enabled: false    # Phase 1: forced false
+  right_tail_enabled: false      # Phase 1: forced false
+  llm_enabled: false             # Phase 1: forced false
+  exchange_live_order_enabled: false  # Phase 1: forced false
+
+logging:
+  level: INFO
+
+database:
+  data_dir: ./data
+  sqlite_subdir: sqlite
+  wal_mode: true
+
+exchange:
+  # Phase 1 does NOT instantiate any real exchange client.
+  name: binance
+  market_type: usdt_perpetual
+  symbols_limit: 200
+  isolated_margin_only: true
+  cross_margin_allowed: false
+
+telegram:
+  # Phase 1 ships an in-process command center skeleton only.
+  enabled: false
+  command_confirm_required:
+    resume: true
+    change_config: true
+    kill_all: false
+
+llm:
+  # Phase 1 does NOT call any LLM provider.
+  provider: deepseek
+  enabled: false
+  max_calls_per_hour: 100
+  allow_trade_decision: false
