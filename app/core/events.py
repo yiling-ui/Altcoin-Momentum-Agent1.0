@@ -53,7 +53,11 @@ class EventType(str, Enum):
     MANIPULATION_DETECTED = "MANIPULATION_DETECTED"
 
     # ---- LLM / Scoring ----------------------------------------------------
+    # LLM_INTERPRETED was declared in Phase 1 / 6; Phase 10C populates it.
     LLM_INTERPRETED = "LLM_INTERPRETED"
+    # Phase 10C - LLM Guarded Interpreter (Issue #10 Part 3)
+    LLM_DEGRADED = "LLM_DEGRADED"
+    LLM_SCHEMA_REJECTED = "LLM_SCHEMA_REJECTED"
     RIGHT_TAIL_SCORED = "RIGHT_TAIL_SCORED"
     OPPORTUNITY_GRADED = "OPPORTUNITY_GRADED"
 

@@ -7,6 +7,152 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 10C - LLM Guarded Interpreter (Issue #10 Part 3)
+
+**Version:** `1.4.0a10c` - Phase 10C - LLM Guarded Interpreter.
+
+Phase 10C adds the receive-only :mod:`app.llm` package: a sandboxed,
+schema-validated, never-trading LLM intelligence layer that
+compresses community / catalyst / narrative text into a small,
+strictly typed intelligence payload (Spec §22). The output is
+*purely informational*; it never carries a trade direction, a
+leverage, a target price, an order, a stop, or any other field that
+could move money. The Risk Engine remains the single gate.
+
+Public surface
+--------------
+
+  - `LLMGuardedInterpreter` - top-level orchestrator. Constructor
+    is keyword-only: `(*, client, event_repo=None, config=None,
+    cache=None, llm_enabled=False)`. `interpret(input)` NEVER
+    raises into the caller; every transport / schema / guardrail
+    failure becomes a degraded :class:`LLMInterpretationResult`.
+  - `LLMInterpreterConfig` - tunable thresholds (Spec §22.4
+    anomaly-score throttle: <60 -> SKIP, 60-75 -> LIGHT,
+    75-90 -> STANDARD, >=90 -> FULL).
+  - `LLMTokenBucket` - in-process Spec §22.4 throttle classifier.
+  - `LLMInterpretationInput` / `LLMInterpretationResult` - frozen
+    dataclasses; `to_payload()` is JSON-safe and provably free of
+    forbidden trade-action fields.
+  - `FakeLLMClient` - deterministic in-memory transport used by
+    tests AND the boot self-check.
+  - `DeepSeekClient` - refusal-only skeleton. Refuses unless
+    `llm_enabled=True` AND `api_key_provided=True`; refuses anyway
+    in Phase 10C. The real adapter ships behind Spec §41 Go/No-Go.
+  - `LLMCache` - LRU cache keyed on `(input_hash, prompt_version,
+    schema_version, model_name, throttle_tier, symbol)`. **Refuses
+    to store credential keys**.
+  - `validate_llm_output` - pure-function Spec §22.2 schema
+    validator. No external dependency (we deliberately do NOT add
+    `jsonschema` to `requirements.txt`).
+  - `sanitize_input_text` - light-touch input cleaner (NFC, control
+    chars, whitespace, max-len). Preserves prompt-injection markers
+    so the detector can still flag them.
+  - `detect_prompt_injection` - 12-pattern regex sniffer.
+  - `enforce_field_whitelist` - drops any output key outside the
+    Spec §22.2 closed schema.
+  - `strip_forbidden_fields` - drops + records any trade-action
+    key (`direction`, `leverage`, `position_size`, `target_price`,
+    `order_type`, `stop_price`, `take_profit`, `should_buy`,
+    `should_short`, `trade_decision`, `entry`, `exit`,
+    `liquidation_price`, `margin_mode`, `risk_budget`, `order`,
+    `signal_to_trade`).
+  - Three new EventType values: `LLM_INTERPRETED`, `LLM_DEGRADED`,
+    `LLM_SCHEMA_REJECTED`. The interpreter is the only Phase 10C
+    write surface; tests assert it is limited to these three event
+    types.
+
+Boot drill (`python -m app.main`)
+---------------------------------
+
+```
+[AMA-RT] Phase 10C - LLM Guarded Interpreter v1.4.0a10c mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  ... (Phase 1-10B fields unchanged) ... \
+  llm_interpreter_degraded=True llm_interpreter_reasons=llm_disabled \
+  llm_events=1 llm_degraded_count=1 llm_interpreted_events=0 \
+  llm_degraded_events=1 llm_schema_rejected_events=0 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+The boot self-check exercises the interpreter end-to-end against a
+deterministic :class:`FakeLLMClient` with `llm_enabled=False`. It
+asserts:
+
+  - `result.degraded == True`
+  - `'llm_disabled' in result.degraded_reason_values`
+  - `result.to_payload()` is free of forbidden trade-action fields
+  - `fake_llm_client.calls == 0` (the transport was NOT invoked)
+  - exactly one `LLM_DEGRADED` event was written to `events.db`
+
+Phase 10C boundary
+------------------
+
+1. **No real network call by default.** No `aiohttp` / `httpx` /
+   `requests` / `websockets` / `ccxt` / `binance` / `openai` /
+   `anthropic` / `deepseek` import anywhere under `app/llm/`. The
+   default transport is `FakeLLMClient`.
+2. **No write surface.** No file under `app/llm/` defines
+   `create_order` / `cancel_order` / `set_leverage` /
+   `set_margin_mode`.
+3. **No LLM-driven trade action.** Closed output schema; forbidden
+   fields stripped + recorded; result degraded if any forbidden
+   field was present.
+4. **No state-mutating component import.** No `RiskEngine`,
+   `ExecutionFSMDriver`, `Reconciler`, `CapitalFlowEngine`,
+   `IncidentRepository`, `MockExchangeClient`, `BinanceClient`,
+   `MarketDataBuffer`, `TelegramCommandCenter`, `RegimeEngine`.
+5. **No `os.environ` reads.** Credentials must be passed in
+   explicitly by the caller.
+6. **No hard-coded secret.** No `api_key` / `api_secret` /
+   `bot_token` parameter or concrete literal anywhere under
+   `app/llm/`.
+7. **No exception escapes.** The interpreter NEVER raises into the
+   caller.
+8. **No Telegram outbound.** Phase 10D owns that surface.
+9. **No Issue #10 Part 10D work.**
+10. **Phase 1 safety lock unchanged.** `llm_enabled` stays
+    `False` at boot.
+
+Tests
+-----
+
+Phase 10C adds nine new test files under `tests/unit/`:
+
+  - `test_llm_models.py` - vocabularies + result schema pinned
+  - `test_llm_schema.py` - validator behaviour
+  - `test_llm_prompts.py` - system prompt content + version pinned
+  - `test_llm_guardrails.py` - whitelist / forbidden / injection
+    detector / sanitizer
+  - `test_llm_cache.py` - LRU + credential refusal
+  - `test_llm_client.py` - FakeLLMClient + DeepSeekClient skeleton
+  - `test_llm_interpreter.py` - end-to-end (Issue acceptance #1-#18)
+  - `test_phase10c_boundary.py` - cumulative defence-in-depth
+  - `test_phase10c_no_network.py` - per-file AST scan
+
+`tests/unit/test_main_entrypoint.py` extended to assert the
+Phase 10C banner string and the LLM event counts.
+
+Live trading risk
+-----------------
+
+**None.** No new exchange SDK, no HTTP / WebSocket / LLM client, no
+Telegram bot library is added. The four `ExchangeClientBase` write
+surfaces continue to raise `SafeModeViolation`. Phase 1 safety
+lock remains in force.
+
+LLM overreach risk
+------------------
+
+**None.** Phase 10C does NOT introduce a real LLM transport. The
+`DeepSeekClient` is a refusal-only skeleton; even when
+`llm_enabled=True` and `api_key_provided=True` it raises
+`TransportError`. The result schema is closed; the guardrail
+strips every forbidden trade-action field; the orchestrator never
+calls the Risk Engine, the Execution FSM, the Capital Flow Engine,
+or any write surface.
+
+
 ### Phase 10B - Reflection Engine (Issue #10 Part 2)
 
 Phase 10B delivers the read-only Reflection Engine on top of the

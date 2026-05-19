@@ -1,24 +1,22 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 10B - Reflection Engine (Issue #10 Part 2).
-> **Paper / mock execution only.** Phase 10B adds the read-only
-> :mod:`app.reflection` package on top of the Phase 10A
-> :mod:`app.replay` substrate. The Reflection Engine consumes one
-> :class:`PaperTradeReplay` plus the surrounding Phase 10A risk /
-> state / incident replays plus the Phase 8.5 ``learning_ready``
-> payload, and produces one structured :class:`ReflectionResult`
-> with a typed ``mistake_tags`` list, deterministic MFE / MAE /
-> ``tail_contribution`` metrics (``None`` when data is insufficient,
-> never fabricated), and four :class:`QualityScore` axes
-> (``entry_quality``, ``exit_quality``, ``risk_process_quality``,
-> ``execution_quality``). Reflection opens **no socket**, imports
-> **no exchange SDK**, **no LLM client**, **no Telegram bot
-> library**, defines **no write surface**, calls **no**
-> ``EventRepository.append_event``, and never instantiates any
-> state-mutating component. **No free-form natural-language
-> reflection** is produced. Issue #10 Parts 10C (LLM Guarded
-> Interpreter) and 10D (Telegram outbound + Export commands) ship
-> in separate PRs; Issue #10 will be closed by Part 10D.
+> **Phase status:** Phase 10C - LLM Guarded Interpreter (Issue #10 Part 3).
+> **Paper / mock execution only.** Phase 10C adds the receive-only,
+> sandboxed :mod:`app.llm` package on top of every Phase 1-10B
+> contract. The :class:`LLMGuardedInterpreter` compresses
+> community / catalyst / narrative text into a small, **strictly
+> typed** intelligence payload (Spec §22). The output is *purely
+> informational*: it never carries a trade direction, a leverage,
+> a target price, an order, a stop, or any other field that could
+> move money. **The Risk Engine remains the single gate.** The
+> default boot path keeps ``llm_enabled=False`` (Phase 1 safety
+> lock) - the Phase 10C boot self-check exercises the orchestrator
+> against a deterministic :class:`FakeLLMClient` and produces a
+> degraded result tagged ``llm_disabled``, persisted as exactly one
+> ``LLM_DEGRADED`` event. The interpreter NEVER raises into the
+> caller; every transport / schema / guardrail failure is wrapped
+> into a degraded :class:`LLMInterpretationResult`. Issue #10 Part
+> 10D (Telegram outbound + Export commands) ships in a separate PR.
 >
 > The Phase 1 safety lock (`mode=paper`,
 > `live_trading_enabled=False`, `right_tail_enabled=False`,
@@ -26,7 +24,7 @@
 > every later boundary remain in force. The four
 > ``ExchangeClientBase`` write surfaces (``create_order``,
 > ``cancel_order``, ``set_leverage``, ``set_margin_mode``)
-> **continue to raise** ``SafeModeViolation`` and Phase 10B NEVER
+> **continue to raise** ``SafeModeViolation`` and Phase 10C NEVER
 > overrides them.
 
 ---
@@ -49,9 +47,99 @@ This is the implementation of the production specification in
 | Phase 8.5 - Learning-Ready Data Contract + Test Data Export | #8.5 | merged | `feature/phase-8-5-learning-ready-data-contract` (PR #20) |
 | Phase 9 - Execution FSM / Reconciliation | #9  | merged | `feature/phase-9-execution-fsm-reconciliation` (PR #21, hardening PR #22) |
 | Phase 10A - Replay Engine (Part 1 of Issue #10) | #10 (Part A) | merged | `feature/phase-10a-replay-engine` (PR #23) |
-| Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | this branch | `feature/phase-10b-reflection-engine` |
-| Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | open | - |
+| Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | merged | `feature/phase-10b-reflection-engine` (PR #24) |
+| Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | this branch | `feature/phase-10c-llm-guarded-interpreter` |
 | Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | open | - |
+
+## Phase 10C deliverable - LLM Guarded Interpreter (Issue #10 Part 3)
+
+Phase 10C adds one new package on top of Phase 10B:
+
+  - **`app/llm/`** - the receive-only, schema-validated, sandboxed
+    LLM intelligence layer. Public surface:
+
+| Surface | Contract |
+| --- | --- |
+| `LLMGuardedInterpreter(*, client, event_repo=, config=, cache=, llm_enabled=False)` | Receive-only orchestrator. NEVER raises; every failure becomes a degraded :class:`LLMInterpretationResult`. |
+| `interpret(LLMInterpretationInput) -> LLMInterpretationResult` | Pure entry point. The result carries only whitelisted intelligence fields plus safety-audit fields. |
+| `LLMInterpretationResult` | Frozen dataclass; `to_payload()` is JSON-safe and provably free of `direction` / `leverage` / `position_size` / `target_price` / etc. |
+| `FakeLLMClient` | Deterministic in-memory transport used by tests + the boot self-check. The default boot path uses this client. |
+| `DeepSeekClient` | Refusal-only skeleton. Refuses unless `llm_enabled=True` AND `api_key_provided=True`; refuses anyway in Phase 10C. The real adapter ships behind Spec §41 Go/No-Go. |
+| `LLMCache` | LRU cache keyed on `(input_hash, prompt_version, schema_version, model_name, throttle_tier, symbol)`. **Refuses to store credential keys**. |
+| `LLMTokenBucket` | Spec §22.4 anomaly-score throttle: `<60 -> SKIP`, `60-75 -> LIGHT`, `75-90 -> STANDARD`, `>=90 -> FULL`. |
+
+Output schema (Spec §22.2 - 10 closed fields):
+``narrative``, ``catalyst``, ``evidence_quality``, ``source_diversity``,
+``kol_concentration``, ``bot_risk``, ``hype_stage``,
+``contradictions``, ``risk_tags``, ``confidence``.
+
+Forbidden output fields (stripped + recorded in `stripped_fields`,
+result is degraded):
+``direction``, ``leverage``, ``position_size``, ``target_price``,
+``order_type``, ``stop_price``, ``take_profit``, ``should_buy``,
+``should_short``, ``trade_decision``, ``entry``, ``exit``,
+``liquidation_price``, ``margin_mode``, ``risk_budget``, ``order``,
+``signal_to_trade``.
+
+Audit events (the only Phase 10C write surface, into `events.db`):
+
+| Event | When |
+| --- | --- |
+| `LLM_INTERPRETED` | clean, schema-valid, non-degraded result |
+| `LLM_DEGRADED` | any degraded result (all short-circuit paths) |
+| `LLM_SCHEMA_REJECTED` | the schema validator returned errors |
+
+### Phase 10C boundary (every clause enforced by tests)
+
+1. **No real network call by default.** The default transport is
+   :class:`FakeLLMClient`. The :class:`DeepSeekClient` skeleton has
+   no socket / SDK / HTTP code paths and refuses on every call.
+2. **No write surface.** No file under `app/llm/` defines
+   `create_order` / `cancel_order` / `set_leverage` /
+   `set_margin_mode`.
+3. **No LLM-driven trade action.** The result schema is closed; any
+   model output outside the 10-field whitelist is dropped, any
+   forbidden trade-action field is stripped + recorded, and the
+   result is degraded.
+4. **No state-mutating component import.** No `RiskEngine`,
+   `ExecutionFSMDriver`, `Reconciler`, `CapitalFlowEngine`,
+   `IncidentRepository`, `MockExchangeClient`, `BinanceClient`,
+   `MarketDataBuffer`, `TelegramCommandCenter`, `RegimeEngine`.
+5. **No `os.environ` reads.** Credentials must be passed in
+   explicitly by the caller.
+6. **No hard-coded secret.** No `api_key` / `api_secret` /
+   `bot_token` parameter or concrete literal under `app/llm/`.
+7. **No exception escapes.** The interpreter wraps every transport
+   / schema / guardrail failure into a degraded result.
+8. **No Telegram outbound.** Phase 10D owns Telegram outbound.
+9. **No Issue #10 Part 10D work.** No export commands, no
+   `send_document`, no operator-allow-list bot.
+10. **The Phase 1 safety lock remains in force.** `llm_enabled`
+    stays `False` at boot; the boot self-check verifies the
+    interpreter short-circuits to degraded with the fake client
+    NEVER being invoked.
+
+### Boot drill (`python -m app.main`)
+
+Boot banner gains six Phase 10C fields:
+
+```
+... reflection_data_quality_notes=5 \
+    llm_interpreter_degraded=True \
+    llm_interpreter_reasons=llm_disabled \
+    llm_events=1 \
+    llm_degraded_count=1 \
+    llm_interpreted_events=0 \
+    llm_degraded_events=1 \
+    llm_schema_rejected_events=0 \
+    risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+A new `llm_guarded_interpreter` health probe is registered: OK
+when `llm_enabled=False` AND no clean (non-degraded) result has
+been produced on the boot path.
+
+---
 
 ## Phase 10B deliverable - Reflection Engine (Issue #10 Part 2)
 

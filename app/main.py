@@ -69,6 +69,12 @@ from app.reconciliation import (  # noqa: E402
     local_snapshot_from_paper_ledger,
     remote_snapshot_from_paper_ledger,
 )
+from app.llm import (  # noqa: E402
+    FakeLLMClient,
+    LLMGuardedInterpreter,
+    LLMInterpretationInput,
+    LLMInterpreterConfig,
+)
 from app.reflection import ReflectionEngine, TradeOutcome  # noqa: E402
 from app.regime import RegimeEngine  # noqa: E402
 from app.replay import (  # noqa: E402
@@ -832,6 +838,110 @@ def run() -> int:
         )
         # ----------------------------------------------------------
 
+        # ---- Phase 10C - LLM Guarded Interpreter boot self-check -
+        # Phase 10C ships a sandboxed, schema-validated, never-trading
+        # LLM intelligence layer. The boot drill exercises the
+        # orchestrator end-to-end against a deterministic FakeLLMClient
+        # WITH llm_enabled=False (the Phase 1 safety lock keeps it
+        # false). The interpreter MUST short-circuit to a degraded
+        # result tagged ``llm_disabled`` and write exactly one
+        # LLM_DEGRADED event to events.db. This proves:
+        #   (a) Phase 10C never opens a socket on the default boot
+        #       path,
+        #   (b) the runtime default is degraded even when the package
+        #       is wired in,
+        #   (c) the audit-event surface (LLM_INTERPRETED /
+        #       LLM_DEGRADED / LLM_SCHEMA_REJECTED) is alive.
+        boot_llm_payload = {
+            "narrative": "phase10c boot self-check stub",
+            "catalyst": "weak",
+            "evidence_quality": "C",
+            "source_diversity": 1,
+            "kol_concentration": 0.1,
+            "bot_risk": 0.1,
+            "hype_stage": "early",
+            "contradictions": [],
+            "risk_tags": [],
+            "confidence": 0.4,
+        }
+        fake_llm_client = FakeLLMClient(
+            payload=boot_llm_payload,
+            model_name="phase10c-fake",
+        )
+        llm_interpreter = LLMGuardedInterpreter(
+            client=fake_llm_client,
+            event_repo=repo,
+            config=LLMInterpreterConfig(),
+            llm_enabled=settings.llm_enabled,  # always False in paper mode
+        )
+        boot_llm_result = llm_interpreter.interpret(
+            LLMInterpretationInput(
+                source_text=(
+                    "phase10c boot drill: read-only intelligence layer "
+                    "self-check. no trade signal."
+                ),
+                symbol=boot_symbol,
+                opportunity_id="opp_phase10c_boot",
+                anomaly_score=82.0,
+                sources=("internal:boot_drill",),
+                correlation_id="phase10c-boot",
+            )
+        )
+        if not boot_llm_result.degraded:
+            raise RuntimeError(
+                "Phase 10C boot self-check: interpreter must produce a "
+                "degraded result when llm_enabled=False; got "
+                f"degraded={boot_llm_result.degraded}, reasons="
+                f"{boot_llm_result.degraded_reason_values}"
+            )
+        if "llm_disabled" not in boot_llm_result.degraded_reason_values:
+            raise RuntimeError(
+                "Phase 10C boot self-check: degraded reason must include "
+                f"'llm_disabled'; got {boot_llm_result.degraded_reason_values}"
+            )
+        # Defence in depth: the result must NEVER carry a forbidden
+        # trade-action field.
+        _boot_llm_payload_dict = boot_llm_result.to_payload()
+        for _forbidden in (
+            "direction", "leverage", "position_size", "target_price",
+            "order_type", "stop_price", "take_profit",
+            "should_buy", "should_short", "trade_decision",
+            "entry", "exit", "liquidation_price", "margin_mode",
+            "risk_budget", "order", "signal_to_trade",
+        ):
+            if _forbidden in _boot_llm_payload_dict:
+                raise RuntimeError(
+                    "Phase 10C boot self-check: result payload "
+                    f"unexpectedly carries forbidden field {_forbidden!r}"
+                )
+        if fake_llm_client.calls != 0:
+            raise RuntimeError(
+                "Phase 10C boot self-check: fake LLM client was called "
+                "even though llm_enabled=False; got "
+                f"calls={fake_llm_client.calls}"
+            )
+        boot_llm_event_count = (
+            llm_interpreter.counters.events_interpreted
+            + llm_interpreter.counters.events_degraded
+            + llm_interpreter.counters.events_schema_rejected
+        )
+        boot_llm_degraded_count = llm_interpreter.counters.degraded_results
+        # Register a Phase 10C health probe. OK when the interpreter
+        # has NOT been wired to a real transport AND has not produced
+        # any clean (non-degraded) result on the default boot path.
+        health.register(
+            "llm_guarded_interpreter",
+            lambda: (
+                HealthStatus.OK
+                if (
+                    not settings.llm_enabled
+                    and llm_interpreter.counters.clean_results == 0
+                )
+                else HealthStatus.DEGRADED
+            ),
+        )
+        # ----------------------------------------------------------
+
 
         overall, _ = health.evaluate()
         capital_count = repo.count_events(event_type=EventType.CAPITAL_DEPOSIT)
@@ -893,6 +1003,16 @@ def run() -> int:
         protection_entered_count = repo.count_events(
             event_type=EventType.PROTECTION_MODE_ENTERED
         )
+        # Phase 10C event counts.
+        llm_interpreted_count = repo.count_events(
+            event_type=EventType.LLM_INTERPRETED
+        )
+        llm_degraded_count = repo.count_events(
+            event_type=EventType.LLM_DEGRADED
+        )
+        llm_schema_rejected_count = repo.count_events(
+            event_type=EventType.LLM_SCHEMA_REJECTED
+        )
         stats = buffer.stats()
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
@@ -946,6 +1066,13 @@ def run() -> int:
             f"reflection_result={reflection_result} "
             f"reflection_mistake_tags={reflection_mistake_tag_count} "
             f"reflection_data_quality_notes={reflection_data_quality_note_count} "
+            f"llm_interpreter_degraded={boot_llm_result.degraded} "
+            f"llm_interpreter_reasons={','.join(boot_llm_result.degraded_reason_values) or 'none'} "
+            f"llm_events={boot_llm_event_count} "
+            f"llm_degraded_count={boot_llm_degraded_count} "
+            f"llm_interpreted_events={llm_interpreted_count} "
+            f"llm_degraded_events={llm_degraded_count} "
+            f"llm_schema_rejected_events={llm_schema_rejected_count} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )
