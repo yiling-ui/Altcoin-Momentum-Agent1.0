@@ -42,3 +42,13 @@ llm:
   enabled: false
   max_calls_per_hour: 100
   allow_trade_decision: false
+
+capital:
+  # Phase 8 Capital Flow Engine configuration.
+  # initial_capital is set per-deployment via environment or secrets.
+  initial_capital: 100.0
+  currency: USDT
+  # Profit harvest suggestion thresholds
+  harvest_suggest_at_2x: true
+  harvest_suggest_at_5x: true
+  harvest_suggest_at_10x: true

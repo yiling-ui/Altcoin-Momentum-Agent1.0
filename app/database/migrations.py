@@ -81,6 +81,31 @@ def _migrate_events_created_at(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE events SET created_at = timestamp WHERE created_at = 0")
 
 
+def _migrate_capital_snapshots_external_flow(conn: sqlite3.Connection) -> None:
+    """Phase 8 Issue #8 fix - add ``external_deposits_total`` and
+    ``principal_withdrawn_total`` columns to a Phase-7 capital_snapshots
+    table if missing. Default 0 preserves the legacy semantics for older
+    rows (no external deposits / principal withdrawals recorded).
+
+    Idempotent. Safe to run on a freshly-created Phase-8 schema (the
+    columns will already be present from CREATE TABLE).
+    """
+    if not _table_exists(conn, "capital_snapshots"):
+        return
+    cols = _table_columns(conn, "capital_snapshots")
+    with conn:
+        if "external_deposits_total" not in cols:
+            conn.execute(
+                "ALTER TABLE capital_snapshots "
+                "ADD COLUMN external_deposits_total REAL NOT NULL DEFAULT 0"
+            )
+        if "principal_withdrawn_total" not in cols:
+            conn.execute(
+                "ALTER TABLE capital_snapshots "
+                "ADD COLUMN principal_withdrawn_total REAL NOT NULL DEFAULT 0"
+            )
+
+
 def apply_schema(conn: sqlite3.Connection, schema_path: Path | None = None) -> None:
     """Apply the SQL DDL in `schema_path` (or the bundled events schema).
 
@@ -94,6 +119,8 @@ def apply_schema(conn: sqlite3.Connection, schema_path: Path | None = None) -> N
         conn.executescript(sql)
     if target == EVENTS_SCHEMA_FILE:
         _migrate_events_created_at(conn)
+    if target == DB_SCHEMA_FILES[DB_CAPITAL]:
+        _migrate_capital_snapshots_external_flow(conn)
 
 
 def migrate_database(name: str, conn: sqlite3.Connection) -> None:

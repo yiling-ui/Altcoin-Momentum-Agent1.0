@@ -7,6 +7,139 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 8 - Issue #8 review fix: External Capital Flow semantics
+
+Issue #8 review pointed out that the Phase-8 PR conflated several
+distinct capital concepts. This patch implements the full External
+Capital Flow vocabulary so the engine cannot mis-classify principal
+withdrawals as profit and cannot mis-classify external deposits as
+trading P&L.
+
+#### Capital semantics (hard rules)
+
+1. **External deposit is NOT trading profit.** A `CAPITAL_DEPOSIT`
+   bumps `external_deposits_total` and `exchange_equity`; it never
+   touches `withdrawn_profit` and never inflates `net_trading_pnl`.
+2. **Principal withdrawal is NOT a loss.** When a withdrawal exceeds
+   `available_profit` the excess lands in `principal_withdrawn_total`,
+   never in `withdrawn_profit`.
+3. **Profit withdrawal is NOT a drawdown.** `lifetime_account_value`
+   is invariant under withdrawals.
+4. **Risk Budget is based ONLY on `trading_capital`.** Already-
+   withdrawn profit and historical peaks never re-enter the budget.
+5. **Performance / `net_trading_pnl` excludes `external_deposits_total`.**
+   Reporting must use `net_trading_pnl`, not `lifetime_equity`, when
+   external deposits are present.
+6. **`initial_capital` is immutable after construction.** The engine
+   raises on any reassignment attempt.
+
+#### Formulas
+
+```
+net_contributed_capital = initial_capital
+                            + external_deposits_total
+                            - principal_withdrawn_total
+
+lifetime_account_value  = exchange_equity
+                            + withdrawn_profit
+                            + principal_withdrawn_total
+
+net_trading_pnl         = lifetime_account_value
+                            - initial_capital
+                            - external_deposits_total
+
+trading_capital         = exchange_equity
+risk_budget             = trading_capital
+```
+
+#### Added
+
+- `CapitalState.external_deposits_total` and
+  `CapitalState.principal_withdrawn_total` fields, plus the
+  computed properties `lifetime_account_value`,
+  `net_contributed_capital`, and `net_trading_pnl`.
+- `CapitalSnapshot` mirrors the new fields. The
+  `capital.db.capital_snapshots` table gains
+  `external_deposits_total` and `principal_withdrawn_total`
+  columns; `app/database/migrations.py` ships an idempotent
+  ALTER-TABLE for existing Phase-7 capital.db files.
+- `RebaseResult` now carries the full External Capital Flow audit
+  trail: `profit_part`, `principal_part`, `withdrawal_type`,
+  `available_profit_before`, plus before/after values for
+  `principal_withdrawn_total`, `external_deposits_total`,
+  `lifetime_account_value`, and `net_trading_pnl`.
+- `CapitalFlowEngine.deposit()` is now a full external-deposit
+  flow: it bumps `external_deposits_total`, sets
+  `is_rebase_in_progress=True` for the duration, emits the
+  full event trio (CAPITAL_DEPOSIT + CAPITAL_REBASE +
+  RISK_BUDGET_RECALCULATED), persists a snapshot, and returns
+  a `RebaseResult`. `withdrawn_profit` is never touched by a
+  deposit.
+- `CapitalFlowEngine.replay_capital_events` /
+  `CapitalFlowEngine.reconstruct_current_snapshot` rebuild a
+  `CapitalState` from the persisted CAPITAL_* event stream. The
+  reconstruction sorts by `(timestamp ASC, rowid ASC)` so events
+  emitted within the same millisecond replay in the order they
+  were inserted.
+- New convenience properties on `CapitalFlowEngine`:
+  `lifetime_account_value`, `net_contributed_capital`,
+  `net_trading_pnl`, `external_deposits_total`,
+  `principal_withdrawn_total`, `withdrawn_profit`. The setter for
+  `initial_capital` now raises `AttributeError` so the immutability
+  contract is enforced at the language level.
+- `CAPITAL_WITHDRAWAL` payload now carries `withdrawal_type`
+  (`"profit"` / `"principal"` / `"mixed"`), `profit_part`,
+  `principal_part`, `available_profit_before`,
+  `lifetime_account_value_before`, `initial_capital`, and
+  `external_deposits_total`. `PROFIT_HARVEST` is only emitted
+  when `profit_part > 0` so harvest analytics never see pure-
+  principal withdrawals. `CAPITAL_REBASE` payloads carry the full
+  External Capital Flow snapshot so a Replay engine can rebuild
+  state deterministically.
+- 25 new tests in `tests/unit/test_capital_flow_engine.py`
+  covering: profit-only withdrawal (Test 1), mixed withdrawal
+  (Test 2), pure-principal withdrawal, mid-stream deposit (Test 3),
+  deposit + trading P&L (Test 4), deposit + profit withdrawal
+  (Test 5), withdrawal exceeding available profit (Test 6),
+  rebase gating (Test 7 - REBASE_IN_PROGRESS plus
+  stop_unconfirmed / unknown_position post-rebase), event-
+  sourced reconstruction (Test 8), `initial_capital` immutability,
+  deposit-emits-full-event-trio, and CAPITAL_WITHDRAWAL payload
+  semantics.
+
+#### Changed
+
+- `app/capital/rebase.py::execute_rebase` now classifies a
+  withdrawal *before* mutating state: it computes
+  `available_profit = max(0, net_trading_pnl_before)` and splits
+  the withdrawal into `profit_part` and `principal_part`. Only
+  `profit_part` accumulates onto `withdrawn_profit`; the rest
+  lands on `principal_withdrawn_total`.
+- `app/capital/profit_harvest.py::suggest_harvest` accepts
+  optional `external_deposits_total` and
+  `principal_withdrawn_total` parameters. The 2x / 5x / 10x
+  multiplier ladder now triggers on the
+  `lifetime_account_value / net_contributed_capital` ratio so
+  external deposits never mis-trigger a harvest suggestion.
+  When both new parameters default to `0` the old formula is
+  preserved exactly.
+- `Risk Engine` already gates new opens via
+  `is_rebase_in_progress`; this remains the only place that
+  authorises resume. Clearing the flag does NOT auto-approve
+  new opens - the No-Trade Gate (stop_unconfirmed,
+  unknown_position, regime, liquidity, account tier, circuit
+  breakers, manipulation) still has final authority.
+
+#### Safety
+
+- No real withdrawal API. The engine only RECORDS withdrawals.
+- No live trading. Phase 1 safety lock unchanged.
+- No exchange write API. Phase 1 safety lock unchanged.
+- No LLM. Phase 1 safety lock unchanged.
+- No Issue #9 / #10 work shipped here.
+- `initial_capital` immutability is enforced at the language
+  level (setter raises `AttributeError`).
+
 ### Phase 7 - Issue #7 review fix: conservative throughput discount
 
 Issue #7 review pointed out that the original PR deferred the

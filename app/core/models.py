@@ -99,6 +99,44 @@ class PositionState(_Base):
 
 # Spec §11.5
 class CapitalState(_Base):
+    """Capital state with full External Capital Flow semantics (Issue #8 fix).
+
+    Field semantics:
+      - ``initial_capital``           : seed capital at engine construction. MUST
+                                        NOT change after construction.
+      - ``exchange_equity``           : current equity on the exchange.
+      - ``withdrawn_profit``          : cumulative *profit* portion of all
+                                        withdrawals. Pure profit, never includes
+                                        principal-portion of a withdrawal.
+      - ``principal_withdrawn_total`` : cumulative *principal* portion of all
+                                        withdrawals (Issue #8 fix - profit and
+                                        principal are tracked separately so
+                                        principal withdrawals never pollute
+                                        ``withdrawn_profit``).
+      - ``external_deposits_total``   : cumulative external/top-up deposits
+                                        recorded after construction. NOT trading
+                                        profit; excluded from net_trading_pnl
+                                        and from any performance metric.
+      - ``lifetime_equity``           : exchange_equity + withdrawn_profit.
+                                        Preserved for backwards compatibility
+                                        with Phase 1-7 callers.
+      - ``trading_capital``           : exchange_equity (= risk_budget_total).
+      - ``risk_budget_total``         : trading_capital. Always based on the
+                                        current exchange_equity, never on
+                                        historical peaks or already-withdrawn
+                                        profit (Spec §28.5 hard rule).
+
+    Computed properties:
+      - ``lifetime_account_value``  = exchange_equity + withdrawn_profit
+                                      + principal_withdrawn_total
+      - ``net_contributed_capital`` = initial_capital + external_deposits_total
+                                      - principal_withdrawn_total
+      - ``net_trading_pnl``         = lifetime_account_value - initial_capital
+                                      - external_deposits_total
+                                      (i.e. real trading P&L, with external
+                                      deposits NOT counted as profit).
+    """
+
     initial_capital: float
     exchange_equity: float
     withdrawn_profit: float = 0.0
@@ -107,14 +145,77 @@ class CapitalState(_Base):
     account_life_tier: AccountLifeTier = AccountLifeTier.B
     risk_budget_total: float = 0.0
     last_rebase_ts: int = 0
+    # Phase 8 Issue #8 fix - External Capital Flow tracking.
+    external_deposits_total: float = 0.0
+    principal_withdrawn_total: float = 0.0
 
     def recompute(self) -> None:
         """Apply Spec §28.2 invariants.
 
-        lifetime_equity = exchange_equity + withdrawn_profit
-        trading_capital = exchange_equity
-        risk_budget_total = trading_capital
+        lifetime_equity     = exchange_equity + withdrawn_profit
+        trading_capital     = exchange_equity
+        risk_budget_total   = trading_capital
+
+        ``principal_withdrawn_total`` and ``external_deposits_total`` feed the
+        computed properties below; they intentionally do NOT alter
+        ``risk_budget_total`` (already-withdrawn principal must not re-enter
+        the risk budget; external deposits flow through ``exchange_equity``
+        directly, not through ``withdrawn_profit``).
         """
         self.lifetime_equity = self.exchange_equity + self.withdrawn_profit
         self.trading_capital = self.exchange_equity
         self.risk_budget_total = self.trading_capital
+
+    # ------------------------------------------------------------------
+    # Phase 8 Issue #8 fix - External Capital Flow computed properties.
+    # ------------------------------------------------------------------
+    @property
+    def lifetime_account_value(self) -> float:
+        """Total dollars the account has ever held / disbursed.
+
+            lifetime_account_value = exchange_equity
+                                     + withdrawn_profit
+                                     + principal_withdrawn_total
+
+        This figure is invariant under withdrawals: pulling money out of the
+        exchange shifts equity into ``withdrawn_profit`` /
+        ``principal_withdrawn_total`` but the sum is unchanged. That is what
+        makes "提现不是亏损" (withdrawal is not a loss) measurable.
+        """
+        return (
+            self.exchange_equity
+            + self.withdrawn_profit
+            + self.principal_withdrawn_total
+        )
+
+    @property
+    def net_contributed_capital(self) -> float:
+        """Net principal injected by the operator.
+
+            net_contributed_capital = initial_capital
+                                      + external_deposits_total
+                                      - principal_withdrawn_total
+        """
+        return (
+            self.initial_capital
+            + self.external_deposits_total
+            - self.principal_withdrawn_total
+        )
+
+    @property
+    def net_trading_pnl(self) -> float:
+        """Real trading P&L, excluding external deposits and principal moves.
+
+            net_trading_pnl = lifetime_account_value
+                              - initial_capital
+                              - external_deposits_total
+
+        External deposits are NOT profit. Principal withdrawals are NOT loss.
+        Profit withdrawals are NOT drawdown. ``net_trading_pnl`` is the only
+        figure performance reporting must use (Issue #8 hard rule).
+        """
+        return (
+            self.lifetime_account_value
+            - self.initial_capital
+            - self.external_deposits_total
+        )
