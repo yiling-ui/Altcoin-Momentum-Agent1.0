@@ -24,6 +24,25 @@ Spec §27.2 conditions implemented here:
   - UniverseDecision.eligible -> reject when False.
   - LiquidityDecision -> reject when not passed.
   - LiquidityFilter.can_exit_position -> reject when not feasible.
+  - **Liquidity throughput conservative discount (Phase 7).** Phase 5
+    documents that ``can_exit_position`` returns an UPPER BOUND on
+    realisable throughput - ``volume_5m / 300s`` assumes the next 5
+    minutes will print at the same pace as the previous 5, that our
+    outflow does not crowd its own exit price, and that ATR / OI do
+    not expand into the exit window. None of that holds in a thinning
+    or panicking tape. The Risk Engine therefore re-checks every new
+    opening against the *discounted* exit time
+    ``estimated_exit_seconds / throughput_safety_factor`` and
+    refuses the request with
+    :attr:`RiskRejectReason.LIQUIDITY_THROUGHPUT_INSUFFICIENT` when
+    the discounted estimate exceeds ``max_exit_seconds``. The default
+    ``throughput_safety_factor`` is ``0.5`` (the Phase 5 throughput
+    is halved before being trusted for sizing). Issue #7 hard rule:
+    "Phase 7 must apply a conservative discount on top of
+    can_exit_position before allowing ATTACK / RIGHT_TAIL_AMPLIFY."
+    DATA_DEGRADED still fires first regardless of any feasible
+    plan; the discount is a defence-in-depth on top of, not a
+    replacement for, the Phase 5 / data-quality gates.
   - ManipulationLevel.M3 -> reject every new opening.
   - ManipulationLevel.M2 + attack_intent -> reject ATTACK / RTA.
   - TradeConfirmationLevel.T0/T1 + attack_intent -> reject attack.
@@ -83,6 +102,21 @@ class NoTradeGateInput:
     trade_confirmation_level: TradeConfirmationLevel | None = None
     daily_loss_breaker_state: CircuitBreakerState = CircuitBreakerState.CLOSED
     consecutive_loss_breaker_state: CircuitBreakerState = CircuitBreakerState.CLOSED
+    # Phase 7 conservative throughput discount (Issue #7).
+    # ``can_exit_position`` returns an UPPER BOUND on realisable
+    # throughput; the Risk Engine refuses to trust it directly. The
+    # safety factor is multiplicative on throughput - equivalently
+    # divisive on ``estimated_exit_seconds`` - so a value of 0.5
+    # doubles the exit-time estimate before comparing it to
+    # ``max_exit_seconds``. Default 0.5 matches the Phase 7 risk
+    # config; tests can override.
+    throughput_safety_factor: float = 0.5
+    # Maximum acceptable exit time in seconds for the discounted
+    # re-check. When ``None`` the Risk Engine derives it from the
+    # original :class:`ExitPlan` / :class:`LiquidityDecision`; when
+    # both are absent the discount re-check is skipped (the regular
+    # NO_EXIT_CHANNEL gate above is still in effect).
+    max_exit_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -215,6 +249,39 @@ def evaluate_no_trade_gate(
         )
 
     # ------------------------------------------------------------------
+    # 7b. Phase 7 conservative throughput discount on top of Phase 5's
+    # can_exit_position. Issue #7 hard rule: the Risk Engine MUST
+    # treat the Phase 5 throughput estimate as an UPPER BOUND and
+    # refuse new openings whose discounted exit time exceeds
+    # ``max_exit_seconds``. Defence-in-depth on top of the raw plan
+    # check above; DATA_DEGRADED / NO_EXIT_CHANNEL / LIQUIDITY_REJECTED
+    # already fired first if applicable.
+    # ------------------------------------------------------------------
+    if (
+        request.exit_plan is not None
+        and request.is_new_open
+        and request.throughput_safety_factor > 0.0
+        and request.throughput_safety_factor < 1.0
+        and request.exit_plan.estimated_exit_seconds is not None
+    ):
+        max_secs = _resolve_max_exit_seconds(request)
+        if max_secs is not None:
+            discounted = (
+                request.exit_plan.estimated_exit_seconds
+                / request.throughput_safety_factor
+            )
+            if discounted > max_secs:
+                reasons.append(
+                    RiskRejectReason.LIQUIDITY_THROUGHPUT_INSUFFICIENT
+                )
+                notes.append(
+                    f"discounted_exit_seconds={discounted:.2f}"
+                    f" > max_exit_seconds={max_secs:.2f}"
+                    f" (raw={request.exit_plan.estimated_exit_seconds:.2f},"
+                    f" safety_factor={request.throughput_safety_factor:.2f})"
+                )
+
+    # ------------------------------------------------------------------
     # 8. Phase 6 manipulation hard rules (Spec §21.3).
     # ------------------------------------------------------------------
     if (
@@ -264,3 +331,24 @@ def evaluate_no_trade_gate(
         reasons=tuple(reasons),
         notes=tuple(notes),
     )
+
+
+def _resolve_max_exit_seconds(request: NoTradeGateInput) -> float | None:
+    """Resolve the ceiling for the discounted exit-time check.
+
+    Phase 7 prefers the explicit ``max_exit_seconds`` on the request;
+    when it is missing we fall back to the Phase 5 LiquidityDecision's
+    ``estimated_exit_seconds`` (it was already <=
+    ``LiquidityConfig.max_exit_seconds`` for the original plan to be
+    feasible, so using it as the ceiling for the discounted re-check
+    is conservative). If neither is available the discount re-check
+    is skipped - the regular NO_EXIT_CHANNEL gate is still in effect.
+    """
+    if request.max_exit_seconds is not None:
+        return request.max_exit_seconds
+    if (
+        request.liquidity_decision is not None
+        and request.liquidity_decision.estimated_exit_seconds is not None
+    ):
+        return request.liquidity_decision.estimated_exit_seconds
+    return None

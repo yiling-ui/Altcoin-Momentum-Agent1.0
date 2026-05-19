@@ -131,6 +131,59 @@ The Phase 7 Risk Engine composes:
     5%). Rolls over on UTC date change. A winning trade does NOT
     auto-close either breaker; only an explicit `reset()` does.
 
+### Phase 7 conservative throughput discount (Issue #7 hard rule)
+
+Phase 5 documents that
+`LiquidityFilter.can_exit_position(...).estimated_exit_seconds` is
+an **upper bound** on realisable throughput - it assumes the next 5
+minutes will print at the same pace as the previous 5, that our
+outflow does not crowd its own exit price, and that ATR / OI do not
+expand into the exit window. None of that holds in a thinning or
+panicking tape. The Phase 7 Risk Engine therefore **MUST** apply a
+conservative discount on top of every Phase 5 plan before allowing
+ATTACK / RIGHT_TAIL_AMPLIFY.
+
+The discount is implemented inside the No-Trade Gate, not Phase 5:
+
+  - `RiskEngine(throughput_safety_factor=0.5)` is the engine-wide
+    default. Per-`RiskRequest` overrides are supported. Allowed
+    range is `(0.0, 1.0]`; the engine raises `ValueError` outside
+    that range.
+  - When a `RiskRequest` carries an :class:`ExitPlan` and is_new_open
+    is `True`, the gate computes `discounted_exit_seconds =
+    estimated_exit_seconds / throughput_safety_factor` and refuses
+    the request with the typed reject reason
+    :attr:`RiskRejectReason.LIQUIDITY_THROUGHPUT_INSUFFICIENT` when
+    the discounted estimate exceeds the configured ceiling
+    (`request.max_exit_seconds`, falling back to the original
+    plan's `estimated_exit_seconds`).
+  - The discount is **defence-in-depth on top of, not a replacement
+    for, the Phase 5 / data-quality gates**. `DATA_DEGRADED`,
+    `NO_EXIT_CHANNEL`, and `LIQUIDITY_REJECTED` all fire before the
+    discount check, so a stale or unfeasible plan is still rejected
+    immediately.
+  - The factor is recorded on every `RISK_APPROVED` /
+    `RISK_REJECTED` audit row (`throughput_safety_factor`,
+    `max_exit_seconds`) so Reflection (Issue #10) can reproduce
+    every decision from `events.db` alone.
+
+The reuse policy (per Issue #7 review): if a future Phase 5 PR ever
+exposes a `throughput_safety_factor` on `LiquidityConfig`, the
+Phase 7 engine should consume that field directly instead of
+defining its own. As of this PR no such field exists on
+`LiquidityConfig`, so Phase 7 owns the factor.
+
+Pinned by `tests/unit/test_risk_engine_phase7.py`:
+`test_throughput_safety_factor_default_is_one_half`,
+`test_raw_feasible_plan_rejected_when_discounted_exceeds_ceiling`,
+`test_raw_feasible_plan_passes_when_discounted_under_ceiling`,
+`test_data_degraded_blocks_even_when_raw_plan_is_feasible`,
+`test_per_request_safety_factor_override_honoured`,
+`test_engine_level_safety_factor_override_honoured`,
+`test_no_trade_gate_throughput_discount_directly`,
+`test_audit_payload_includes_throughput_safety_factor`,
+`test_throughput_safety_factor_invalid_rejected`.
+
 The engine writes one `RISK_APPROVED` or `RISK_REJECTED` event per
 call. The Phase 7 audit payload extends Phase 6's with
 `account_tier`, `is_new_open`, `regime`, `risk_permission`,

@@ -451,6 +451,7 @@ class RiskRejectReason(str, Enum):
     EXCHANGE_DISCONNECTED = "exchange_disconnected"
     DAILY_LOSS_BREAKER_OPEN = "daily_loss_breaker_open"
     CONSECUTIVE_LOSS_BREAKER_OPEN = "consecutive_loss_breaker_open"
+    LIQUIDITY_THROUGHPUT_INSUFFICIENT = "liquidity_throughput_insufficient"
     ACCOUNT_TIER_HALT = "account_tier_halt"
     ACCOUNT_TIER_NO_NEW_OPEN = "account_tier_no_new_open"
     ACCOUNT_TIER_NO_RIGHT_TAIL = "account_tier_no_right_tail"

@@ -132,6 +132,16 @@ class RiskRequest:
       ``capital.db.capital_snapshots``.
     - account_tier_override: optional explicit tier override (tests
       pass this without populating equity numbers).
+    - throughput_safety_factor: per-request override of the
+      conservative-discount factor applied on top of the Phase 5
+      ``can_exit_position`` throughput estimate. ``None`` (default)
+      defers to ``RiskEngine.throughput_safety_factor`` (default 0.5).
+      A value of 0.5 doubles the exit-time estimate before comparing
+      it to ``max_exit_seconds``. Issue #7 hard rule: the engine MUST
+      treat ``volume_5m / 300s`` as an UPPER BOUND.
+    - max_exit_seconds: ceiling for the discounted re-check. When
+      ``None`` the engine derives it from the supplied
+      ``LiquidityDecision`` / ``ExitPlan``.
     """
 
     source_module: str
@@ -156,6 +166,15 @@ class RiskRequest:
     current_equity: float | None = None
     initial_capital: float | None = None
     account_tier_override: AccountLifeTier | None = None
+    # Phase 7 Issue #7 fix: conservative throughput discount applied
+    # on top of LiquidityFilter.can_exit_position. Default mirrors
+    # ``RiskEngine.throughput_safety_factor`` (0.5). Per-request
+    # override lets tests exercise edge cases without re-instantiating
+    # the engine. ``max_exit_seconds`` overrides the ceiling used by
+    # the discounted re-check; when ``None`` the engine derives it
+    # from the supplied ``LiquidityDecision`` / ``ExitPlan``.
+    throughput_safety_factor: float | None = None
+    max_exit_seconds: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -194,6 +213,7 @@ class RiskEngine:
         *,
         consecutive_loss_breaker: ConsecutiveLossCircuitBreaker | None = None,
         daily_loss_breaker: DailyLossCircuitBreaker | None = None,
+        throughput_safety_factor: float = 0.5,
     ) -> None:
         self._settings = settings or get_settings()
         self._event_repo = event_repo
@@ -213,6 +233,16 @@ class RiskEngine:
                 max_daily_loss_pct=risk_cfg.max_daily_loss_pct,
             )
         )
+        # Phase 7 Issue #7 fix: conservative throughput discount.
+        # Spec §27 requires Phase 7 to apply this discount on top of
+        # the Phase 5 ``can_exit_position`` upper-bound estimate
+        # before allowing ATTACK / RIGHT_TAIL_AMPLIFY. Default 0.5.
+        if not (0.0 < throughput_safety_factor <= 1.0):
+            raise ValueError(
+                "throughput_safety_factor must be in (0.0, 1.0]; "
+                f"got {throughput_safety_factor}"
+            )
+        self._throughput_safety_factor = throughput_safety_factor
 
     # ------------------------------------------------------------------
     @property
@@ -226,6 +256,14 @@ class RiskEngine:
     @property
     def daily_loss_breaker(self) -> DailyLossCircuitBreaker:
         return self._daily_loss_breaker
+
+    @property
+    def throughput_safety_factor(self) -> float:
+        """Conservative discount applied on top of Phase 5's
+        ``can_exit_position`` throughput estimate before allowing
+        ATTACK / RIGHT_TAIL_AMPLIFY (Issue #7 hard rule). Default
+        0.5; per-request overrides honoured."""
+        return self._throughput_safety_factor
 
     # ------------------------------------------------------------------
     # Public hooks for Issue #8 (Capital Flow): record realised PnL so
@@ -311,6 +349,12 @@ class RiskEngine:
             trade_confirmation_level=request.trade_confirmation_level,
             daily_loss_breaker_state=self._daily_loss_breaker.state,
             consecutive_loss_breaker_state=self._consecutive_loss_breaker.state,
+            throughput_safety_factor=(
+                request.throughput_safety_factor
+                if request.throughput_safety_factor is not None
+                else self._throughput_safety_factor
+            ),
+            max_exit_seconds=request.max_exit_seconds,
         )
         gate_decision = evaluate_no_trade_gate(gate_input)
         for reason in gate_decision.reasons:
@@ -442,6 +486,12 @@ class RiskEngine:
                         if decision.request.exchange_connection_state is not None
                         else None
                     ),
+                    "throughput_safety_factor": (
+                        decision.request.throughput_safety_factor
+                        if decision.request.throughput_safety_factor is not None
+                        else self._throughput_safety_factor
+                    ),
+                    "max_exit_seconds": decision.request.max_exit_seconds,
                 },
             )
         )

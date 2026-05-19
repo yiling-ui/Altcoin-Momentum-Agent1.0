@@ -7,6 +7,90 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 7 - Issue #7 review fix: conservative throughput discount
+
+Issue #7 review pointed out that the original PR deferred the
+Phase 5 ``can_exit_position`` upper-bound discount to Issue #8 / #9.
+That is wrong - Spec §27.2 + §19.2 require the Risk Engine to apply
+the conservative discount itself. This commit moves the discount on
+to the Phase 7 No-Trade Gate, where Issue #7 actually wants it.
+
+#### Added
+
+- ``RiskEngine.throughput_safety_factor`` (default ``0.5``) and a
+  matching ``throughput_safety_factor: float | None`` field on
+  :class:`RiskRequest`. Allowed range is ``(0.0, 1.0]``; the engine
+  raises ``ValueError`` outside that range. Per-request overrides
+  are honoured.
+- ``RiskRequest.max_exit_seconds`` (optional) - ceiling for the
+  discounted re-check. When ``None`` the engine derives it from the
+  supplied :class:`LiquidityDecision` / :class:`ExitPlan`.
+- ``NoTradeGateInput.throughput_safety_factor`` and
+  ``NoTradeGateInput.max_exit_seconds`` so the gate can be driven
+  directly by tests / replay.
+- :attr:`RiskRejectReason.LIQUIDITY_THROUGHPUT_INSUFFICIENT` typed
+  reject reason: fires when
+  ``estimated_exit_seconds / throughput_safety_factor`` exceeds the
+  resolved ``max_exit_seconds`` ceiling on a new opening.
+- ``RISK_APPROVED`` / ``RISK_REJECTED`` audit payload now carries
+  ``throughput_safety_factor`` and ``max_exit_seconds`` so
+  Reflection (Issue #10) can reproduce the decision.
+- README "Phase 7 conservative throughput discount" subsection that
+  explains the Issue #7 hard rule, the resolution policy
+  (``RiskRequest.throughput_safety_factor`` -> engine default), and
+  the reuse rule for any future Phase 5
+  ``LiquidityConfig.throughput_safety_factor``.
+
+#### Changed
+
+- ``app/risk/no_trade_gate.py`` - the Phase 5 ``can_exit_position``
+  output is now treated as an upper bound. The gate runs the raw
+  feasibility check first (``NO_EXIT_CHANNEL`` /
+  ``LIQUIDITY_REJECTED`` / ``DATA_DEGRADED`` still fire as before)
+  and then runs the discounted re-check on every new opening with a
+  feasible plan. Step ordering is deterministic so reflective tools
+  see the most severe / earliest reason at index 0.
+- ``app/risk/engine.py`` - ``RiskEngine.__init__`` accepts the new
+  keyword. Audit payload extended.
+- README + CHANGELOG explicit: "Risk Engine treats liquidity
+  throughput as an upper bound and applies a conservative safety
+  factor before allowing ATTACK / RIGHT_TAIL_AMPLIFY."
+
+#### Reuse policy
+
+If a future Phase 5 PR ever adds ``throughput_safety_factor`` to
+``LiquidityConfig``, the Phase 7 engine MUST consume that field
+directly instead of defining its own. As of this commit no such
+field exists on ``LiquidityConfig`` and the
+``app/liquidity/`` package is unchanged.
+
+#### Tests
+
+**+9 new tests on top of the 714 from the Phase 7 PR = 723 total,
+all passing.**
+
+| Test | Pins |
+| --- | --- |
+| ``test_throughput_safety_factor_default_is_one_half`` | Default factor is 0.5. |
+| ``test_throughput_safety_factor_invalid_rejected`` | (0.0, 1.0] enforced; constructor raises ``ValueError`` outside that range. |
+| ``test_raw_feasible_plan_rejected_when_discounted_exceeds_ceiling`` | Issue #7 review fix: 40s raw + factor 0.5 -> 80s discounted -> REJECT with ``liquidity_throughput_insufficient``. |
+| ``test_raw_feasible_plan_passes_when_discounted_under_ceiling`` | 10s raw + factor 0.5 -> 20s discounted -> APPROVE. |
+| ``test_data_degraded_blocks_even_when_raw_plan_is_feasible`` | Issue #7 review fix: feasible plan + degraded data -> still rejected with ``data_degraded``. |
+| ``test_no_trade_gate_throughput_discount_directly`` | Direct ``evaluate_no_trade_gate(...)`` regression so the discount is independently pinned at the gate level. |
+| ``test_per_request_safety_factor_override_honoured`` | Per-request ``throughput_safety_factor=1.0`` (no discount) approves the same input that 0.5 would refuse. |
+| ``test_engine_level_safety_factor_override_honoured`` | ``RiskEngine(throughput_safety_factor=0.9)`` approves a 40s/60s plan. |
+| ``test_audit_payload_includes_throughput_safety_factor`` | The factor is on the persisted ``RISK_APPROVED`` audit row. |
+
+#### Live trading risk
+
+**None.** This commit only adds defensive plumbing: a new
+multiplicative discount, a new typed reject reason, two new
+optional ``RiskRequest`` fields, and audit-payload entries. No new
+mode flag, no loosened safety lock, no new dependency, no new
+write surface, no new network surface, no LLM. The Phase 1 safety
+lock, the Phase 3 read-only invariant, the Phase 4 / 5 / 6
+boundaries remain unchanged.
+
 ### Phase 7 - State Machine Risk Engine
 
 #### Added

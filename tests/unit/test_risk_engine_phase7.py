@@ -478,3 +478,195 @@ def test_legacy_phase1_request_still_approved():
     )
     assert decision.approved
     assert decision.reasons == ["paper_only_skeleton_approval"]
+
+
+
+
+# ===========================================================================
+# Issue #7 review fix: conservative throughput discount
+# ===========================================================================
+from app.liquidity.models import Side  # noqa: E402  (local import for clarity)
+from app.risk.no_trade_gate import NoTradeGateInput, evaluate_no_trade_gate  # noqa: E402
+
+
+def _feasible_exit_plan(*, exit_seconds: float = 30.0) -> ExitPlan:
+    """Build a Phase 5 :class:`ExitPlan` whose raw view is feasible.
+
+    Used by the Issue #7 review-fix tests: the raw plan is feasible
+    (Phase 5 thinks the position can be flattened in
+    ``exit_seconds`` seconds at <= max_slippage_pct), but the Phase 7
+    Risk Engine must STILL refuse when the discounted re-check
+    fails.
+    """
+    return ExitPlan(
+        symbol="PEPEUSDT",
+        side=Side.LONG,
+        qty=1.0,
+        feasible=True,
+        estimated_slippage_pct=0.001,
+        estimated_exit_seconds=exit_seconds,
+        cleared_qty=1.0,
+        weighted_avg_fill_price=100.0,
+        reject_reasons=(),
+    )
+
+
+def test_throughput_safety_factor_default_is_one_half():
+    """Issue #7 review fix: the engine must default to a conservative
+    throughput discount of 0.5."""
+    engine = RiskEngine()
+    assert engine.throughput_safety_factor == 0.5
+
+
+def test_throughput_safety_factor_invalid_rejected():
+    import pytest
+
+    with pytest.raises(ValueError):
+        RiskEngine(throughput_safety_factor=0.0)
+    with pytest.raises(ValueError):
+        RiskEngine(throughput_safety_factor=-0.1)
+    with pytest.raises(ValueError):
+        RiskEngine(throughput_safety_factor=1.5)
+
+
+def test_raw_feasible_plan_rejected_when_discounted_exceeds_ceiling():
+    """Issue #7 review fix: raw can_exit_position is feasible, but
+    after the conservative throughput discount it would exceed the
+    configured exit-time ceiling. The Risk Engine MUST reject the
+    attack candidate."""
+    engine = RiskEngine()
+    # Raw plan is 40s; max_exit_seconds is 60s -> raw passes.
+    # With safety_factor=0.5 the discounted estimate is 80s -> reject.
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="open_attack",
+            symbol="PEPEUSDT",
+            attack_intent=True,
+            exit_plan=_feasible_exit_plan(exit_seconds=40.0),
+            max_exit_seconds=60.0,
+        )
+    )
+    assert decision.rejected
+    assert "liquidity_throughput_insufficient" in decision.reasons
+
+
+def test_raw_feasible_plan_passes_when_discounted_under_ceiling():
+    """Sanity: when the discounted estimate is comfortably under the
+    ceiling, no rejection fires from the new gate."""
+    engine = RiskEngine()
+    # 10s raw, doubled = 20s. Ceiling 60s -> approved.
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="open_attack",
+            symbol="PEPEUSDT",
+            attack_intent=True,
+            exit_plan=_feasible_exit_plan(exit_seconds=10.0),
+            max_exit_seconds=60.0,
+            regime_snapshot=_regime(RiskPermission.ALLOW_ATTACK),
+            trade_confirmation_level=TradeConfirmationLevel.T3,
+            manipulation_level=ManipulationLevel.M0,
+        )
+    )
+    assert decision.approved
+    assert "liquidity_throughput_insufficient" not in decision.reasons
+
+
+def test_data_degraded_blocks_even_when_raw_plan_is_feasible():
+    """Issue #7 review fix: degraded=True must keep the engine from
+    approving a new opening even if the raw can_exit_position plan
+    looks feasible. DATA_DEGRADED fires regardless of the discount."""
+    engine = RiskEngine()
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="open_attack",
+            symbol="PEPEUSDT",
+            attack_intent=True,
+            is_data_degraded=True,
+            exit_plan=_feasible_exit_plan(exit_seconds=10.0),
+            max_exit_seconds=60.0,
+        )
+    )
+    assert decision.rejected
+    assert "data_degraded" in decision.reasons
+
+
+def test_no_trade_gate_throughput_discount_directly():
+    """Driving evaluate_no_trade_gate directly so the discount logic
+    is also pinned at the gate level (the engine adds Phase 1 / Phase
+    6 reasons on top, which can mask the gate result in the
+    higher-level test)."""
+    decision = evaluate_no_trade_gate(
+        NoTradeGateInput(
+            symbol="PEPEUSDT",
+            attack_intent=True,
+            exit_plan=_feasible_exit_plan(exit_seconds=40.0),
+            max_exit_seconds=60.0,
+            throughput_safety_factor=0.5,
+        )
+    )
+    assert not decision.allowed
+    from app.core.enums import RiskRejectReason as _RR  # local import
+
+    assert _RR.LIQUIDITY_THROUGHPUT_INSUFFICIENT in decision.reasons
+
+
+def test_per_request_safety_factor_override_honoured():
+    """The default factor is 0.5 but a per-request override is
+    honoured. With factor=1.0 (no discount), a 40s raw plan against
+    a 60s ceiling MUST pass."""
+    engine = RiskEngine()
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="open_attack",
+            symbol="PEPEUSDT",
+            attack_intent=True,
+            exit_plan=_feasible_exit_plan(exit_seconds=40.0),
+            max_exit_seconds=60.0,
+            throughput_safety_factor=1.0,  # no discount
+            regime_snapshot=_regime(RiskPermission.ALLOW_ATTACK),
+            trade_confirmation_level=TradeConfirmationLevel.T3,
+            manipulation_level=ManipulationLevel.M0,
+        )
+    )
+    assert decision.approved
+
+
+def test_engine_level_safety_factor_override_honoured():
+    """A loose engine-level factor (e.g. 0.9) is also honoured."""
+    engine = RiskEngine(throughput_safety_factor=0.9)
+    assert engine.throughput_safety_factor == 0.9
+    # 40s / 0.9 ~ 44.4s, still under 60s -> approved.
+    decision = engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="open_attack",
+            symbol="PEPEUSDT",
+            attack_intent=True,
+            exit_plan=_feasible_exit_plan(exit_seconds=40.0),
+            max_exit_seconds=60.0,
+            regime_snapshot=_regime(RiskPermission.ALLOW_ATTACK),
+            trade_confirmation_level=TradeConfirmationLevel.T3,
+            manipulation_level=ManipulationLevel.M0,
+        )
+    )
+    assert decision.approved
+
+
+def test_audit_payload_includes_throughput_safety_factor(events_repo):
+    """Reflection (Issue #10) must be able to read the safety factor
+    that was applied for any historic decision."""
+    engine = RiskEngine(event_repo=events_repo)
+    engine.evaluate(
+        RiskRequest(
+            source_module="strategy",
+            action="probe",
+            symbol="PEPEUSDT",
+            attack_intent=False,
+        )
+    )
+    [event] = events_repo.list(event_type=EventType.RISK_APPROVED)
+    assert event.payload["throughput_safety_factor"] == 0.5
