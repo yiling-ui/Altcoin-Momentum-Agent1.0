@@ -1,35 +1,29 @@
-"""AMA-RT entrypoint (Phase 10A - Replay Engine).
+"""AMA-RT entrypoint (Phase 10B - Reflection Engine).
 
 Run with:
 
     python -m app.main
 
-This entrypoint DOES NOT trade. Phase 10A wires the read-only
-Replay Engine into the boot drill on top of the Phase 9
-Execution FSM + Reconciliation drill. After the paper-mode order
-has been driven through POSITION_OPEN and a clean reconciliation
-pass has landed, Replay reconstructs:
+This entrypoint DOES NOT trade. Phase 10B wires the read-only
+Reflection Engine into the boot drill on top of the Phase 10A
+Replay self-check. After the paper-mode order has been driven
+through POSITION_CLOSED and Replay has reconstructed the
+lifecycle, Reflection produces ONE structured
+:class:`ReflectionResult` for the boot trade.
 
-  - the paper trade lifecycle keyed by the boot client_order_id,
-  - the boot CAPITAL_DEPOSIT marker,
-  - the bootstrap RISK_APPROVED decision,
-  - any P0 incidents (boot drill expects zero),
-  - the boot STATE_TRANSITION ladder for the first eligible symbol,
-  - the boot Telegram /status command,
-  - the P0 latched-pause invariant against the boot's clean
-    reconciliation pass.
-
-Every Phase 1-9 contract stays in force:
+Every Phase 1-10A contract stays in force:
 
   - The five Phase 1 safety flags remain locked.
   - The four Phase 3 ExchangeClientBase write surfaces still raise
-    SafeModeViolation - Phase 10A NEVER overrides them. Paper-mode
+    SafeModeViolation - Phase 10B NEVER overrides them. Paper-mode
     state lives in a separate :class:`PaperLedger`.
   - Phase 8.5 redaction / export contract is unchanged.
   - LLM remains disabled; Telegram outbound remains deferred to
     Issue #10 Part 10D.
-  - Replay is read-only - it never writes to events.db, never
-    instantiates an exchange client, never opens a socket.
+  - Replay (Phase 10A) is read-only - it never writes to events.db.
+  - Reflection (Phase 10B) is read-only - it consumes the Replay
+    output, never writes to events.db, never opens a socket, never
+    instantiates a state-mutating component.
 """
 
 from __future__ import annotations
@@ -75,6 +69,7 @@ from app.reconciliation import (  # noqa: E402
     local_snapshot_from_paper_ledger,
     remote_snapshot_from_paper_ledger,
 )
+from app.reflection import ReflectionEngine, TradeOutcome  # noqa: E402
 from app.regime import RegimeEngine  # noqa: E402
 from app.replay import (  # noqa: E402
     P0LatchedPauseInvariantReport,
@@ -770,6 +765,73 @@ def run() -> int:
         replay_invariant_held = invariant.held
         # ----------------------------------------------------------
 
+        # ---- Phase 10B - Reflection Engine boot self-check -------
+        # Phase 10B is read-only. The Reflection Engine consumes the
+        # Phase 10A Replay output produced above (a clean
+        # close_paper_trade lifecycle, no P0 incidents) plus the
+        # Phase 8.5 learning_ready payload. It produces one
+        # ReflectionResult; Phase 10D Telegram outbound (a separate
+        # PR) will consume the payload directly.
+        reflection_engine = ReflectionEngine(replay=replay)
+        boot_reflection = reflection_engine.reflect_paper_trade(
+            client_order_id=boot_order.client_order_id,
+        )
+        # Sanity: the boot lifecycle is a clean Phase 9 paper trade
+        # closed at break-even (realized_pnl=0 in the boot drill). We
+        # therefore expect the result to be BREAKEVEN, not WIN/LOSS.
+        if boot_reflection.result is not TradeOutcome.BREAKEVEN:
+            raise RuntimeError(
+                "Phase 10B boot self-check: paper trade reflection "
+                f"result must be breakeven; got {boot_reflection.result.value}"
+            )
+        if boot_reflection.client_order_id != boot_order.client_order_id:
+            raise RuntimeError(
+                "Phase 10B boot self-check: reflection client_order_id "
+                "must match the boot order's client_order_id."
+            )
+        if not boot_reflection.source_event_ids:
+            raise RuntimeError(
+                "Phase 10B boot self-check: reflection must reference "
+                "at least one source event id."
+            )
+        # The boot drill emits a deterministic happy-path lifecycle
+        # without slippage / execution-delay / late-entry signals so
+        # none of the Issue-required mistake_tags should fire.
+        # The diagnostic INSUFFICIENT_DATA tag MAY land because the
+        # boot lifecycle has no virtual_trade_plan / signal_snapshot
+        # attached, which is an honest "we cannot tell" signal.
+        non_diagnostic_tags = {
+            t for t in boot_reflection.mistake_tags
+            if t.value not in {
+                "insufficient_data",
+                "no_lifecycle_observed",
+                "incident_during_lifecycle",
+            }
+        }
+        if non_diagnostic_tags:
+            raise RuntimeError(
+                "Phase 10B boot self-check: clean boot drill must not "
+                f"fire any issue-required mistake_tags; got {non_diagnostic_tags}"
+            )
+        reflection_mistake_tag_count = len(boot_reflection.mistake_tags)
+        reflection_data_quality_note_count = len(
+            boot_reflection.data_quality_notes
+        )
+        reflection_setup = boot_reflection.setup
+        reflection_result = boot_reflection.result.value
+        # Register a Phase 10B health probe. The probe is OK when the
+        # reflection result is BREAKEVEN/WIN and no issue-required
+        # mistake_tag fired (diagnostic tags do not flip the probe).
+        health.register(
+            "reflection_engine",
+            lambda: (
+                HealthStatus.OK
+                if not non_diagnostic_tags
+                else HealthStatus.DEGRADED
+            ),
+        )
+        # ----------------------------------------------------------
+
 
         overall, _ = health.evaluate()
         capital_count = repo.count_events(event_type=EventType.CAPITAL_DEPOSIT)
@@ -880,6 +942,10 @@ def run() -> int:
             f"replay_telegram_commands={replay_telegram_command_count} "
             f"replay_state_transitions={replay_state_transition_count} "
             f"replay_p0_latched_pause_invariant={replay_invariant_held} "
+            f"reflection_setup={reflection_setup} "
+            f"reflection_result={reflection_result} "
+            f"reflection_mistake_tags={reflection_mistake_tag_count} "
+            f"reflection_data_quality_notes={reflection_data_quality_note_count} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )
