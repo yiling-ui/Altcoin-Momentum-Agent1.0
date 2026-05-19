@@ -458,6 +458,8 @@ class RiskRejectReason(str, Enum):
     ACCOUNT_TIER_PAPER_ONLY = "account_tier_paper_only"
     RIGHT_TAIL_FROM_PRINCIPAL_FORBIDDEN = "right_tail_from_principal_forbidden"
     LOSING_POSITION_CANNOT_AMPLIFY = "losing_position_cannot_amplify"
+    # Phase 8 (Issue #8) - Capital Flow Engine.
+    REBASE_IN_PROGRESS = "rebase_in_progress"
 
 
 # ---------------------------------------------------------------------------

@@ -53,6 +53,16 @@ class LLMConfig(BaseModel):
     allow_trade_decision: bool = False
 
 
+class CapitalConfig(BaseModel):
+    """Schema for capital section in defaults.yaml (Phase 8)."""
+
+    initial_capital: float = 100.0
+    currency: str = "USDT"
+    harvest_suggest_at_2x: bool = True
+    harvest_suggest_at_5x: bool = True
+    harvest_suggest_at_10x: bool = True
+
+
 class DefaultsConfig(BaseModel):
     """Schema for `app/config/defaults.yaml`."""
 
@@ -62,6 +72,7 @@ class DefaultsConfig(BaseModel):
     exchange: ExchangeConfig = Field(default_factory=ExchangeConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    capital: CapitalConfig = Field(default_factory=CapitalConfig)
 
 
 class RiskThresholds(BaseModel):

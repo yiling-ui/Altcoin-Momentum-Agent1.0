@@ -214,9 +214,14 @@ class RiskEngine:
         consecutive_loss_breaker: ConsecutiveLossCircuitBreaker | None = None,
         daily_loss_breaker: DailyLossCircuitBreaker | None = None,
         throughput_safety_factor: float = 0.5,
+        capital_flow_engine: object | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._event_repo = event_repo
+        # Phase 8: optional reference to the CapitalFlowEngine so the
+        # Risk Engine can check ``is_rebase_in_progress`` and auto-populate
+        # equity/initial_capital on requests that omit them.
+        self._capital_flow_engine = capital_flow_engine
         # Phase 7: circuit breakers are part of the engine instance so
         # tests / Issue #8 can record realised PnL onto the same engine
         # that adjudicates new requests. Defaults match the YAML.
@@ -283,6 +288,21 @@ class RiskEngine:
         will populate it from ``capital.db``."""
         self._daily_loss_breaker.initial_capital = initial_capital
 
+    def set_capital_flow_engine(self, engine: object) -> None:
+        """Attach a CapitalFlowEngine instance (Phase 8).
+
+        Once attached, the Risk Engine will:
+          - Check ``engine.is_rebase_in_progress`` and reject new opens.
+          - Auto-populate current_equity / initial_capital on requests
+            that omit them (using the engine's state).
+        """
+        self._capital_flow_engine = engine
+
+    @property
+    def capital_flow_engine(self) -> object | None:
+        """The attached CapitalFlowEngine, or None."""
+        return self._capital_flow_engine
+
     # ------------------------------------------------------------------
     def evaluate(self, request: RiskRequest) -> RiskDecision:
         reasons: list[str] = []
@@ -303,6 +323,14 @@ class RiskEngine:
             self._settings.live_trading_enabled
         ):
             reasons.append(RiskRejectReason.TRADING_MODE_INCONSISTENT.value)
+
+        # ----------------------------------------------------------
+        # 1b. Phase 8 - Capital Rebase in progress blocks new opens.
+        #     Spec §28.4 hard rule: "Rebase 前禁止新开仓".
+        # ----------------------------------------------------------
+        if request.is_new_open and self._capital_flow_engine is not None:
+            if getattr(self._capital_flow_engine, "is_rebase_in_progress", False):
+                reasons.append(RiskRejectReason.REBASE_IN_PROGRESS.value)
 
         # ----------------------------------------------------------
         # 2. Phase 6 hard rules - byte-compatible with Phase 6.
@@ -416,11 +444,23 @@ class RiskEngine:
     def _resolve_tier(self, request: RiskRequest) -> AccountLifeTier | None:
         if request.account_tier_override is not None:
             return request.account_tier_override
-        if request.current_equity is None or request.initial_capital is None:
+        # Phase 8: auto-populate from CapitalFlowEngine if available.
+        current_equity = request.current_equity
+        initial_capital = request.initial_capital
+        if self._capital_flow_engine is not None:
+            if current_equity is None:
+                current_equity = getattr(
+                    self._capital_flow_engine, "trading_capital", None
+                )
+            if initial_capital is None:
+                initial_capital = getattr(
+                    self._capital_flow_engine, "initial_capital", None
+                )
+        if current_equity is None or initial_capital is None:
             return None
         return classify_account_tier(
-            current_equity=request.current_equity,
-            initial_capital=request.initial_capital,
+            current_equity=current_equity,
+            initial_capital=initial_capital,
         )
 
     # ------------------------------------------------------------------
