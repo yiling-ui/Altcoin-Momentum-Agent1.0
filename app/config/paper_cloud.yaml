@@ -1,0 +1,113 @@
+# AMA-RT Phase 11B - Cloud Paper Trading test configuration.
+#
+# This file controls the Phase 11B cloud paper-mode supervisor. It is
+# READ ONLY by the supervisor; it does NOT affect the Phase 1 safety
+# lock (defaults.yaml + _apply_phase1_safety_lock are the single
+# source of truth for trading_mode / live_trading_enabled /
+# right_tail_enabled / llm_enabled / exchange_live_order_enabled).
+#
+# Hard rules (per Phase 11B brief):
+#   - trading_mode MUST be "paper"
+#   - live_trading_enabled MUST be False
+#   - right_tail_enabled MUST be False
+#   - exchange_live_order_enabled MUST be False
+#   - llm_enabled is "false_or_guarded" (Phase 1 lock keeps it False
+#     at boot; the supervisor refuses to start otherwise)
+#   - real_order_enabled MUST be False
+#
+# The supervisor asserts every clause above on every boot. Any drift
+# raises SafetyViolation and the cloud process exits non-zero.
+
+paper_cloud:
+  # Hard expectations - the supervisor will refuse to start if these
+  # do not match the resolved Settings. They are repeated here so a
+  # cloud operator can grep this file and see the contract.
+  trading_mode: paper
+  live_trading_enabled: false
+  right_tail_enabled: false
+  exchange_live_order_enabled: false
+  llm_enabled: false
+  real_order_enabled: false
+
+  # Acceptance test duration. Phase 11B brief allows 7 or 15 days; the
+  # synthetic acceptance dry-run uses ``acceptance_dry_run_minutes``
+  # instead so the test loop can finish under a minute on CI.
+  paper_test_duration_days: 7
+  acceptance_dry_run_minutes: 1
+
+  # Daily reporting cadence + output directory (under settings.data_dir).
+  daily_report_enabled: true
+  daily_report_subdir: reports/daily
+  daily_report_filename_template: "{date}-paper-report.md"
+
+  # Auto-export cadence. Phase 8.5 TestDataExportService is the single
+  # entry point for redacted bundles.
+  export_enabled: true
+  export_interval_hours: 24
+  export_subdir: reports/exports
+  export_range_label: "24h"
+  export_type_filter: "all"
+  # First-boot acceptance gate: immediately run /export_test_data 24h
+  # so the operator sees a fresh manifest + summary on the first
+  # successful boot.
+  export_on_boot: true
+
+  # Telegram outbound configuration. Phase 11B keeps the FakeTelegramClient
+  # as the default. Set ``telegram_outbound_enabled: true`` ONLY when the
+  # Spec §41 Go/No-Go gate has landed AND a real transport ships in a
+  # separate PR. The refusal-only TelegramHttpClient still raises on
+  # every call regardless.
+  telegram_report_enabled: true
+  telegram_outbound_enabled: false
+  telegram_token_loaded: false
+  telegram_chat_id: "phase11b_cloud"
+
+  # Health-check cadence (seconds). The supervisor evaluates every wired
+  # health probe at this interval. The acceptance dry-run forces one tick.
+  health_check_interval_seconds: 60
+
+  # Incident drill harness. The supervisor runs every drill below on
+  # every acceptance boot. Each drill is *isolated*: it builds its own
+  # disposable wiring so the main paper loop is not perturbed.
+  incident_drill_enabled: true
+  incident_drills:
+    - stop_unconfirmed
+    - unknown_position
+    - data_degraded
+    - p0_ghost_position
+    - p0_unattached_stop
+    - rebase_in_progress
+    - telegram_export_failure
+    - llm_degraded
+
+  # Defence-in-depth env-var guard. The supervisor reads each of these
+  # AMA_* env vars (the same set Phase 1 settings.py already consumes)
+  # and refuses to start if any is set to a value that would imply a
+  # live-trading intent. Phase 1's _apply_phase1_safety_lock would
+  # bind-coerce these anyway; the env-guard is a louder pre-flight so
+  # cloud operators see the failure in their deploy logs.
+  env_guard:
+    enabled: true
+    refuse_on_dangerous_value: true
+    inspected_env_vars:
+      - AMA_TRADING_MODE
+      - AMA_LIVE_TRADING_ENABLED
+      - AMA_RIGHT_TAIL_ENABLED
+      - AMA_LLM_ENABLED
+      - AMA_EXCHANGE_LIVE_ORDER_ENABLED
+    # The supervisor refuses to start if it observes any of these
+    # credentials in the process environment. Phase 11B never reads
+    # these values; they are only inspected for *presence*. A cloud
+    # operator who needs to attach a real transport in a future phase
+    # MUST land a Go/No-Go gate first.
+    forbidden_credential_env_vars:
+      - AMA_EXCHANGE_API_KEY
+      - AMA_EXCHANGE_API_SECRET
+      - AMA_TELEGRAM_BOT_TOKEN
+      - AMA_DEEPSEEK_API_KEY
+      - BINANCE_API_KEY
+      - BINANCE_API_SECRET
+      - TELEGRAM_BOT_TOKEN
+      - DEEPSEEK_API_KEY
+      - OPENAI_API_KEY
+      - ANTHROPIC_API_KEY
