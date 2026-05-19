@@ -1,16 +1,22 @@
-"""AMA-RT entrypoint (Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract).
+"""AMA-RT entrypoint (Phase 9 - Execution FSM Reconciliation).
 
 Run with:
 
     python -m app.main
 
-This entrypoint DOES NOT trade. Phase 8.5 ships passive data
-plumbing only - the Phase 1-8 boot drill is preserved unchanged.
-The banner now advertises Phase 8.5 / v1.4.0a8.5 so operators see
-which contract is in force; no behavioural change to the boot
-path itself. See ``docs/PHASE_8_5_TELEGRAM_EXPORT_CONTRACT.md`` and
-``app/learning/`` / ``app/exports/`` for the new surfaces. The
-five Phase 1 safety flags remain locked.
+This entrypoint DOES NOT trade. Phase 9 wires the Execution FSM
+driver and the Reconciliation loop into the boot drill so a single
+paper-mode order is taken from IDLE through POSITION_OPEN and a
+clean reconciliation pass is emitted. Every Phase 1-8.5 contract
+stays in force:
+
+  - The five Phase 1 safety flags remain locked.
+  - The four Phase 3 ExchangeClientBase write surfaces still raise
+    SafeModeViolation - Phase 9 NEVER overrides them. Paper-mode
+    state lives in a separate :class:`PaperLedger`.
+  - Phase 8.5 redaction / export contract is unchanged.
+  - LLM remains disabled; Telegram outbound remains deferred to
+    Issue #10.
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ from app import __phase__, __version__  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
 from app.core.clock import now_ms  # noqa: E402
 from app.core.constants import PROJECT_NAME  # noqa: E402
-from app.core.enums import ExecutionState, TradeState, TradeStateTrigger  # noqa: E402
+from app.core.enums import Direction, ExecutionState, TradeState, TradeStateTrigger  # noqa: E402
 from app.core.errors import SafeModeViolation, SafetyViolation  # noqa: E402
 from app.core.events import Event, EventType  # noqa: E402
 from app.database.connection import DatabaseSet, PHASE2_DATABASES  # noqa: E402
@@ -36,12 +42,26 @@ from app.exchanges import MockExchangeClient  # noqa: E402
 from app.exchanges.base import WRITE_SURFACE_METHODS  # noqa: E402
 from app.exchanges.mock import MockExchangeSeed  # noqa: E402
 from app.exchanges.models import RecentTrade, TradeSide  # noqa: E402
-from app.execution.fsm import ExecutionFSM  # noqa: E402
+from app.execution.fsm import ExecutionFSM, ExecutionFSMDriver  # noqa: E402
+from app.execution.models import (  # noqa: E402
+    OrderIntent,
+    OrderKind,
+    OrderRequest,
+    OrderSide,
+    side_for_direction,
+)
+from app.execution.paper_ledger import PaperLedger  # noqa: E402
+from app.incidents.repository import IncidentRepository  # noqa: E402
 from app.liquidity import LiquidityFilter, Side as LiquiditySide  # noqa: E402
 from app.manipulation import ManipulationDetector  # noqa: E402
 from app.market_data import MarketDataBuffer  # noqa: E402
 from app.monitoring.health import HealthChecker, HealthStatus  # noqa: E402
 from app.monitoring.metrics import MetricsRegistry  # noqa: E402
+from app.reconciliation import (  # noqa: E402
+    Reconciler,
+    local_snapshot_from_paper_ledger,
+    remote_snapshot_from_paper_ledger,
+)
 from app.regime import RegimeEngine  # noqa: E402
 from app.risk.engine import RiskEngine, RiskRequest  # noqa: E402
 from app.scanner import AnomalyScanner, PreAnomalyScanner  # noqa: E402
@@ -94,6 +114,27 @@ def _assert_phase3_read_only(client) -> None:
         raise SafeModeViolation(
             f"{client.name}.{fn_name} did NOT refuse a probe call. "
             f"Phase 3 contract demands SafeModeViolation. Refusing to start."
+        )
+
+
+def _assert_phase9_no_live_writes(driver: ExecutionFSMDriver) -> None:
+    """Defence-in-depth: refuse to start if Phase 9 driver somehow flipped
+    a flag that would let a real order land. Today the construction-time
+    refusals in :class:`ExecutionFSMDriver` already enforce this; this is
+    the boot-time mirror so monitoring sees an explicit assertion line.
+    """
+    settings = driver._settings  # noqa: SLF001 - intentional cross-module probe
+    if settings.trading_mode != "paper":
+        raise SafeModeViolation(
+            "ExecutionFSMDriver requires trading_mode=paper at boot."
+        )
+    if settings.live_trading_enabled:
+        raise SafeModeViolation(
+            "Phase 9 forbids live_trading_enabled at boot."
+        )
+    if settings.exchange_live_order_enabled:
+        raise SafeModeViolation(
+            "Phase 9 forbids exchange_live_order_enabled at boot."
         )
 
 
@@ -451,7 +492,7 @@ def run() -> int:
         state_machine.transition_to(
             TradeState.OBSERVE,
             trigger=TradeStateTrigger.SIGNAL,
-            reasons=("phase8_5_boot",),
+            reasons=("phase9_boot",),
         )
         decision = risk.evaluate(
             RiskRequest(
@@ -495,10 +536,113 @@ def run() -> int:
                 payload={
                     "from": fsm.state.value,
                     "to": ExecutionState.IDLE.value,
-                    "reason": "phase8_5_boot",
+                    "reason": "phase9_boot",
                 },
             )
         )
+
+        # ---- Phase 9 - Execution FSM driver + Reconciliation ----
+        # Build an in-process IncidentRepository (writes incidents.db)
+        # and an ExecutionFSMDriver wired against the Risk Engine and
+        # the in-process paper ledger. The driver is paper-mode by
+        # construction; the four ExchangeClientBase write surfaces
+        # remain SafeModeViolation refusals.
+        incidents = IncidentRepository(
+            incidents_conn=dbs.incidents,
+            event_repo=repo,
+        )
+        paper_ledger = PaperLedger(initial_equity=0.0)
+        execution_driver = ExecutionFSMDriver(
+            risk_engine=risk,
+            event_repo=repo,
+            paper_ledger=paper_ledger,
+            settings=settings,
+            protection_hook=incidents,
+        )
+        _assert_phase9_no_live_writes(execution_driver)
+
+        # Drive ONE paper-mode order from IDLE through POSITION_OPEN.
+        # Use the first exchange symbol so the boot drill runs even
+        # when the mock exposes a different symbol set in a future PR.
+        boot_symbol = (
+            exchange_symbols[0].symbol if exchange_symbols else "BOOT"
+        )
+        boot_order = OrderRequest(
+            client_order_id=f"phase9_boot_{int(now_ms())}",
+            symbol=boot_symbol,
+            side=side_for_direction(Direction.LONG, is_close=False),
+            kind=OrderKind.LIMIT,
+            qty=0.001,
+            limit_price=100.0,
+            intent=OrderIntent.NEW_OPEN,
+            direction=Direction.LONG,
+            leverage=1.0,
+            stop_price=98.0,
+            opportunity_id="opp_phase9_boot",
+            notes=("phase9_boot_paper_self_check",),
+        )
+        boot_session = execution_driver.simulate_paper_lifecycle(
+            boot_order,
+            ack_id="phase9_boot_ack",
+            fill_price=100.0,
+            stop_price=98.0,
+            regime_snapshot=regime_snapshot,
+            manipulation_level=bootstrap_manipulation,
+            trade_confirmation_level=bootstrap_confirmation,
+            is_data_degraded=False,
+            exchange_connection_state=exchange.health.state,
+        )
+        # Trigger an exit with is_new_open=False so the Phase 9
+        # protective-exit / reduce-only-closing-flow contract is
+        # exercised at boot.
+        execution_driver.trigger_exit(
+            session=boot_session,
+            reason="phase9_boot_paper_close",
+            regime_snapshot=regime_snapshot,
+            manipulation_level=bootstrap_manipulation,
+            is_data_degraded=False,
+            exchange_connection_state=exchange.health.state,
+        )
+        execution_driver.on_position_closed(
+            session=boot_session,
+            realized_pnl=0.0,
+        )
+
+        # Run ONE Reconciliation pass against a snapshot built from
+        # the same paper ledger. This must be a clean reconciliation
+        # in paper mode (local view == remote view), so no
+        # RECONCILIATION_MISMATCH should fire on a fresh boot.
+        reconciler = Reconciler(
+            event_repo=repo,
+            protection_hook=incidents,
+        )
+        local_snap = local_snapshot_from_paper_ledger(
+            paper_ledger,
+            websocket_state=exchange.health.state,
+            rest_state=exchange.health.state,
+        )
+        remote_snap = remote_snapshot_from_paper_ledger(
+            paper_ledger,
+            websocket_state=exchange.health.state,
+            rest_state=exchange.health.state,
+        )
+        reconciliation_decision = reconciler.reconcile(
+            local=local_snap, remote=remote_snap
+        )
+
+        health.register(
+            "execution_driver",
+            lambda: HealthStatus.OK
+            if execution_driver.counters.error_protection_entered == 0
+            else HealthStatus.DEGRADED,
+        )
+        health.register(
+            "reconciliation",
+            lambda: HealthStatus.OK
+            if not reconciler.new_opens_paused
+            else HealthStatus.DEGRADED,
+        )
+        # ----------------------------------------------------------
 
         # Telegram skeleton: drive one /status command through the bus.
         from app.telegram.commands import Command  # local import keeps boot light
@@ -512,7 +656,7 @@ def run() -> int:
         repo.record_capital_deposit(
             amount=0.0,
             source_module="bootstrap",
-            note="phase8_5_boot_paper_marker",
+            note="phase9_boot_paper_marker",
         )
 
         overall, _ = health.evaluate()
@@ -548,6 +692,33 @@ def run() -> int:
         state_transition_count = repo.count_events(
             event_type=EventType.STATE_TRANSITION
         )
+        # Phase 9 event counts.
+        order_sent_count = repo.count_events(event_type=EventType.ORDER_SENT)
+        order_filled_count = repo.count_events(event_type=EventType.ORDER_FILLED)
+        stop_confirmed_count = repo.count_events(
+            event_type=EventType.STOP_CONFIRMED
+        )
+        position_opened_count = repo.count_events(
+            event_type=EventType.POSITION_OPENED
+        )
+        position_closed_count = repo.count_events(
+            event_type=EventType.POSITION_CLOSED
+        )
+        reconciliation_started_count = repo.count_events(
+            event_type=EventType.RECONCILIATION_STARTED
+        )
+        reconciliation_resolved_count = repo.count_events(
+            event_type=EventType.RECONCILIATION_RESOLVED
+        )
+        reconciliation_mismatch_count = repo.count_events(
+            event_type=EventType.RECONCILIATION_MISMATCH
+        )
+        incident_opened_count = repo.count_events(
+            event_type=EventType.INCIDENT_OPENED
+        )
+        protection_entered_count = repo.count_events(
+            event_type=EventType.PROTECTION_MODE_ENTERED
+        )
         stats = buffer.stats()
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
@@ -579,13 +750,26 @@ def run() -> int:
             f"trade_state={state_machine.state.value} "
             f"daily_loss_breaker={risk.daily_loss_breaker.state.value} "
             f"consecutive_loss_breaker={risk.consecutive_loss_breaker.state.value} "
+            f"orders_submitted={execution_driver.counters.orders_submitted} "
+            f"order_sent_events={order_sent_count} "
+            f"order_filled_events={order_filled_count} "
+            f"stops_confirmed={stop_confirmed_count} "
+            f"positions_opened={position_opened_count} "
+            f"positions_closed={position_closed_count} "
+            f"reconciliations_run={reconciler.reconciliations_run} "
+            f"reconciliation_started_events={reconciliation_started_count} "
+            f"reconciliation_resolved_events={reconciliation_resolved_count} "
+            f"reconciliation_mismatches={reconciliation_mismatch_count} "
+            f"new_opens_paused={reconciler.new_opens_paused} "
+            f"incidents_opened={incident_opened_count} "
+            f"protection_mode_entered={protection_entered_count} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )
         # Stop the exchange cleanly so DATA_UNRELIABLE is emitted on
         # shutdown - that lets replay-based tests confirm the lifecycle
         # closed properly.
-        exchange.stop(reason="phase8_5_shutdown")
+        exchange.stop(reason="phase9_shutdown")
     finally:
         dbs.close()
     return 0

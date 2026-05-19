@@ -1,23 +1,29 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 8.5 - Learning-Ready Data Contract +
-> Test Data Export Contract.
-> **Paper mode only.** Phase 8.5 ships the **passive data contract**
-> every future phase will read (Replay, MFE/MAE, Tail labelling,
-> Dataset Builder, AI Learning) plus the cloud-test-friendly
-> **Test Data Export Service** (zip + manifest + summary +
-> redaction) and a CLI. Full AI Learning, Feature Store, model
-> training, strategy ordering, live trading, real network, LLM and
-> Telegram outbound are **NOT** implemented in this phase. The
-> `app/telegram` package remains a Phase 1 in-process skeleton.
+> **Phase status:** Phase 9 - Execution FSM + Reconciliation.
+> **Paper / mock execution only.** Phase 9 wires the Execution FSM
+> driver and the Reconciliation loop on top of every Phase 1-8.5
+> contract. The driver advances per-order sessions through the 15
+> :class:`ExecutionState` values, emits the matching ``ORDER_*`` /
+> ``STOP_*`` / ``POSITION_*`` events, and consults the Risk Engine
+> on every NEW open AND on every reduce-only / protective-exit /
+> kill_all path. Paper-mode state lives in a separate
+> :class:`PaperLedger`; the four ``ExchangeClientBase`` write
+> surfaces (``create_order``, ``cancel_order``, ``set_leverage``,
+> ``set_margin_mode``) **continue to raise** ``SafeModeViolation``
+> and Phase 9 NEVER overrides them. The Reconciliation loop emits
+> ``RECONCILIATION_STARTED`` / ``RECONCILIATION_MISMATCH`` /
+> ``RECONCILIATION_RESOLVED`` events and opens P0 incidents on
+> ghost positions / unattached stops via the new
+> :class:`IncidentRepository` (first writer of ``incidents.db``).
 > This repository still does **not** trade real money, does **not**
 > open any outbound network socket, does **not** import any
 > exchange SDK (`ccxt`, `binance-connector`, `python-binance` are
-> intentionally absent from `requirements.txt`), does **not**
-> call any LLM, and does **not** read real API keys. The four write
-> surfaces on `ExchangeClientBase` (`create_order`, `cancel_order`,
-> `set_leverage`, `set_margin_mode`) continue to raise
-> `SafeModeViolation` from the base class.
+> intentionally absent from `requirements.txt`), does **not** call
+> any LLM, and does **not** read real API keys. The Phase 1 safety
+> lock (`mode=paper`, `live_trading_enabled=False`,
+> `right_tail_enabled=False`, `llm_enabled=False`,
+> `exchange_live_order_enabled=False`) remains in force.
 
 ---
 
@@ -36,9 +42,201 @@ This is the implementation of the production specification in
 | Phase 6 - Scanner / Confirmation / Manipulation | #6  | merged | `feature/phase-6-scanner-confirmation-manipulation` (PR #17) |
 | Phase 7 - State Machine / Risk Engine | #7  | merged | `feature/phase-7-state-machine-risk-engine` (PR #18) |
 | Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | merged | `feature/phase-8-capital-flow-profit-harvest-rebase` (PR #19) |
-| Phase 8.5 - Learning-Ready Data Contract + Test Data Export | #8.5 | this branch | `feature/phase-8-5-learning-ready-data-contract` |
-| Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
+| Phase 8.5 - Learning-Ready Data Contract + Test Data Export | #8.5 | merged | `feature/phase-8-5-learning-ready-data-contract` (PR #20) |
+| Phase 9 - Execution FSM / Reconciliation | #9  | this branch | `feature/phase-9-execution-fsm-reconciliation` |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+
+## Phase 9 deliverable - Execution FSM + Reconciliation
+
+Phase 9 adds three new packages on top of the Phase 8.5 substrate:
+
+  - **`app/execution/`** - the Phase 9 :class:`ExecutionFSMDriver`
+    plus the :class:`OrderRequest` / :class:`OrderIntent` /
+    :class:`OrderKind` / :class:`OrderSide` / :class:`MarginMode`
+    (ISOLATED only) / :class:`TimeInForce` vocabulary, the
+    :class:`FillEvent` / :class:`StopEvent` value objects, and the
+    in-memory :class:`PaperLedger`. The Phase 1
+    :class:`ExecutionFSM` skeleton is preserved verbatim for
+    back-compat; Phase 9 callers should construct
+    :class:`ExecutionFSMDriver` instead.
+  - **`app/incidents/`** - the :class:`IncidentRepository` (first
+    writer of `incidents.db`) plus the typing.Protocol
+    :class:`ProtectionHook` the FSM driver and the Reconciler
+    consume. Emits ``INCIDENT_OPENED`` / ``INCIDENT_RESOLVED`` /
+    ``PROTECTION_MODE_ENTERED`` / ``PROTECTION_MODE_EXITED`` events
+    through `EventRepository`.
+  - **`app/reconciliation/`** - the :class:`Reconciler` engine plus
+    :class:`LocalSnapshot` / :class:`RemoteSnapshot` / `OrderView` /
+    `PositionView` / `StopView` / `EquitySnapshot` / `LinkHealth`
+    value objects. The reconciler is a **pure function over two
+    snapshots**; it never opens a network surface and never calls a
+    write surface.
+
+### ExecutionFSMDriver lifecycle (Spec §30)
+
+```
+IDLE
+  -> SIGNAL_RECEIVED       (submit_order)
+  -> RISK_CHECKED          (Risk Engine.evaluate; is_new_open derived from intent)
+  -> ORDER_SENT            (paper: paper_ledger.record_order, ORDER_SENT event)
+  -> ACK_RECEIVED          (on_ack -> ORDER_ACK event)
+  -> PARTIAL_FILLED ...    (on_partial_fill -> ORDER_PARTIAL_FILLED + risk recompute on every step, Spec §30.2)
+  -> FULL_FILLED           (on_full_fill -> ORDER_FILLED, paper_ledger.close_order)
+  -> STOP_SENT             (attach_stop -> STOP_SENT, reduce_only enforced at the model layer)
+  -> STOP_CONFIRMED        (on_stop_confirmed -> STOP_CONFIRMED + POSITION_OPENED + paper position)
+  -> POSITION_OPEN
+  -> EXIT_TRIGGERED        (trigger_exit calls Risk Engine with is_new_open=False, EXIT_TRIGGERED event)
+  -> POSITION_CLOSING
+  -> POSITION_CLOSED       (on_position_closed -> POSITION_CLOSED, paper_ledger.close_position)
+  -> IDLE
+       any state -> ERROR_PROTECTION on hard failure
+                   (on_stop_failed -> STOP_FAILED -> ERROR_PROTECTION;
+                    P0 incident via IncidentRepository.open_incident;
+                    PROTECTION_MODE_ENTERED + automatic reduce-only protective close)
+```
+
+### Phase 9 hard rules (Spec §30 + §31)
+
+  1. **Paper / mock execution only.** The driver writes to an
+     in-memory :class:`PaperLedger`, never to the four
+     :class:`ExchangeClientBase` write surfaces. The four
+     :class:`SafeModeViolation` refusals are unchanged.
+  2. **Construction-time refusal** of `trading_mode != paper`,
+     `live_trading_enabled=True`, `exchange_live_order_enabled=True`
+     (defence in depth on top of the Phase 1 boot guard).
+  3. **Risk Engine on every transition that enters or shrinks a
+     position.** `is_new_open=True` for `NEW_OPEN` / `SCALE_IN`
+     intents, `is_new_open=False` for every reduce-only intent
+     (`LOCK_PROFIT`, `FORCED_EXIT`, `DISTRIBUTION_EXIT`,
+     `PROTECTIVE_CLOSE`, `KILL_ALL`, `STOP_ATTACH`).
+  4. **Partial fills recompute risk** on the remaining size
+     (Spec §30.2 "部分成交必须重算风险"). A re-rejection drives the
+     session into `ERROR_PROTECTION`.
+  5. **Stops are reduce-only** (Spec §30.2 "止盈止损必须 reduce-only").
+     `StopEvent.reduce_only` is True or the model refuses to
+     construct.
+  6. **`MarginMode.ISOLATED` only** (Spec §13.2 + §30.2 "禁止 cross
+     margin"). The enum does not even declare `CROSS`.
+  7. **Naked market orders forbidden for NEW_OPEN / SCALE_IN**
+     (Spec §30.2 "默认禁止裸市价追单"). The protective / forced-exit
+     / kill_all intents may still use market orders so the
+     operator can flatten under stress.
+  8. **Stop-attach failure -> ERROR_PROTECTION**
+     (Spec §30.3 "止损挂不上：立即保护平仓"). The driver writes
+     `STOP_FAILED`, opens a P0 incident via the protection hook,
+     emits `PROTECTION_MODE_ENTERED`, and runs an automatic
+     reduce-only protective close on the paper position.
+  9. **M3 / DATA_DEGRADED / REGIME / EXCHANGE_DISCONNECTED /
+     REBASE_IN_PROGRESS do NOT block reduce-only closes.** The
+     Phase 7 No-Trade Gate already handles this when
+     `is_new_open=False`; Phase 9 always sets the flag correctly
+     for protective paths.
+ 10. **Every Phase 9 event carries `opportunity_id` and
+     `learning_ready`** (Phase 8.5 contract) when the caller
+     supplies them. Reflection / Replay (Issue #10) can group every
+     order / stop / fill / position event by opportunity.
+
+### Reconciliation engine (Spec §31)
+
+The :class:`Reconciler` consumes a :class:`LocalSnapshot` (from the
+paper ledger or an internal accounting source) and a
+:class:`RemoteSnapshot` (from the exchange's read-only surfaces) and
+emits one ``RECONCILIATION_STARTED``, one ``RECONCILIATION_MISMATCH``
+per mismatch, and one ``RECONCILIATION_RESOLVED`` per pass. Five
+mismatch classes plus three P0-promoted sub-types:
+
+| Mismatch type | Default severity | Notes |
+| --- | --- | --- |
+| `ORDER_MISMATCH` | P1 | local order set ≠ remote order set, or qty / fill / side disagrees |
+| `POSITION_MISMATCH` | P0 | local position set ≠ remote position set, or qty / direction disagrees |
+| `STOP_MISMATCH` | P0 | local stop set ≠ remote stop set, or qty / price / side disagrees |
+| `EQUITY_DRIFT` | P1 | local equity vs remote equity beyond tolerance |
+| `WS_REST_CONFLICT` | P1 | WebSocket and REST disagree on link state |
+| `GHOST_POSITION` | P0 | local empty + remote has a position (sub-type of `POSITION_MISMATCH`) |
+| `MISSING_REMOTE_POSITION` | P0 | local has a position + remote empty (sub-type of `POSITION_MISMATCH`) |
+| `UNATTACHED_STOP` | P0 | local thinks stop is attached + remote has no stop on that position (sub-type of `STOP_MISMATCH`) |
+
+#### Reconciler hard rules
+
+  - Any non-empty mismatch list -> `new_opens_paused=True` on the
+    decision; the flag advises the FSM driver to refuse new
+    `NEW_OPEN` / `SCALE_IN` `submit_order` calls until the next
+    clean reconciliation.
+  - Any P0 mismatch opens a P0 incident via
+    `IncidentRepository.open_incident(...)` AND drives
+    `enter_protection_mode(...)` so monitoring sees the latch.
+  - Reduce-only / protective-exit / kill_all flow is NOT blocked by
+    `new_opens_paused` (Spec §31.3 hard rule: "保护性退出 / reduce-only
+    closing 不被 No-Trade Gate 阻断").
+  - A clean reconciliation clears `new_opens_paused` automatically
+    (operator-equivalent of `/resume`).
+
+### IncidentRepository (`app/incidents/`)
+
+Phase 9 is the first phase that writes to `incidents.db`. The
+:class:`IncidentRepository` writes one row into ``incidents`` and
+one row into ``incident_log`` per `open_incident` call, appends
+`updated` rows on `update_incident`, appends a `resolved` row +
+sets `resolved_at` / `resolution` on `resolve_incident`, and emits
+`INCIDENT_OPENED` / `INCIDENT_RESOLVED` events through the
+`EventRepository`. Protection-mode entry / exit is also surfaced as
+`PROTECTION_MODE_ENTERED` / `PROTECTION_MODE_EXITED` events.
+
+The repository implements the duck-typed
+:class:`ProtectionHook` Protocol the Execution FSM driver and the
+Reconciler consume; tests can substitute a mock that records calls
+without spinning up `incidents.db`.
+
+### Boot drill (`python -m app.main`)
+
+```
+[AMA-RT] Phase 9 - Execution FSM Reconciliation v1.4.0a9 mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  databases=5 events_count=44 capital_events=1 \
+  exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+  market_data=3/0 market_snapshots=3 data_unreliable=1 \
+  regime=ALT_RISK_OFF/ALLOW_SCOUT regime_events=1 \
+  universe=0/3 universe_events=3 liquidity_events=6 \
+  pre_anomaly_events=3 anomaly_events=3 trade_confirmed_events=3 manipulation_events=3 \
+  state_transitions=2 trade_state=observe \
+  daily_loss_breaker=closed consecutive_loss_breaker=closed \
+  orders_submitted=1 order_sent_events=1 order_filled_events=1 \
+  stops_confirmed=1 positions_opened=1 positions_closed=1 \
+  reconciliations_run=1 reconciliation_started_events=1 reconciliation_resolved_events=1 \
+  reconciliation_mismatches=0 new_opens_paused=False \
+  incidents_opened=0 protection_mode_entered=0 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+The Phase 9 boot drill drives ONE paper-mode order through the
+full FSM (`NEW_OPEN` -> `POSITION_OPEN` -> `LOCK_PROFIT` exit ->
+`POSITION_CLOSED` -> `IDLE`) and then runs ONE reconciliation pass
+against snapshots built from the same paper ledger. In paper mode
+the local view equals the remote view, so the boot reconciliation
+is always clean (`reconciliation_mismatches=0`,
+`new_opens_paused=False`, `incidents_opened=0`).
+
+### Phase 9 boundary
+
+  1. **No real exchange call.** No `create_order` / `cancel_order` /
+     `set_leverage` / `set_margin_mode` call site exists anywhere
+     under `app/execution/`, `app/incidents/`, `app/reconciliation/`.
+  2. **No exchange SDK / HTTP / WebSocket / LLM / Telegram client
+     imported** anywhere under the three new packages (asserted by
+     `tests/unit/test_phase9_no_network.py`).
+  3. **No `api_key` / `api_secret` parameter or concrete literal**
+     anywhere under the three new packages (AST scan).
+  4. **No `os.environ` / `os.getenv` / bare `getenv()` call**
+     anywhere under the three new packages.
+  5. **No subclass of `ExchangeClientBase`** anywhere under the
+     three new packages.
+  6. **`trades.db` and `positions.db` remain unwritten in Phase 9.**
+     The paper ledger is in-memory only; real-trade persistence
+     lands behind a real exchange adapter in a future PR.
+  7. **No Issue #10 work.** No LLM, no Telegram outbound, no
+     Replay diff reports, no Reflection.
+
+---
 
 ## Phase 8.5 deliverable - Learning-Ready Data Contract + Test Data Export Contract
 
