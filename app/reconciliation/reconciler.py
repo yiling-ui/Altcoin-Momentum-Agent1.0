@@ -21,6 +21,32 @@ Hard rules (per Spec §31.3 + Issue #9):
     Execution FSM driver to refuse new ``submit_order`` calls whose
     intent is ``NEW_OPEN`` / ``SCALE_IN``.
 
+P0 latched-pause rule (Issue #9 fix-up)
+---------------------------------------
+
+A clean reconciliation pass auto-clears the pause for **P1-only**
+mismatches (``ORDER_MISMATCH`` / ``EQUITY_DRIFT`` / ``WS_REST_CONFLICT``).
+Once a **P0** mismatch has fired (``GHOST_POSITION`` /
+``MISSING_REMOTE_POSITION`` / ``POSITION_MISMATCH`` / ``STOP_MISMATCH`` /
+``UNATTACHED_STOP``) the pause is **latched**: a clean reconciliation
+alone is not sufficient to resume new opens. Resumption requires all
+of the following:
+
+  1. ``has_open_p0_incident`` is False (operator marked the P0 incidents
+     as resolved via :meth:`mark_p0_incidents_resolved`).
+  2. ``protection_mode_active`` is False (the protection hook has been
+     instructed to exit protection mode).
+  3. ``operator_resume_confirmed`` is True (an explicit operator /
+     manual confirmation has landed via :meth:`confirm_operator_resume`).
+  4. The current reconciliation pass is clean (no mismatches).
+  5. The Risk Engine separately allows the next ``submit_order`` (the
+     reconciler advertises ``new_opens_paused``; the FSM driver / Risk
+     Engine still own the final go / no-go decision).
+
+The ``operator_resume_confirmed`` flag is **consumed** when the latch
+clears, so a stale confirmation cannot survive across multiple P0
+incidents.
+
 Phase 9 boundary
 ----------------
 
@@ -108,6 +134,20 @@ class Reconciler:
         self._p1_incidents_opened: int = 0
         self._new_opens_paused: bool = False
         self._last_pause_reason: str | None = None
+        # Phase 9 fix-up (Issue #9): P0 latched-pause state.
+        # ``_p0_latched_pause`` stays True until ALL of:
+        #   - has_open_p0_incident == False
+        #   - protection_mode_active == False
+        #   - operator_resume_confirmed == True
+        #   - current pass is clean
+        # are simultaneously satisfied. This prevents a single clean
+        # reconciliation from auto-resuming new opens after a P0 event.
+        self._p0_latched_pause: bool = False
+        self._has_open_p0_incident: bool = False
+        # Local fallback for protection-mode tracking when no hook is
+        # wired (the hook is the canonical source when present).
+        self._protection_mode_latched: bool = False
+        self._operator_resume_confirmed: bool = False
 
     # ------------------------------------------------------------------
     # Counters
@@ -139,6 +179,144 @@ class Reconciler:
     @property
     def config(self) -> ReconcilerConfig:
         return self._config
+
+    # ------------------------------------------------------------------
+    # P0 latched-pause state (Issue #9 fix-up)
+    # ------------------------------------------------------------------
+    @property
+    def p0_latched_pause(self) -> bool:
+        """True if a P0 mismatch has fired and the pause has not yet
+        been cleared by operator confirmation + protection-exit +
+        incident-resolved + a subsequent clean reconciliation."""
+        return self._p0_latched_pause
+
+    @property
+    def has_open_p0_incident(self) -> bool:
+        """True if the reconciler has opened P0 incidents that the
+        operator has not yet acknowledged via
+        :meth:`mark_p0_incidents_resolved`. The reconciler is the only
+        process-side authority on this flag; the IncidentRepository is
+        the on-disk record but does not push notifications back here.
+        """
+        return self._has_open_p0_incident
+
+    @property
+    def protection_mode_active(self) -> bool:
+        """True if protection mode is currently active.
+
+        Reads through the wired :class:`ProtectionHook` (canonical
+        source) when one is available; falls back to a local latch
+        when no hook is wired (e.g. minimal unit tests)."""
+        hook = self._protection_hook
+        if hook is not None and hasattr(hook, "in_protection_mode"):
+            try:
+                return bool(hook.in_protection_mode)
+            except Exception:  # pragma: no cover - defensive
+                pass
+        return self._protection_mode_latched
+
+    @property
+    def operator_resume_confirmed(self) -> bool:
+        """True if the operator has staged an explicit resume
+        confirmation that has not yet been consumed.
+
+        Set via :meth:`confirm_operator_resume`; consumed (reset to
+        False) the first time the P0 latch is cleared so it cannot
+        survive across multiple P0 events.
+        """
+        return self._operator_resume_confirmed
+
+    # ------------------------------------------------------------------
+    # Operator / incident lifecycle hooks (Issue #9 fix-up)
+    # ------------------------------------------------------------------
+    def mark_p0_incidents_resolved(
+        self,
+        *,
+        note: str | None = None,
+    ) -> None:
+        """Operator / incident-side signal that every open P0 incident
+        opened by this reconciler has been resolved.
+
+        Does NOT by itself unpause new opens; the pause only clears
+        when :meth:`reconcile` next runs and finds a clean state with
+        protection mode exited and an operator confirmation staged.
+        """
+        self._has_open_p0_incident = False
+        if note is not None:
+            logger.info(
+                "Reconciler.mark_p0_incidents_resolved: {}",
+                note,
+            )
+
+    def confirm_operator_resume(
+        self,
+        *,
+        reason: str = "operator_confirmation",
+    ) -> None:
+        """Stage an operator confirmation that new opens may resume on
+        the next clean reconciliation.
+
+        The flag is consumed once the P0 latch clears, so a stale
+        confirmation cannot resume new opens after a fresh P0 event.
+        """
+        self._operator_resume_confirmed = True
+        logger.info(
+            "Reconciler.confirm_operator_resume: {}",
+            reason,
+        )
+
+    def exit_protection_mode(
+        self,
+        *,
+        reason: str = "operator_resume",
+        symbol: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Pass-through helper that drives protection-mode exit through
+        the wired hook AND clears the local latch.
+
+        Callers that already drive
+        :meth:`IncidentRepository.exit_protection_mode` directly may
+        skip this helper; the :attr:`protection_mode_active` property
+        will pick up the change either way.
+        """
+        if self._protection_hook is not None and hasattr(
+            self._protection_hook, "exit_protection_mode"
+        ):
+            try:
+                self._protection_hook.exit_protection_mode(
+                    reason=reason,
+                    source_module=self.SOURCE_MODULE,
+                    symbol=symbol,
+                    payload=payload or {},
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Reconciler.exit_protection_mode hook raised: {}",
+                    exc,
+                )
+        self._protection_mode_latched = False
+
+    def can_clear_pause_after_clean_reconciliation(self) -> bool:
+        """Whether the next clean reconciliation may resume new opens.
+
+        Distinguishes between P1 and P0 latches per Issue #9:
+
+          - P1-only pause: always clearable on a clean pass.
+          - P0 latched pause: clearable only when
+            :attr:`has_open_p0_incident` is False, the protection mode
+            is not active, and an operator confirmation is staged.
+
+        Risk Engine approval is enforced separately by the FSM driver
+        on the next ``submit_order`` call.
+        """
+        if not self._p0_latched_pause:
+            return True
+        return (
+            (not self._has_open_p0_incident)
+            and (not self.protection_mode_active)
+            and self._operator_resume_confirmed
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -191,6 +369,9 @@ class Reconciler:
         new_opens_paused = bool(mismatches)
         protection_entered = False
         notes: list[str] = []
+        has_p0_in_pass = any(
+            m.severity is MismatchSeverity.P0 for m in mismatches
+        )
         if new_opens_paused:
             self._mismatches_total += len(mismatches)
             reason = "; ".join(
@@ -199,18 +380,57 @@ class Reconciler:
             self._new_opens_paused = True
             self._last_pause_reason = reason
             notes.append(f"new_opens_paused: {reason}")
+            if has_p0_in_pass:
+                # Latch the P0 pause + the open-P0-incident flag. The
+                # pause can only clear once an operator confirmation
+                # plus protection-exit plus incident-resolved plus a
+                # clean reconciliation all line up (Issue #9 fix-up).
+                self._p0_latched_pause = True
+                self._has_open_p0_incident = True
+                notes.append("p0_latched_pause")
         else:
-            # Successful reconciliation clears the pause flag, mirroring
-            # the Phase 7 protective-exit caveat: a clean reconciliation
-            # is the operator-equivalent of /resume.
-            if self._new_opens_paused:
-                notes.append("new_opens_unpaused: clean_reconciliation")
-            self._new_opens_paused = False
-            self._last_pause_reason = None
+            # Clean pass. Distinguish P1-only vs P0-latched pauses.
+            if self._p0_latched_pause:
+                if self.can_clear_pause_after_clean_reconciliation():
+                    # All four conditions met: clear the latch and
+                    # consume the operator confirmation so it cannot
+                    # carry over to a future P0 event.
+                    self._p0_latched_pause = False
+                    self._operator_resume_confirmed = False
+                    if self._new_opens_paused:
+                        notes.append(
+                            "new_opens_unpaused: clean_after_p0_resolved"
+                        )
+                    self._new_opens_paused = False
+                    self._last_pause_reason = None
+                else:
+                    # Latched: clean alone is not enough.
+                    blockers: list[str] = []
+                    if self._has_open_p0_incident:
+                        blockers.append("has_open_p0_incident")
+                    if self.protection_mode_active:
+                        blockers.append("protection_mode_active")
+                    if not self._operator_resume_confirmed:
+                        blockers.append("operator_resume_not_confirmed")
+                    new_opens_paused = True
+                    self._new_opens_paused = True
+                    blocker_str = ",".join(blockers) or "p0_latched"
+                    self._last_pause_reason = f"p0_latched: {blocker_str}"
+                    notes.append(
+                        f"new_opens_paused: p0_latched({blocker_str})"
+                    )
+            else:
+                # P1-only pause is cleared by a clean reconciliation,
+                # mirroring the original Phase 9 behaviour.
+                if self._new_opens_paused:
+                    notes.append("new_opens_unpaused: clean_reconciliation")
+                self._new_opens_paused = False
+                self._last_pause_reason = None
 
         # P0 mismatches additionally drive protection mode if a hook is
         # available.
-        if any(m.severity is MismatchSeverity.P0 for m in mismatches):
+        if has_p0_in_pass:
+            self._protection_mode_latched = True
             if self._protection_hook is not None:
                 try:
                     self._protection_hook.enter_protection_mode(
@@ -239,7 +459,7 @@ class Reconciler:
             finished_at=finished_at,
             mismatches=tuple(mismatches),
             incidents_opened=tuple(incident_ids),
-            new_opens_paused=new_opens_paused,
+            new_opens_paused=self._new_opens_paused,
             protection_mode_entered=protection_entered,
             notes=tuple(notes),
         )
@@ -258,7 +478,11 @@ class Reconciler:
                     "p1_count": sum(
                         1 for m in mismatches if m.severity is MismatchSeverity.P1
                     ),
-                    "new_opens_paused": new_opens_paused,
+                    "new_opens_paused": self._new_opens_paused,
+                    "p0_latched_pause": self._p0_latched_pause,
+                    "has_open_p0_incident": self._has_open_p0_incident,
+                    "protection_mode_active": self.protection_mode_active,
+                    "operator_resume_confirmed": self._operator_resume_confirmed,
                     "protection_mode_entered": protection_entered,
                     "incident_ids": list(incident_ids),
                     "notes": list(notes),

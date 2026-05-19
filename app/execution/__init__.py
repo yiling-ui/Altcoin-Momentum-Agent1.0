@@ -51,6 +51,17 @@ from app.execution.fsm import (
     ExecutionFSMDriver,
     IllegalTransition,
 )
+from app.execution.lifecycle import (
+    FINAL_STATUS_CLOSED,
+    FINAL_STATUS_IN_PROGRESS,
+    FINAL_STATUS_OPEN,
+    FINAL_STATUS_PROTECTED,
+    FINAL_STATUS_REJECTED,
+    LIFECYCLE_EVENT_TYPES,
+    OPTIONAL_LIFECYCLE_EVENT_TYPES,
+    PaperLifecycleSummary,
+    reconstruct_paper_lifecycle,
+)
 from app.execution.models import (
     ExecutionResult,
     ExecutionSession,
@@ -102,4 +113,14 @@ __all__ = [
     "PaperStop",
     "PaperPosition",
     "PaperEquity",
+    # Phase 9 fix-up: paper-mode lifecycle reconstruction helper
+    "PaperLifecycleSummary",
+    "reconstruct_paper_lifecycle",
+    "LIFECYCLE_EVENT_TYPES",
+    "OPTIONAL_LIFECYCLE_EVENT_TYPES",
+    "FINAL_STATUS_CLOSED",
+    "FINAL_STATUS_OPEN",
+    "FINAL_STATUS_PROTECTED",
+    "FINAL_STATUS_IN_PROGRESS",
+    "FINAL_STATUS_REJECTED",
 ]

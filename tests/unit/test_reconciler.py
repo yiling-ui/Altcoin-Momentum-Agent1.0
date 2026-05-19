@@ -326,23 +326,23 @@ def test_ws_rest_both_connected_does_not_fire(repo):
 # ---------------------------------------------------------------------------
 # new_opens_paused state machine
 # ---------------------------------------------------------------------------
-def test_new_opens_paused_clears_on_clean_reconciliation(repo):
+def test_new_opens_paused_clears_on_clean_reconciliation_for_p1(repo):
     rec = Reconciler(event_repo=repo)
-    # First pass: bad
+    # First pass: P1 only - one local order with no remote counterpart
+    # (ORDER_MISMATCH default severity is P1).
+    local_order = OrderView(
+        order_id="o1",
+        symbol="X",
+        side="buy",
+        qty=1.0,
+    )
     rec.reconcile(
-        local=LocalSnapshot(),
-        remote=RemoteSnapshot(positions=(
-            PositionView(
-                position_id="exch_1",
-                symbol="X",
-                direction="long",
-                qty=1.0,
-                entry_price=10.0,
-            ),
-        )),
+        local=LocalSnapshot(orders=(local_order,)),
+        remote=RemoteSnapshot(),
     )
     assert rec.new_opens_paused is True
-    # Second pass: clean
+    assert rec.p0_latched_pause is False
+    # Second pass: clean. P1-only pause clears immediately.
     rec.reconcile(local=LocalSnapshot(), remote=RemoteSnapshot())
     assert rec.new_opens_paused is False
 
