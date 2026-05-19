@@ -7,6 +7,319 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 7 - Issue #7 review fix: conservative throughput discount
+
+Issue #7 review pointed out that the original PR deferred the
+Phase 5 ``can_exit_position`` upper-bound discount to Issue #8 / #9.
+That is wrong - Spec §27.2 + §19.2 require the Risk Engine to apply
+the conservative discount itself. This commit moves the discount on
+to the Phase 7 No-Trade Gate, where Issue #7 actually wants it.
+
+#### Added
+
+- ``RiskEngine.throughput_safety_factor`` (default ``0.5``) and a
+  matching ``throughput_safety_factor: float | None`` field on
+  :class:`RiskRequest`. Allowed range is ``(0.0, 1.0]``; the engine
+  raises ``ValueError`` outside that range. Per-request overrides
+  are honoured.
+- ``RiskRequest.max_exit_seconds`` (optional) - ceiling for the
+  discounted re-check. When ``None`` the engine derives it from the
+  supplied :class:`LiquidityDecision` / :class:`ExitPlan`.
+- ``NoTradeGateInput.throughput_safety_factor`` and
+  ``NoTradeGateInput.max_exit_seconds`` so the gate can be driven
+  directly by tests / replay.
+- :attr:`RiskRejectReason.LIQUIDITY_THROUGHPUT_INSUFFICIENT` typed
+  reject reason: fires when
+  ``estimated_exit_seconds / throughput_safety_factor`` exceeds the
+  resolved ``max_exit_seconds`` ceiling on a new opening.
+- ``RISK_APPROVED`` / ``RISK_REJECTED`` audit payload now carries
+  ``throughput_safety_factor`` and ``max_exit_seconds`` so
+  Reflection (Issue #10) can reproduce the decision.
+- README "Phase 7 conservative throughput discount" subsection that
+  explains the Issue #7 hard rule, the resolution policy
+  (``RiskRequest.throughput_safety_factor`` -> engine default), and
+  the reuse rule for any future Phase 5
+  ``LiquidityConfig.throughput_safety_factor``.
+
+#### Changed
+
+- ``app/risk/no_trade_gate.py`` - the Phase 5 ``can_exit_position``
+  output is now treated as an upper bound. The gate runs the raw
+  feasibility check first (``NO_EXIT_CHANNEL`` /
+  ``LIQUIDITY_REJECTED`` / ``DATA_DEGRADED`` still fire as before)
+  and then runs the discounted re-check on every new opening with a
+  feasible plan. Step ordering is deterministic so reflective tools
+  see the most severe / earliest reason at index 0.
+- ``app/risk/engine.py`` - ``RiskEngine.__init__`` accepts the new
+  keyword. Audit payload extended.
+- README + CHANGELOG explicit: "Risk Engine treats liquidity
+  throughput as an upper bound and applies a conservative safety
+  factor before allowing ATTACK / RIGHT_TAIL_AMPLIFY."
+
+#### Reuse policy
+
+If a future Phase 5 PR ever adds ``throughput_safety_factor`` to
+``LiquidityConfig``, the Phase 7 engine MUST consume that field
+directly instead of defining its own. As of this commit no such
+field exists on ``LiquidityConfig`` and the
+``app/liquidity/`` package is unchanged.
+
+#### Tests
+
+**+9 new tests on top of the 714 from the Phase 7 PR = 723 total,
+all passing.**
+
+| Test | Pins |
+| --- | --- |
+| ``test_throughput_safety_factor_default_is_one_half`` | Default factor is 0.5. |
+| ``test_throughput_safety_factor_invalid_rejected`` | (0.0, 1.0] enforced; constructor raises ``ValueError`` outside that range. |
+| ``test_raw_feasible_plan_rejected_when_discounted_exceeds_ceiling`` | Issue #7 review fix: 40s raw + factor 0.5 -> 80s discounted -> REJECT with ``liquidity_throughput_insufficient``. |
+| ``test_raw_feasible_plan_passes_when_discounted_under_ceiling`` | 10s raw + factor 0.5 -> 20s discounted -> APPROVE. |
+| ``test_data_degraded_blocks_even_when_raw_plan_is_feasible`` | Issue #7 review fix: feasible plan + degraded data -> still rejected with ``data_degraded``. |
+| ``test_no_trade_gate_throughput_discount_directly`` | Direct ``evaluate_no_trade_gate(...)`` regression so the discount is independently pinned at the gate level. |
+| ``test_per_request_safety_factor_override_honoured`` | Per-request ``throughput_safety_factor=1.0`` (no discount) approves the same input that 0.5 would refuse. |
+| ``test_engine_level_safety_factor_override_honoured`` | ``RiskEngine(throughput_safety_factor=0.9)`` approves a 40s/60s plan. |
+| ``test_audit_payload_includes_throughput_safety_factor`` | The factor is on the persisted ``RISK_APPROVED`` audit row. |
+
+#### Live trading risk
+
+**None.** This commit only adds defensive plumbing: a new
+multiplicative discount, a new typed reject reason, two new
+optional ``RiskRequest`` fields, and audit-payload entries. No new
+mode flag, no loosened safety lock, no new dependency, no new
+write surface, no new network surface, no LLM. The Phase 1 safety
+lock, the Phase 3 read-only invariant, the Phase 4 / 5 / 6
+boundaries remain unchanged.
+
+### Phase 7 - State Machine Risk Engine
+
+#### Added
+
+- **`app/state_machine/` package** (Spec §26, Issue #7).
+  - `TradeStateMachine` per-symbol Trade State Machine implementing
+    the Spec §26.1 ladder (`NO_TRADE -> OBSERVE -> SCOUT -> CONFIRM
+    -> ATTACK -> RIGHT_TAIL_AMPLIFY -> LOCK_PROFIT ->
+    DISTRIBUTION_ALERT -> FORCED_EXIT`).
+  - Whitelisted transition table forbidding level skipping
+    (Issue #7 hard rule 1). OBSERVE cannot directly become
+    RIGHT_TAIL_AMPLIFY; SCOUT cannot directly become ATTACK; every
+    illegal attempt raises :class:`IllegalStateTransition`.
+  - `promote(TradeStateContext)` / `downgrade(reason)` /
+    `record_breakout_failure()` / `record_distribution_bar()` /
+    `lock_profit()` / `distribution_alert()` / `forced_exit()` /
+    `tick(clock_ms)` / `reset()` operations. Each successful
+    transition writes one ``STATE_TRANSITION`` event with the
+    `from / to / trigger / reasons` payload.
+  - Phase 7 hard rules enforced: CONFIRM-failures downgrade to
+    SCOUT after the configured threshold; DISTRIBUTION_ALERT
+    cannot promote; FORCED_EXIT is sticky (only `reset()` clears
+    it); a losing position cannot enter RIGHT_TAIL_AMPLIFY;
+    right-tail amplification must come from floating profit.
+  - Spec §26.4 timeouts implemented in `tick(clock_ms)`: OBSERVE
+    -> NO_TRADE after 30 min, SCOUT -> NO_TRADE after 12 min,
+    ATTACK -> LOCK_PROFIT on `cvd_weakening=True`,
+    RIGHT_TAIL_AMPLIFY -> LOCK_PROFIT on
+    `right_tail_core_failed=True`, DISTRIBUTION_ALERT -> FORCED_EXIT
+    after 3 confirming bars.
+  - :class:`TimeoutConfig` exposes the timeout policy as a frozen
+    dataclass so YAML overrides remain a future, additive change.
+
+- **`app/risk/no_trade_gate.py`** (Spec §27.2, Issue #7).
+  - `evaluate_no_trade_gate(NoTradeGateInput) -> NoTradeGateDecision`
+    composes every Spec §27.2 condition into a typed
+    :class:`RiskRejectReason` list. Walks in stable order so the
+    "first" reason in the list is the most severe / earliest.
+  - Reads Phase 5 `RegimeSnapshot.risk_permission`,
+    `UniverseDecision.eligible`, `LiquidityDecision.passed`, and
+    `ExitPlan.feasible`.
+  - Reads Phase 6 `ManipulationLevel` and
+    `TradeConfirmationLevel`.
+  - Reads exchange-link state, market-data degraded view,
+    stop-confirmation, position-known flag, and the two circuit
+    breaker states.
+  - Honours the `is_new_open` flag so Phase 9 can call the gate
+    on a protective-exit / reduce-only path without M3 / regime /
+    data-degraded firing.
+
+- **`app/risk/account_tier.py`** (Spec §27.4, Issue #7).
+  - `classify_account_tier(current_equity, initial_capital) ->
+    AccountLifeTier` pure function (A..F by equity ratio).
+  - `ACCOUNT_TIER_POLICY` table + `policy_for(tier)` helper. Each
+    `AccountTierPolicy` exposes `allow_new_open`, `allow_attack`,
+    `allow_right_tail_amplify`, `allow_live_trading`, `halt_only`,
+    `paper_only`, `notes`. Tiers D / E / F progressively restrict
+    the ladder; tier F is halt-only.
+
+- **`app/risk/circuit_breaker.py`** (Spec §27.2, Issue #7).
+  - `ConsecutiveLossCircuitBreaker` opens after N consecutive
+    losses (default 5). `record_loss()` / `record_win()` /
+    `reset()`. A winning trade does NOT auto-close an opened
+    breaker - Phase 7 requires an explicit `reset()`.
+  - `DailyLossCircuitBreaker` opens once cumulative gross daily
+    loss exceeds `max_daily_loss_pct * initial_capital` (default
+    5%). Rolls over on UTC date change. Same explicit-`reset()`
+    contract.
+
+- **`app/risk/engine.py` Phase 7 extension** (Spec §27, Issue #7).
+  - `RiskRequest` gained ten optional Phase 7 fields:
+    `is_new_open` (default `True` for backwards compat),
+    `regime_snapshot`, `universe_decision`, `liquidity_decision`,
+    `exit_plan`, `is_data_degraded`, `exchange_connection_state`,
+    `current_equity`, `initial_capital`, `account_tier_override`.
+  - `RiskEngine.evaluate(...)` now composes the Phase 1 hard
+    flags + Phase 6 hard rules + the Phase 7 No-Trade Gate +
+    Account Life Tier policy + Circuit Breaker state into one
+    decision.
+  - `RiskEngine.record_loss(loss_amount=)` /
+    `record_win(profit_amount=)` /
+    `configure_initial_capital(initial_capital=)` are the public
+    hooks Issue #8 (Capital Flow Engine) will use to record
+    realised PnL onto the breakers without re-instantiating the
+    engine.
+  - The audit payload extends Phase 6 with `account_tier`,
+    `is_new_open`, `regime`, `risk_permission`,
+    `exchange_connection_state`, `daily_loss_breaker_state`,
+    `consecutive_loss_breaker_state`, `no_trade_gate_reasons`,
+    `no_trade_gate_notes`. Reasons are still rendered as
+    byte-compatible strings so Phase 1 / Phase 6 Replay code
+    keeps working unchanged.
+
+- **`app/core/enums.py`** new vocabulary:
+  - `CircuitBreakerState` (`closed`, `open_daily_loss`,
+    `open_consecutive_loss`, `cool_down`).
+  - `TradeStateTrigger` (`signal`, `promote`, `downgrade`,
+    `timeout`, `lock_profit`, `distribution_alert`,
+    `forced_exit`, `kill_switch`, `reset`).
+  - `RiskRejectReason` typed enum with **23** values covering
+    Phase 1 + Phase 6 + Phase 7 reasons. Values match the Phase 1
+    / Phase 6 string reasons byte-for-byte so existing tests and
+    audit rows stay byte-compatible.
+
+- **Phase 7 boot self-check in `python -m app.main`**.
+  - Drives a `TradeStateMachine` `NO_TRADE -> OBSERVE`
+    transition for the first mock symbol. One additional
+    ``STATE_TRANSITION`` event is written via the state-machine
+    module (the Phase 6 boot drill already wrote one
+    `IDLE -> IDLE` marker; Phase 7 raises the total to two).
+  - Calls `RiskEngine.evaluate(...)` with
+    `is_new_open=False`, the Phase 5 regime snapshot, the Phase
+    6 manipulation + confirmation levels, and the exchange link
+    state. The bootstrap stays a clean approval because every
+    `is_new_open=True`-only gate is bypassed.
+  - Banner extended with four Phase 7 fields:
+    `state_transitions=`, `trade_state=`, `daily_loss_breaker=`,
+    `consecutive_loss_breaker=`.
+
+- **Documentation**.
+  - `README.md` rewritten: status table updated (Phase 6 ->
+    merged, Phase 7 -> this branch); new "Phase 7 deliverable"
+    section with the State Machine ladder + transition rules,
+    No-Trade Gate composition, Account Life Tier table, Circuit
+    Breaker contract, protective-exit caveat, and seven semantic
+    locks.
+  - `docs/CHANGELOG.md`: this entry. Phase 6 entries are
+    preserved below.
+  - `app/__init__.py` bumped to `Phase 7 - State Machine Risk
+    Engine` / `1.4.0a7`.
+
+#### Phase 7 hard rules enforced
+
+| Rule | Enforcement |
+|---|---|
+| 1. No trade-state level skipping | `ALLOWED_TRANSITIONS` whitelist + `IllegalStateTransition`. |
+| 2. SCOUT cannot become ATTACK directly | SCOUT -> CONFIRM is the only legal step in `ALLOWED_TRANSITIONS`. |
+| 3. CONFIRM failures must downgrade | `record_breakout_failure()` after 2 consecutive failures returns SCOUT. |
+| 4. DISTRIBUTION_ALERT cannot promote | `promote(...)` refuses with `cannot_promote_from_distribution_alert`. |
+| 5. FORCED_EXIT is sticky | `ALLOWED_TRANSITIONS[FORCED_EXIT] = frozenset()`; only `reset()` clears it. |
+| 6. Losing position cannot amplify | Refused at promotion; refused at engine via `right_tail_from_principal_forbidden`. |
+| 7. SYSTEMIC_RISK -> BLOCK_ALL | `RiskRejectReason.REGIME_BLOCK_ALL` fires for every new opening. |
+| 8. ALT_RISK_OFF -> ALLOW_SCOUT no attack | `RiskRejectReason.REGIME_SCOUT_ONLY_FOR_ATTACK` fires for `attack_intent=True`. |
+| 9. M3 blocks new open | `RiskRejectReason.MANIPULATION_M3` fires when `is_new_open=True`; protective exits pass with `is_new_open=False`. |
+| 10. M2 + attack_intent blocks | `RiskRejectReason.MANIPULATION_M2_ATTACK`. |
+| 11. T0/T1 + attack_intent blocks | `RiskRejectReason.TRADE_CONFIRMATION_TOO_LOW_FOR_ATTACK`. |
+| 12. 5 consecutive losses pause new open | `ConsecutiveLossCircuitBreaker` opens; engine emits `CONSECUTIVE_LOSS_BREAKER_OPEN`. |
+| 13. Daily loss threshold pauses new open | `DailyLossCircuitBreaker` opens; engine emits `DAILY_LOSS_BREAKER_OPEN`. |
+| 14. State transitions persisted | One `STATE_TRANSITION` event per accepted transition. |
+| 15. Reject events carry typed reasons | Every reason is a `RiskRejectReason` value; rendered as its string in the audit row. |
+
+#### Tests
+
+123 new Phase 7 unit tests on top of the 591 retained from
+Phase 1-6 = 714 total, all passing.
+
+| File | Tests | What it covers |
+| --- | --- | --- |
+| `tests/unit/test_state_machine.py` | 27 | Issue #7 acceptance criteria 1+2 (no level skipping, no SCOUT->ATTACK), promotion guards, downgrade ladder, CONFIRM-failure threshold, DISTRIBUTION_ALERT cannot promote, three-bar -> FORCED_EXIT, FORCED_EXIT is sticky / only reset() clears it, Spec §26.4 timeouts (OBSERVE / SCOUT / ATTACK / RIGHT_TAIL_AMPLIFY), `STATE_TRANSITION` events persisted, refusal counter, custom `TimeoutConfig` honoured. |
+| `tests/unit/test_account_tier.py` | 12 | Tier A..F classifier boundary tests, F when initial_capital invalid, per-tier `AccountTierPolicy` flags, policy table covers every tier. |
+| `tests/unit/test_circuit_breaker.py` | 9 | Issue #7 acceptance criteria 12+13: 5 consecutive losses open the breaker; daily-loss threshold opens the breaker; winning does not auto-close an opened breaker; explicit reset returns to closed; gross daily loss is measured (not net); zero-amount and zero-initial-capital edge cases. |
+| `tests/unit/test_no_trade_gate.py` | 23 | Every Spec §27.2 condition individually + composed. Acceptance criteria 4 (M2 + attack), 5 (T0/T1 + attack), 8 (liquidity not exitable), 9 (DATA_DEGRADED), plus the ALLOW_SCOUT-no-attack semantic lock and the M3 protective-exit caveat. |
+| `tests/unit/test_risk_engine_phase7.py` | 18 | Liquidity reject, no-exit-channel reject, SYSTEMIC_RISK overrides T4 / M0, ALLOW_ATTACK alone does not authorise live trade, T3 alone does not authorise, M3 protective-exit caveat, DATA_DEGRADED rejects new open / passes protective exit, breakers + tier policies, audit payload exposes Phase 7 fields, Phase 1 + Phase 6 + Phase 7 reasons accumulate, `legacy_request_still_approved`. |
+| `tests/unit/test_phase7_boundary.py` | 16 | Phase 1 + Phase 3 invariants unchanged, TradeState / AccountLifeTier / CircuitBreakerState / TradeStateTrigger / `RiskRejectReason` vocabularies pinned, public exports complete (`app.risk.__all__`, `app.state_machine.__all__`), Risk Engine + State Machine expose no write surface, do not subclass ExchangeClientBase, `RiskRequest` Phase 7 fields present, `is_new_open` defaults True. |
+| `tests/unit/test_phase7_no_network.py` | 9 | No exchange SDK / LLM import under `app/state_machine/` or `app/risk/`, no `api_key` substring, no `os.environ` / `getenv` (AST scan), no write surface, no Issue #8 / #9 / #10 module imports, no MarketDataBuffer / Mock / Binance constructor call, no stand-alone BTC/ETH module added, no other-DB direct sqlite3.connect. |
+| `tests/unit/test_main_entrypoint.py` | extended | Phase 7 banner fields (`Phase 7 - State Machine Risk Engine`, `state_transitions=`, `trade_state=`, `daily_loss_breaker=`, `consecutive_loss_breaker=`). |
+
+#### Issue #7 acceptance criteria
+
+| # | Criterion | Test |
+| --- | --- | --- |
+| 1 | OBSERVE 不能直接 RIGHT_TAIL_AMPLIFY | `test_observe_cannot_directly_become_right_tail_amplify` |
+| 2 | SCOUT 不能直接 ATTACK | `test_scout_cannot_directly_become_attack` |
+| 3 | M3 必须禁止新开仓 | `test_m3_blocks_new_open` (gate), `test_m3_does_not_block_protective_exit_when_is_new_open_false` (engine) |
+| 4 | M2 + attack_intent 必须禁止 ATTACK / RIGHT_TAIL_AMPLIFY | `test_m2_with_attack_intent_blocks` |
+| 5 | T0/T1 + attack_intent 必须拒绝进攻 | `test_t0_with_attack_intent_blocks` / `test_t1_with_attack_intent_blocks` |
+| 6 | T3/T4 不得单独批准交易 | `test_t3_alone_does_not_authorise_live_trade` |
+| 7 | ALLOW_ATTACK 不得单独批准交易 | `test_allow_attack_alone_does_not_authorise_live_trade` |
+| 8 | Liquidity 不可退出时必须拒绝进攻 | `test_liquidity_rejected_blocks_attack` / `test_no_exit_channel_blocks_attack` |
+| 9 | DATA_DEGRADED 时必须拒绝或降级 | `test_data_degraded_rejects_new_open` / `test_data_degraded_does_not_block_protective_exit` |
+| 10 | stop_unconfirmed 必须拒绝新开仓 | `test_stop_unconfirmed_blocks` (gate) + Phase 1 test still applies |
+| 11 | unknown_position 必须拒绝新开仓 | `test_unknown_position_blocks` / `test_unknown_position_rejected_for_new_open` |
+| 12 | 连续亏损 5 次必须暂停新开仓 | `test_consecutive_loss_breaker_opens_at_threshold` + `test_consecutive_loss_breaker_blocks_new_open` |
+| 13 | 单日亏损触发必须暂停新开仓 | `test_daily_loss_breaker_opens_at_threshold` + `test_daily_loss_breaker_blocks_new_open` |
+| 14 | 状态转移事件可回放 | `test_state_transition_event_persisted` / `test_full_ladder_writes_all_transition_events` |
+| 15 | 风控拒绝事件包含 reason_tags | `test_audit_payload_includes_phase7_fields` (typed `RiskRejectReason` -> string) |
+| 16 | pytest 全部通过 | 714 passed |
+| 17 | 不存在 live trading 风险 | Defence-in-depth (see "Live trading risk" below) |
+| 18 | 不存在真实交易所下单风险 | Same as 17 |
+
+#### Live trading risk
+
+**None.** Phase 7 is additive on top of the Phase 1 - 6 safety
+substrate. No exchange SDK, no HTTP client, no LLM client, no
+write surface. The Phase 1 safety lock, the Phase 3 read-only
+invariant, the Phase 4 / 5 / 6 boundaries are all unchanged. The
+boot banner still shows
+`mode=paper live_trading=False right_tail=False llm=False
+exchange_live_orders=False`.
+
+#### Real exchange order risk
+
+**None.** No `create_order` / `cancel_order` / `set_leverage` /
+`set_margin_mode` call site is added. The four
+`SafeModeViolation` refusals on `ExchangeClientBase` continue to
+apply.
+
+#### Next-phase recommendation
+
+After this merges, **Issue #8 (Phase 8 - Capital Flow / Profit
+Harvest / Rebase)** is the next phase. Issue #8 will:
+
+- Replace the in-memory counters in
+  `RiskEngine.consecutive_loss_breaker` / `daily_loss_breaker`
+  with `capital.db.capital_snapshots` lookups.
+- Drive `RiskEngine.configure_initial_capital(...)` from the
+  capital event stream, so Account Tier classification is
+  always anchored to the latest `lifetime_equity`.
+- Add the `CAPITAL_REBASE` flow: pause new openings, recompute
+  `risk_budget`, recompute `account_life_tier`, then resume.
+- Land the `withdrawn_profit` invariant so a user-initiated
+  withdrawal is NOT misread as a draw-down.
+
+The Phase 7 boundary (no exchange SDK, no real network, no API
+key, no write surface, no LLM, no stand-alone BTC/ETH module,
+trade-state level whitelist) plus the cumulative defence-in-depth
+layers will continue to gate against accidental live trading
+until the Go/No-Go checklist (§41) is executed end to end.
+
 ### Phase 6 - Scanner Confirmation Manipulation
 
 #### Added

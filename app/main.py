@@ -1,4 +1,4 @@
-"""AMA-RT entrypoint (Phase 6 - Scanner / Confirmation / Manipulation).
+"""AMA-RT entrypoint (Phase 7 - State Machine + Risk Engine).
 
 Run with:
 
@@ -78,7 +78,7 @@ from app import __phase__, __version__  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
 from app.core.clock import now_ms  # noqa: E402
 from app.core.constants import PROJECT_NAME  # noqa: E402
-from app.core.enums import ExecutionState  # noqa: E402
+from app.core.enums import ExecutionState, TradeState, TradeStateTrigger  # noqa: E402
 from app.core.errors import SafeModeViolation, SafetyViolation  # noqa: E402
 from app.core.events import Event, EventType  # noqa: E402
 from app.database.connection import DatabaseSet, PHASE2_DATABASES  # noqa: E402
@@ -97,6 +97,10 @@ from app.monitoring.metrics import MetricsRegistry  # noqa: E402
 from app.regime import RegimeEngine  # noqa: E402
 from app.risk.engine import RiskEngine, RiskRequest  # noqa: E402
 from app.scanner import AnomalyScanner, PreAnomalyScanner  # noqa: E402
+from app.state_machine import (  # noqa: E402
+    TradeStateContext,
+    TradeStateMachine,
+)
 from app.confirmation import RealTradeConfirmation  # noqa: E402
 from app.telegram.bot import TelegramCommandCenter  # noqa: E402
 from app.universe import UniverseFilter  # noqa: E402
@@ -470,9 +474,12 @@ def run() -> int:
 
         # Demonstration that the wiring is alive: ask the Risk Engine to
         # adjudicate a trivial paper-mode action. RISK_APPROVED is written.
-        # Phase 6 hooks the observed manipulation + confirmation levels
-        # in - with attack_intent=False, the M2 / T0 / T1 attack guards
-        # do NOT fire so the bootstrap remains a clean approval.
+        # Phase 7 hooks the observed manipulation + confirmation levels,
+        # the regime snapshot, the worst Phase 5 universe / liquidity
+        # decisions, the buffer's degraded view, and the exchange link
+        # state. With attack_intent=False and is_new_open=False the
+        # bootstrap stays a clean approval - the Phase 7 No-Trade Gate
+        # does NOT fire on a non-opening self-check.
         bootstrap_manipulation = (
             observed_manipulation_level[0]
             if observed_manipulation_level is not None
@@ -483,16 +490,38 @@ def run() -> int:
             if observed_confirmation_level is not None
             else None
         )
+        # Phase 7: drive a Trade State Machine for the first eligible
+        # symbol so the boot drill exercises STATE_TRANSITION events
+        # via the new state_machine package. Use the buffer's
+        # symbol set; pick the first one for the drill.
+        first_symbol = (
+            exchange_symbols[0].symbol if exchange_symbols else "BOOT"
+        )
+        state_machine = TradeStateMachine(
+            symbol=first_symbol, event_repo=repo
+        )
+        state_machine.transition_to(
+            TradeState.OBSERVE,
+            trigger=TradeStateTrigger.SIGNAL,
+            reasons=("phase7_boot",),
+        )
         decision = risk.evaluate(
             RiskRequest(
                 source_module="bootstrap",
-                action="phase6_self_check",
+                action="phase7_self_check",
                 symbol=None,
                 live_trading_required=False,
                 right_tail_amplify=False,
                 attack_intent=False,
+                # is_new_open=False so the Phase 7 No-Trade Gate does
+                # not fire on the boot self-check (this is a
+                # paper-mode bookkeeping call, not a real opening).
+                is_new_open=False,
                 manipulation_level=bootstrap_manipulation,
                 trade_confirmation_level=bootstrap_confirmation,
+                regime_snapshot=regime_snapshot,
+                is_data_degraded=False,
+                exchange_connection_state=exchange.health.state,
             )
         )
         metrics.incr("risk_decisions_total")
@@ -518,7 +547,7 @@ def run() -> int:
                 payload={
                     "from": fsm.state.value,
                     "to": ExecutionState.IDLE.value,
-                    "reason": "phase6_boot",
+                    "reason": "phase7_boot",
                 },
             )
         )
@@ -535,7 +564,7 @@ def run() -> int:
         repo.record_capital_deposit(
             amount=0.0,
             source_module="bootstrap",
-            note="phase6_boot_paper_marker",
+            note="phase7_boot_paper_marker",
         )
 
         overall, _ = health.evaluate()
@@ -565,6 +594,12 @@ def run() -> int:
         manipulation_count = repo.count_events(
             event_type=EventType.MANIPULATION_DETECTED
         )
+        # Phase 7: count STATE_TRANSITION events written by the
+        # state-machine boot drill (separate from the bootstrap
+        # IDLE -> IDLE marker emitted earlier).
+        state_transition_count = repo.count_events(
+            event_type=EventType.STATE_TRANSITION
+        )
         stats = buffer.stats()
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
@@ -592,13 +627,17 @@ def run() -> int:
             f"anomaly_events={anomaly_count} "
             f"trade_confirmed_events={trade_confirmed_count} "
             f"manipulation_events={manipulation_count} "
+            f"state_transitions={state_transition_count} "
+            f"trade_state={state_machine.state.value} "
+            f"daily_loss_breaker={risk.daily_loss_breaker.state.value} "
+            f"consecutive_loss_breaker={risk.consecutive_loss_breaker.state.value} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )
         # Stop the exchange cleanly so DATA_UNRELIABLE is emitted on
         # shutdown - that lets replay-based tests confirm the lifecycle
         # closed properly.
-        exchange.stop(reason="phase6_shutdown")
+        exchange.stop(reason="phase7_shutdown")
     finally:
         dbs.close()
     return 0

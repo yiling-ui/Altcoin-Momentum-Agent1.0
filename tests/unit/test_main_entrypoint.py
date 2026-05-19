@@ -52,8 +52,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 6 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 6 - Scanner Confirmation Manipulation" in captured
+    # Phase 7 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 7 - State Machine Risk Engine" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -80,6 +80,11 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "anomaly_events=" in captured
     assert "trade_confirmed_events=" in captured
     assert "manipulation_events=" in captured
+    # Phase 7 fields
+    assert "state_transitions=" in captured
+    assert "trade_state=" in captured
+    assert "daily_loss_breaker=" in captured
+    assert "consecutive_loss_breaker=" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
