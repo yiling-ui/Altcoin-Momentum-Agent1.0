@@ -7,6 +7,301 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 9 - Execution FSM + Reconciliation
+
+Phase 9 wires the Execution FSM driver and the Reconciliation
+loop on top of every Phase 1-8.5 contract. The driver advances
+per-order sessions through the 15 ``ExecutionState`` values, emits
+the matching ``ORDER_*`` / ``STOP_*`` / ``POSITION_*`` events,
+and consults the Risk Engine on every NEW open AND every
+reduce-only / protective-exit / kill_all path. Phase 9 runs
+ENTIRELY in paper / mock mode; the four ``ExchangeClientBase``
+write surfaces continue to raise ``SafeModeViolation`` and are
+NEVER overridden.
+
+#### Added
+
+##### `app/execution/` - Execution FSM driver
+
+- `OrderRequest` (frozen Pydantic v2): `client_order_id`, `symbol`,
+  `side`, `kind`, `qty`, `limit_price`, `intent`, `direction`,
+  `time_in_force`, `margin_mode`, `leverage`, `reduce_only`,
+  `stop_price`, `invalid_price`, `max_slippage_pct`,
+  `opportunity_id`, `notes`. Validators enforce `qty > 0`,
+  `leverage >= 1.0`, `0 < max_slippage_pct <= 0.10`,
+  `margin_mode == ISOLATED` (cross margin is not declared at the
+  enum level so a typo cannot construct one). `is_new_open` /
+  `is_reduce_only_intent` properties derive from the intent
+  vocabulary so callers cannot accidentally swap polarity.
+- `OrderIntent` (8 values): `NEW_OPEN`, `SCALE_IN`, `LOCK_PROFIT`,
+  `FORCED_EXIT`, `DISTRIBUTION_EXIT`, `PROTECTIVE_CLOSE`,
+  `KILL_ALL`, `STOP_ATTACH`. Plus `NEW_OPEN_INTENTS` and
+  `REDUCE_ONLY_INTENTS` partition sets that exhaust the enum.
+- `OrderKind` (`LIMIT` / `MARKET` / `STOP_MARKET` / `STOP_LIMIT`).
+- `OrderSide` (`BUY` / `SELL`) plus the `side_for_direction(direction,
+  is_close)` helper that resolves the canonical mapping.
+- `MarginMode` - the enum **only** declares `ISOLATED`. Cross
+  margin is forbidden in Phase 9 (Spec §13.2 + §30.2 "禁止 cross
+  margin") and the enum guarantees it cannot even be constructed.
+- `TimeInForce` (`GTC` / `IOC` / `FOK`).
+- `FillEvent` (frozen Pydantic v2): one fill applied to a session.
+  Validates `fill_qty > 0`, `fill_price > 0`.
+- `StopEvent` (frozen Pydantic v2): reduce-only stop attachment
+  descriptor. The `reduce_only=True` invariant is enforced at the
+  model layer (Spec §30.2 "止盈止损必须 reduce-only") so a stop
+  cannot be constructed with `reduce_only=False`.
+- `ExecutionSession` (mutable dataclass): per-order lifecycle state
+  including `state`, `exchange_order_id`, `stop_order_id`,
+  `position_id`, `filled_qty`, `avg_fill_price`, `realized_pnl`,
+  transition history, learning-context payload, incident_id,
+  protection-mode flag.
+- `ExecutionResult` (frozen): return value of `submit_order`
+  carrying `accepted`, the session, and the rejection reasons.
+- `ExecutionFSMDriver`:
+  - `submit_order(...)` drives `IDLE -> SIGNAL_RECEIVED ->
+    RISK_CHECKED -> ORDER_SENT`. Calls
+    `RiskEngine.evaluate(...)` with `is_new_open` derived from the
+    intent. On rejection, the session is reverted to `IDLE` with
+    `rejection_reasons` attached and removed from the driver's
+    `_sessions` map. On approval, records the order in the paper
+    ledger and writes one `ORDER_SENT` event.
+  - `on_ack(...)` -> `ACK_RECEIVED` + `ORDER_ACK` event.
+  - `on_partial_fill(...)` -> `PARTIAL_FILLED` + `ORDER_PARTIAL_FILLED`
+    event. **Recomputes risk on the remaining size** (Spec §30.2
+    hard rule "部分成交必须重算风险"); a re-rejection drives the
+    session into `ERROR_PROTECTION`.
+  - `on_full_fill(...)` -> `FULL_FILLED` + `ORDER_FILLED` event.
+    Validates that the cumulative filled qty equals the request
+    size.
+  - `attach_stop(stop_price=...)` -> `STOP_SENT` + `STOP_SENT`
+    event. The stop is constructed with `reduce_only=True`; any
+    reduce-only intent (`LOCK_PROFIT` / `FORCED_EXIT` / etc.) is
+    refused as a stop attachment target.
+  - `on_stop_confirmed(stop=...)` -> `STOP_CONFIRMED` ->
+    `POSITION_OPEN`. Records the paper position and writes one
+    `POSITION_OPENED` event.
+  - `on_stop_failed(reason=...)` -> `STOP_FAILED` ->
+    `ERROR_PROTECTION`. Spec §30.3 "止损挂不上：立即保护平仓":
+    the driver opens a P0 incident via the protection hook,
+    emits `PROTECTION_MODE_ENTERED`, and runs an automatic
+    reduce-only protective close on the paper position.
+  - `trigger_exit(reason=...)` -> `EXIT_TRIGGERED` ->
+    `POSITION_CLOSING`. Calls `RiskEngine.evaluate(...)` with
+    `is_new_open=False` so M3 / DATA_DEGRADED / REGIME /
+    EXCHANGE_DISCONNECTED / REBASE_IN_PROGRESS gates do NOT block
+    the exit (Phase 7 protective-exit caveat; Phase 8 rebase rule).
+  - `on_position_closed(realized_pnl=...)` -> `POSITION_CLOSED` ->
+    `IDLE`. Removes the paper position from the ledger.
+  - `enter_error_protection(...)` / `exit_protection_mode(...)` -
+    public entry points for the operator override path.
+  - `simulate_paper_lifecycle(...)` - high-level helper used by
+    the boot drill.
+  - **Construction-time refusal** of `trading_mode != paper`,
+    `live_trading_enabled=True`, `exchange_live_order_enabled=True`
+    (defence in depth on top of the Phase 1 boot guard).
+  - **Every Phase 9 event carries `opportunity_id` and
+    `learning_ready`** when the caller supplies them, so future
+    Replay / Reflection / Dataset Builder can group every order /
+    stop / fill / position event by opportunity (Phase 8.5
+    contract).
+- `PaperLedger` - in-memory paper-mode store of `PaperOrder` /
+  `PaperStop` / `PaperPosition` / `PaperEquity`. Pure data; never
+  opens a network surface. Provides observability counters
+  (`orders_recorded`, `stops_recorded`, `positions_opened`,
+  `positions_closed`).
+- The Phase 1 `ExecutionFSM` skeleton + `IllegalTransition` are
+  preserved verbatim for back-compat (Phase 1 tests + the boot
+  drill still construct it).
+
+##### `app/incidents/` - IncidentRepository
+
+- `Incident` dataclass (`incident_id`, `level`, `title`,
+  `description`, `source_module`, `symbol`, `position_id`,
+  `opened_at`, `resolved_at`, `resolution`, `payload`).
+- `IncidentRecord` dataclass (one row of the `incident_log` table).
+- `INCIDENT_STATE_OPENED` / `INCIDENT_STATE_UPDATED` /
+  `INCIDENT_STATE_RESOLVED` constants matching the Phase 2
+  `incidents.sql` schema.
+- `IncidentRepository`:
+  - `open_incident(level=, title=, description=, source_module=,
+    symbol=, position_id=, payload=, ...)` - writes one row into
+    `incidents.incidents` + one row into
+    `incidents.incident_log` + one `INCIDENT_OPENED` event.
+  - `update_incident(incident_id=, note=, payload=, ...)` -
+    appends one `incident_log` row with state=`updated`.
+  - `resolve_incident(incident_id=, resolution=, ...)` - updates
+    the `incidents` row's `resolved_at` / `resolution` columns +
+    appends a `resolved` row + emits one `INCIDENT_RESOLVED`
+    event.
+  - `enter_protection_mode(reason=, ...)` /
+    `exit_protection_mode(reason=, ...)` - emit
+    `PROTECTION_MODE_ENTERED` / `PROTECTION_MODE_EXITED` events
+    and toggle the `in_protection_mode` flag.
+  - Read-only queries: `get_incident(incident_id)`,
+    `list_open_incidents(level=, symbol=)`, `list_log_for(incident_id)`.
+  - Counters for monitoring: `opened_count`, `resolved_count`,
+    `protection_entered_count`, `protection_exited_count`,
+    `last_protection_reason`.
+- `ProtectionHook` typing.Protocol exposing `open_incident`,
+  `enter_protection_mode`, `exit_protection_mode` so the FSM
+  driver and the Reconciler stay decoupled from the SQLite layer
+  (tests substitute mocks).
+
+Phase 9 is the **first phase that writes to `incidents.db`**.
+Earlier phases shipped only the schema; Phase 2 explicitly
+forbade writes.
+
+##### `app/reconciliation/` - Reconciliation engine
+
+- `MismatchType` (8 values): `ORDER_MISMATCH`,
+  `POSITION_MISMATCH`, `STOP_MISMATCH`, `EQUITY_DRIFT`,
+  `WS_REST_CONFLICT` (the 5 mandated by Issue #9), plus three
+  P0-promoted sub-types `GHOST_POSITION`,
+  `MISSING_REMOTE_POSITION`, `UNATTACHED_STOP` so reflection /
+  replay can group P0 incidents by canonical name without
+  re-deriving them from the parent payload.
+- `MismatchSeverity` (`P0` / `P1` / `P2`).
+- `OrderView` / `PositionView` / `StopView` / `EquitySnapshot` /
+  `LinkHealth` - frozen value objects describing the two snapshot
+  sides.
+- `LocalSnapshot` / `RemoteSnapshot` - the two inputs the
+  reconciler consumes. Pure functions
+  `local_snapshot_from_paper_ledger(...)` /
+  `remote_snapshot_from_paper_ledger(...)` build them from the
+  in-process paper ledger; tests can construct divergent
+  snapshots directly to exercise the mismatch paths.
+- `Mismatch` (frozen): one concrete mismatch carrying
+  `mismatch_type`, `severity`, `symbol`, `summary`, `details`.
+- `ReconciliationDecision` (frozen): result of one pass. Carries
+  `started_at`, `finished_at`, `mismatches`, `incidents_opened`,
+  `new_opens_paused`, `protection_mode_entered`, `notes`. Plus
+  `matched`, `severities`, `has_p0` derived properties.
+- `Reconciler`:
+  - `reconcile(local=, remote=)` writes one
+    `RECONCILIATION_STARTED` event, one
+    `RECONCILIATION_MISMATCH` event per mismatch, and one
+    `RECONCILIATION_RESOLVED` event with
+    `mismatch_count` / `p0_count` / `p1_count` /
+    `new_opens_paused` / `incident_ids` / `notes`.
+  - Opens a P0 incident via `protection_hook.open_incident(...)`
+    on every P0 mismatch.
+  - Drives `protection_hook.enter_protection_mode(...)` on any
+    P0 mismatch; the boot drill registers an
+    `IncidentRepository` as the hook so this lands in
+    `incidents.db` AND emits a `PROTECTION_MODE_ENTERED` event.
+  - `new_opens_paused=True` on any non-empty mismatch list; the
+    flag advises the FSM driver to refuse new `NEW_OPEN` /
+    `SCALE_IN` `submit_order` calls until the next clean
+    reconciliation.
+  - A clean reconciliation clears `new_opens_paused`
+    automatically (operator-equivalent of `/resume`).
+  - Tunable thresholds: `equity_drift_tolerance_abs=0.01` USDT,
+    `equity_drift_tolerance_rel=0.005` (0.5%),
+    `qty_tolerance=1e-9`, `stop_price_tolerance_pct=0.001`
+    (0.1%). The reconciler treats abs OR rel passing as "within
+    tolerance" - both must exceed before the drift fires.
+
+##### Risk Engine integration (Phase 9-only consumer of an existing API)
+
+Phase 9 makes **no** changes to `RiskEngine` / `RiskRequest`. The
+existing Phase 7 protective-exit caveat (`is_new_open=False` is
+the right way to bypass M3 / DATA_DEGRADED / REGIME /
+EXCHANGE_DISCONNECTED gates) and the Phase 8 rebase rule
+(`is_rebase_in_progress` blocks new opens but never blocks exits)
+already do the right thing. Phase 9 simply derives `is_new_open`
+from the `OrderIntent` vocabulary so callers cannot pass the
+wrong flag.
+
+Verified by the Phase 9 boundary tests: M3 + protective close
+PASSES, DATA_DEGRADED + protective close PASSES,
+REBASE_IN_PROGRESS + protective close PASSES; the corresponding
+`is_new_open=True` paths are still rejected.
+
+##### Boot drill (`python -m app.main`)
+
+The boot drill now drives ONE paper-mode order through the full
+Execution FSM (`NEW_OPEN` -> `POSITION_OPEN` -> `LOCK_PROFIT` exit
+-> `POSITION_CLOSED` -> `IDLE`) and runs ONE reconciliation pass
+against snapshots built from the same paper ledger. In paper mode
+the local view equals the remote view, so the boot reconciliation
+is always clean (zero mismatches, zero incidents). The banner
+gained 14 new fields (`orders_submitted`, `order_sent_events`,
+`order_filled_events`, `stops_confirmed`, `positions_opened`,
+`positions_closed`, `reconciliations_run`,
+`reconciliation_started_events`, `reconciliation_resolved_events`,
+`reconciliation_mismatches`, `new_opens_paused`,
+`incidents_opened`, `protection_mode_entered`).
+
+Two new health probes are registered:
+  - `execution_driver` - DEGRADED if the driver has entered
+    `ERROR_PROTECTION` at least once.
+  - `reconciliation` - DEGRADED if `new_opens_paused=True` at the
+    end of the boot pass.
+
+##### Documentation + version bump
+
+- `app/__init__.py` -> `1.4.0a9` /
+  `Phase 9 - Execution FSM Reconciliation`.
+- `pyproject.toml` -> `1.4.0a9`.
+- `README.md` -> Phase 9 deliverable + boundary section + status
+  table updated (Phase 8.5 marked merged, Phase 9 is "this branch").
+- `docs/CHANGELOG.md` -> Phase 9 entry prepended; the Phase 8.5
+  entries are preserved verbatim below.
+
+#### Tests
+
+```
+$ python3.12 -m pytest tests/unit
+1091 passed in 9.28s
+```
+
+**+149 new Phase 9 tests on top of 942 retained from Phase 1-8.5 = 1091 total.**
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_execution_models.py` | 16 | OrderRequest validators (qty / leverage / margin_mode / slippage), `is_new_open` / `is_reduce_only_intent` derivation, intent partition complete, FillEvent / StopEvent validators (incl. `reduce_only` enforcement), `side_for_direction`, OrderKind / MarginMode vocabularies. |
+| `test_paper_ledger.py` | 10 | record_order, partial-fill clamping, close_order, stops, positions (incl. cascading stop removal on close), equity snapshot. |
+| `test_execution_fsm_driver.py` | 28 | construction guards (3), submit_order happy path + opportunity_id propagation + learning_ready propagation + duplicate refusal, market-order on NEW_OPEN refused vs allowed for protective close, reduce_only auto-resolution, risk rejection paths (M3 new open, M3 protective close PASSES, DATA_DEGRADED protective close PASSES, REBASE_IN_PROGRESS protective close PASSES), full lifecycle event sequence, partial fill recompute (Spec §30.2), VWAP computation, full fill consume remaining, stop attach reduce_only, on_stop_failed -> ERROR_PROTECTION + P0 incident + protective close, on_stop_confirmed -> POSITION_OPENED + paper position, trigger_exit calls Risk Engine with is_new_open=False, M3 protective exit does not open incident, enter / exit_protection_mode lifecycle. |
+| `test_incidents_repository.py` | 8 | open_incident writes row + log + INCIDENT_OPENED, update_incident appends log row only, resolve_incident updates row + emits INCIDENT_RESOLVED, get / list helpers, enter / exit protection mode events, ProtectionHook surface. |
+| `test_reconciler.py` | 16 | clean recon, paper ledger round trip clean, ghost position P0 + new_opens_paused + protection_hook P0 incident, missing remote position P0, position qty disagreement P0, unattached_stop P0, order local-only P1, order qty disagreement, equity within tolerance / above tolerance, WS-REST conflict P1, both-connected no fire, new_opens_paused state machine clears on clean recon, RECONCILIATION_RESOLVED payload counts, RECONCILIATION_MISMATCH event per mismatch. |
+| `test_phase9_boundary.py` | 16 | Phase 1 lock unchanged, Phase 3 write surfaces still refuse on Mock + Binance skeleton, Phase 9 packages don't subclass ExchangeClientBase, no write surface method definitions, OrderIntent / OrderKind / MarginMode / MismatchType / MismatchSeverity vocabularies pinned, driver construction guard, all Phase 9 EventType values reachable, public exports, OrderRequest model-level validators. |
+| `test_phase9_no_network.py` | ~50 | per-file AST scan of every `.py` under `app/execution/`, `app/incidents/`, `app/reconciliation/`: no forbidden import (ccxt / binance / aiohttp / websockets / requests / httpx / openai / anthropic / deepseek / telegram), no write-surface method, no `api_key` / `api_secret` / `bot_token` parameter or literal, no `os.environ.get` / `getenv()`, no `send_message` / `send_document` / `send_photo` reference, no other-DB `sqlite3.connect`. |
+
+`tests/unit/test_main_entrypoint.py` was extended (not replaced)
+to assert the new Phase 9 banner fields and Phase 9 event counts
+(1 each of `ORDER_SENT` / `ORDER_ACK` / `ORDER_FILLED` /
+`STOP_SENT` / `STOP_CONFIRMED` / `POSITION_OPENED` /
+`EXIT_TRIGGERED` / `POSITION_CLOSED`, 1 `RECONCILIATION_STARTED`
++ `RECONCILIATION_RESOLVED`, 0 `RECONCILIATION_MISMATCH`, 0
+`INCIDENT_OPENED`, 0 `PROTECTION_MODE_ENTERED`).
+
+#### Live trading risk
+
+**None.**
+
+  - `requirements.txt` and `pyproject.toml` contain no exchange
+    SDK, no HTTP / WebSocket client, no LLM client, no Telegram
+    bot library.
+  - No source under `app/execution/`, `app/incidents/`,
+    `app/reconciliation/` imports `ccxt`, `binance`, `aiohttp`,
+    `websockets`, `requests`, `httpx`, `openai`, `anthropic`,
+    `deepseek`, or any Telegram library.
+  - No source under those packages defines `create_order` /
+    `cancel_order` / `set_leverage` / `set_margin_mode`.
+  - `MarginMode` enum does not even declare `CROSS`.
+  - `ExchangeClientBase.{create_order, cancel_order, set_leverage,
+    set_margin_mode}` continue to raise `SafeModeViolation` from
+    the base class.
+  - The Phase 1 safety lock + the Phase 3 read-only invariant +
+    every Phase 4 / 5 / 6 / 7 / 8 / 8.5 contract are unchanged.
+    Boot banner still shows
+    `mode=paper live_trading=False right_tail=False llm=False
+    exchange_live_orders=False`.
+  - The `ExecutionFSMDriver` refuses to construct unless the
+    Phase 1 safety lock matches paper-mode (defence in depth).
+
+## [Unreleased - prior]
+
 ### Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract
 
 Phase 8.5 lays the **passive data contract** every future phase

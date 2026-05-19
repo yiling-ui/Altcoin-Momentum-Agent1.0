@@ -18,7 +18,17 @@ The boot routine must:
     - exercise the Phase 6 Pre-Anomaly / Anomaly / Confirmation /
       Manipulation classifiers: emit one of each event type per
       symbol.
-    - emit a DATA_UNRELIABLE + EXCHANGE_DISCONNECTED event on shutdown
+    - exercise the Phase 9 Execution FSM driver: drive ONE paper-mode
+      order from IDLE through POSITION_OPEN and POSITION_CLOSED. Emit
+      ORDER_SENT / ORDER_ACK / ORDER_FILLED / STOP_SENT /
+      STOP_CONFIRMED / POSITION_OPENED / EXIT_TRIGGERED /
+      POSITION_CLOSED.
+    - exercise the Phase 9 Reconciliation loop: emit
+      RECONCILIATION_STARTED + RECONCILIATION_RESOLVED. The boot
+      drill must produce zero RECONCILIATION_MISMATCH events because
+      the local + remote snapshots are built from the same paper
+      ledger.
+    - emit a DATA_UNRELIABLE + EXCHANGE_DISCONNECTED event on shutdown.
 """
 
 from __future__ import annotations
@@ -52,8 +62,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 8.5 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract" in captured
+    # Phase 9 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 9 - Execution FSM Reconciliation" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -85,6 +95,20 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "trade_state=" in captured
     assert "daily_loss_breaker=" in captured
     assert "consecutive_loss_breaker=" in captured
+    # Phase 9 fields
+    assert "orders_submitted=" in captured
+    assert "order_sent_events=" in captured
+    assert "order_filled_events=" in captured
+    assert "stops_confirmed=" in captured
+    assert "positions_opened=" in captured
+    assert "positions_closed=" in captured
+    assert "reconciliations_run=" in captured
+    assert "reconciliation_started_events=" in captured
+    assert "reconciliation_resolved_events=" in captured
+    assert "reconciliation_mismatches=0" in captured
+    assert "new_opens_paused=False" in captured
+    assert "incidents_opened=0" in captured
+    assert "protection_mode_entered=" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -169,5 +193,27 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         for ev in manipulation:
             assert "level" in ev.payload
             assert ev.payload["level"] in ("M0", "M1", "M2", "M3")
+        # Phase 9: the boot drill drives one paper-mode order through
+        # the full Execution FSM.
+        order_sent = repo.list_events(event_type=EventType.ORDER_SENT)
+        assert len(order_sent) == 1
+        assert order_sent[0].payload["intent"] == "new_open"
+        assert order_sent[0].payload["request"]["margin_mode"] == "isolated"
+        assert order_sent[0].payload["opportunity_id"] == "opp_phase9_boot"
+        assert repo.count_events(event_type=EventType.ORDER_ACK) == 1
+        assert repo.count_events(event_type=EventType.ORDER_FILLED) == 1
+        assert repo.count_events(event_type=EventType.STOP_SENT) == 1
+        assert repo.count_events(event_type=EventType.STOP_CONFIRMED) == 1
+        assert repo.count_events(event_type=EventType.POSITION_OPENED) == 1
+        assert repo.count_events(event_type=EventType.EXIT_TRIGGERED) == 1
+        assert repo.count_events(event_type=EventType.POSITION_CLOSED) == 1
+        # Phase 9: ONE clean reconciliation pass at boot, no mismatch.
+        assert repo.count_events(event_type=EventType.RECONCILIATION_STARTED) == 1
+        assert repo.count_events(event_type=EventType.RECONCILIATION_RESOLVED) == 1
+        assert repo.count_events(event_type=EventType.RECONCILIATION_MISMATCH) == 0
+        # Phase 9: clean boot writes ZERO incidents and stays out of
+        # protection mode.
+        assert repo.count_events(event_type=EventType.INCIDENT_OPENED) == 0
+        assert repo.count_events(event_type=EventType.PROTECTION_MODE_ENTERED) == 0
     finally:
         conn.close()
