@@ -62,8 +62,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 10B entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 10B - Reflection Engine" in captured
+    # Phase 10C entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 10C - LLM Guarded Interpreter" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -120,6 +120,14 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "reflection_result=breakeven" in captured
     assert "reflection_mistake_tags=" in captured
     assert "reflection_data_quality_notes=" in captured
+    # Phase 10C fields - LLM interpreter self-check (degraded by default).
+    assert "llm_interpreter_degraded=True" in captured
+    assert "llm_disabled" in captured  # in llm_interpreter_reasons
+    assert "llm_events=" in captured
+    assert "llm_degraded_count=" in captured
+    assert "llm_interpreted_events=0" in captured
+    assert "llm_degraded_events=" in captured
+    assert "llm_schema_rejected_events=0" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -226,5 +234,19 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         # protection mode.
         assert repo.count_events(event_type=EventType.INCIDENT_OPENED) == 0
         assert repo.count_events(event_type=EventType.PROTECTION_MODE_ENTERED) == 0
+        # Phase 10C: the LLM boot self-check writes exactly one
+        # LLM_DEGRADED event (llm_enabled=False short-circuit). It
+        # MUST NOT write LLM_INTERPRETED on a default boot.
+        assert repo.count_events(event_type=EventType.LLM_DEGRADED) >= 1
+        assert repo.count_events(event_type=EventType.LLM_INTERPRETED) == 0
+        assert repo.count_events(event_type=EventType.LLM_SCHEMA_REJECTED) == 0
+        # Phase 10C: every LLM_DEGRADED audit payload MUST be free of
+        # forbidden trade-action keys.
+        forbidden_in_payload = {
+            "direction", "leverage", "position_size", "target_price",
+            "should_buy", "should_short", "trade_decision", "order",
+        }
+        for ev in repo.list_events(event_type=EventType.LLM_DEGRADED):
+            assert not (forbidden_in_payload & set(ev.payload))
     finally:
         conn.close()

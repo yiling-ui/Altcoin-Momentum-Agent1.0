@@ -1,53 +1,63 @@
 """AMA-RT Altcoin Momentum Agent - Right Tail Edition.
 
-Phase 10B: Reflection Engine (Issue #10 Part 2).
+Phase 10C: LLM Guarded Interpreter (Issue #10 Part 3).
 
 This package is paper-mode by default and contains NO live trading
-code. Every Phase 1-10A contract remains in force. Phase 10B ADDS
-the read-only :mod:`app.reflection` package that consumes Phase 10A
-:class:`ReplayEngine` outputs and the Phase 8.5 ``learning_ready``
-payload to produce one structured :class:`ReflectionResult` per
-paper-trade lifecycle. The result carries a typed ``mistake_tags``
-list, MFE / MAE / tail_contribution metrics (deterministic; ``None``
-when data is insufficient), and four :class:`QualityScore` axes.
+code. Every Phase 1-10B contract remains in force. Phase 10C ADDS
+the receive-only :mod:`app.llm` package: a sandboxed,
+schema-validated, never-trading LLM intelligence layer that
+compresses community / catalyst / narrative text into a small,
+strictly typed intelligence payload (Spec §22). The output is
+informational only; it never carries a trade direction, a leverage,
+a target price, an order, a stop, or any other field that could move
+money. The Risk Engine remains the single gate.
 
-Phase 10B is **read-only**: it opens no socket, imports no exchange
-/ HTTP / WebSocket / LLM / Telegram client, defines no write surface,
-calls no ``EventRepository.append_event``, and never instantiates a
-state-mutating component. Issue #10 Parts 10C (LLM Guarded
-Interpreter) and 10D (Telegram outbound + Export commands) land in
-separate PRs. Issue #10 will be closed by Part 10D.
+Phase 10C is constrained:
+
+  - The five Phase 1 safety flags remain locked. ``llm_enabled``
+    stays ``False`` at boot; the Phase 10C boot self-check exercises
+    the orchestrator with ``llm_enabled=False`` and a deterministic
+    :class:`FakeLLMClient`, producing a degraded result that is
+    persisted as exactly one ``LLM_DEGRADED`` event.
+  - No exchange SDK / HTTP / WebSocket / LLM client / Telegram bot
+    library is imported anywhere under :mod:`app.llm`.
+  - No write surface (``create_order`` / ``cancel_order`` /
+    ``set_leverage`` / ``set_margin_mode``) is added.
+  - No ``api_key`` / ``api_secret`` / ``bot_token`` parameter or
+    concrete literal lives anywhere under :mod:`app.llm`.
+  - No ``os.environ`` / ``getenv`` reads anywhere under
+    :mod:`app.llm` - credentials must be passed in explicitly.
+  - The interpreter NEVER raises into the caller; every failure -
+    transport, schema, exception - converts into a degraded
+    :class:`LLMInterpretationResult`.
+  - Phase 10D (Telegram outbound + Export commands) ships in a
+    separate PR; Phase 10C does NOT introduce a Telegram surface.
+
+Phase 10B contracts that remain in force:
+
+  - app.reflection.*: read-only Reflection Engine on top of Phase
+    10A Replay outputs and the Phase 8.5 ``learning_ready`` payload.
+  - app.replay.*: read-only Replay Engine over events.db. Never
+    writes; never opens a socket.
 
 Phase 9 contracts that remain in force:
 
-  - app.execution.*: Phase 9 Execution FSM driver, OrderRequest /
-    OrderIntent vocabulary, FillEvent / StopEvent value objects,
-    PaperLedger in-memory paper-mode store. The Phase 1 ExecutionFSM
-    skeleton is preserved verbatim.
-  - app.reconciliation.*: Reconciler engine with 5 mismatch types
-    (orders / positions / stops / equity / WS-vs-REST) plus 3 P0
-    sub-types (ghost_position / missing_remote_position /
-    unattached_stop). Pure-function design over LocalSnapshot /
-    RemoteSnapshot value objects.
-  - app.incidents.*: IncidentRepository - first writer of
-    incidents.db. Emits INCIDENT_OPENED / INCIDENT_RESOLVED /
-    PROTECTION_MODE_ENTERED / PROTECTION_MODE_EXITED through
-    EventRepository.
+  - app.execution.*: paper-mode Execution FSM driver. The four
+    ExchangeClientBase write surfaces continue to raise
+    SafeModeViolation; Phase 10C NEVER overrides them.
+  - app.reconciliation.*: pure-function reconciler.
+  - app.incidents.*: incident repository (writes incidents.db).
 
-Phase 9 runs ENTIRELY in paper / mock mode. The four
-ExchangeClientBase write surfaces (create_order, cancel_order,
-set_leverage, set_margin_mode) continue to raise SafeModeViolation;
-Phase 9 NEVER overrides them. Paper-mode execution state lives in a
-separate PaperLedger; it is NOT a substitute for trades.db /
-positions.db (those land behind a real exchange adapter in a future
-PR).
+Phase 10C does NOT implement:
 
-Phase 10B does NOT implement the rest of Issue #10 (LLM Guarded
-Interpreter, Telegram outbound, Export commands), full AI Learning,
-Feature Store, model training, complex data collection / reporting
-pipeline, real-trade persistence, free-form natural-language
-reflection, or live trading.
+  - Any real LLM transport (DeepSeek client is a refusal-only
+    skeleton)
+  - Telegram outbound / bot client / file export commands
+  - Free-form natural-language reflection
+  - LLM-driven trade decisions / direction / leverage / target_price
+  - Real network access at boot
+  - Real-trade persistence into trades.db / positions.db
 """
 
-__version__ = "1.4.0a10b"
-__phase__ = "Phase 10B - Reflection Engine"
+__version__ = "1.4.0a10c"
+__phase__ = "Phase 10C - LLM Guarded Interpreter"
