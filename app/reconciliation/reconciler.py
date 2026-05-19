@@ -192,12 +192,36 @@ class Reconciler:
 
     @property
     def has_open_p0_incident(self) -> bool:
-        """True if the reconciler has opened P0 incidents that the
-        operator has not yet acknowledged via
-        :meth:`mark_p0_incidents_resolved`. The reconciler is the only
-        process-side authority on this flag; the IncidentRepository is
-        the on-disk record but does not push notifications back here.
+        """True if any P0 incident is currently unresolved.
+
+        Reads through the wired :class:`ProtectionHook` (canonical
+        source) when one is available - this counts ALL open P0
+        incidents in the IncidentRepository, regardless of which
+        module opened them. That's deliberately conservative: if any
+        P0 is unresolved anywhere in the system, new opens stay
+        paused.
+
+        Falls back to a local latch when no hook is wired (e.g.
+        minimal unit tests). The local latch is the OR of "this
+        reconciler opened a P0 in this process lifetime that has not
+        been cleared via :meth:`mark_p0_incidents_resolved`".
+
+        Note on process restart: the local fallback flag is
+        process-bounded. After a restart, the next reconciliation
+        pass re-establishes protection from the on-disk state of the
+        IncidentRepository (when wired) or from the next mismatch it
+        observes. The brief Issue #9 fix-up does not require
+        cross-restart persistence of operator-acknowledgement state.
         """
+        hook = self._protection_hook
+        if hook is not None and hasattr(hook, "list_open_incidents"):
+            try:
+                from app.core.enums import IncidentLevel as _IncidentLevel
+
+                open_p0 = hook.list_open_incidents(level=_IncidentLevel.P0)
+                return bool(open_p0)
+            except Exception:  # pragma: no cover - defensive
+                pass
         return self._has_open_p0_incident
 
     @property
@@ -234,8 +258,18 @@ class Reconciler:
         *,
         note: str | None = None,
     ) -> None:
-        """Operator / incident-side signal that every open P0 incident
+        """Operator / incident-side signal that every P0 incident
         opened by this reconciler has been resolved.
+
+        Clears only the LOCAL fallback flag. When a protection hook
+        is wired, :attr:`has_open_p0_incident` reads from
+        :meth:`IncidentRepository.list_open_incidents` directly, so
+        an operator who calls this method without ALSO resolving the
+        incidents in the repository (via
+        :meth:`IncidentRepository.resolve_incident`) will still see
+        ``has_open_p0_incident=True`` from the canonical source, and
+        the latch will not clear. That decoupling is deliberate: the
+        on-disk record is the source of truth.
 
         Does NOT by itself unpause new opens; the pause only clears
         when :meth:`reconcile` next runs and finds a clean state with
@@ -307,13 +341,18 @@ class Reconciler:
             :attr:`has_open_p0_incident` is False, the protection mode
             is not active, and an operator confirmation is staged.
 
+        Reads ``has_open_p0_incident`` and ``protection_mode_active``
+        through their PROPERTIES, not the underlying local fields, so
+        the canonical-source semantics (read from the wired
+        :class:`IncidentRepository` when available) are honoured.
+
         Risk Engine approval is enforced separately by the FSM driver
         on the next ``submit_order`` call.
         """
         if not self._p0_latched_pause:
             return True
         return (
-            (not self._has_open_p0_incident)
+            (not self.has_open_p0_incident)
             and (not self.protection_mode_active)
             and self._operator_resume_confirmed
         )
@@ -387,6 +426,16 @@ class Reconciler:
                 # clean reconciliation all line up (Issue #9 fix-up).
                 self._p0_latched_pause = True
                 self._has_open_p0_incident = True
+                # Invalidate any stale operator confirmation. A
+                # confirmation staged BEFORE this P0 (e.g. for an
+                # earlier incident, or pre-emptively) must not carry
+                # forward - the operator has to re-confirm AFTER they
+                # have inspected this fresh P0.
+                if self._operator_resume_confirmed:
+                    notes.append(
+                        "operator_resume_confirmed_invalidated_by_new_p0"
+                    )
+                    self._operator_resume_confirmed = False
                 notes.append("p0_latched_pause")
         else:
             # Clean pass. Distinguish P1-only vs P0-latched pauses.
@@ -406,7 +455,7 @@ class Reconciler:
                 else:
                     # Latched: clean alone is not enough.
                     blockers: list[str] = []
-                    if self._has_open_p0_incident:
+                    if self.has_open_p0_incident:
                         blockers.append("has_open_p0_incident")
                     if self.protection_mode_active:
                         blockers.append("protection_mode_active")
@@ -480,7 +529,7 @@ class Reconciler:
                     ),
                     "new_opens_paused": self._new_opens_paused,
                     "p0_latched_pause": self._p0_latched_pause,
-                    "has_open_p0_incident": self._has_open_p0_incident,
+                    "has_open_p0_incident": self.has_open_p0_incident,
                     "protection_mode_active": self.protection_mode_active,
                     "operator_resume_confirmed": self._operator_resume_confirmed,
                     "protection_mode_entered": protection_entered,

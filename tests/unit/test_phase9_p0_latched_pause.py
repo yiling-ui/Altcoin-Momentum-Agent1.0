@@ -476,3 +476,130 @@ def test_p0_latch_works_without_protection_hook(in_memory_repo):
     rec.reconcile(local=LocalSnapshot(), remote=RemoteSnapshot())
     assert rec.new_opens_paused is False
     assert rec.p0_latched_pause is False
+
+
+
+# ---------------------------------------------------------------------------
+# Production-safety hardening (post-audit)
+# ---------------------------------------------------------------------------
+def test_pre_emptive_operator_confirmation_is_invalidated_by_new_p0(wired):
+    """Hole #1: a confirmation staged BEFORE any P0 (or for a previous
+    P0) must NOT survive into a fresh P0 event. The operator must
+    re-confirm AFTER inspecting the new P0 - otherwise a single
+    pre-emptive ``confirm_operator_resume()`` could silently auto-
+    resume new opens after every future P0.
+    """
+    rec, _, _ = wired
+    # Operator confirms BEFORE any P0 lands (e.g. responding to a
+    # P1 false alarm, or pre-emptively).
+    rec.confirm_operator_resume(reason="pre_emptive")
+    assert rec.operator_resume_confirmed is True
+
+    # Now a P0 lands.
+    rec.reconcile(local=LocalSnapshot(), remote=_ghost_remote())
+    assert rec.p0_latched_pause is True
+    # The pre-emptive confirmation MUST be invalidated by the new P0.
+    assert rec.operator_resume_confirmed is False
+
+
+def test_stale_confirmation_invalidated_when_second_p0_lands_after_first_resolved(
+    wired,
+):
+    """Confirmation for P0 #1 must not carry forward to P0 #2 even
+    when the operator has already done the work for #1 but not #2.
+    """
+    rec, incidents, _ = wired
+    # P0 #1 fires.
+    rec.reconcile(local=LocalSnapshot(), remote=_ghost_remote("ALPHAUSDT"))
+    # Operator does the full work for #1.
+    for inc in incidents.list_open_incidents(level=IncidentLevel.P0):
+        incidents.resolve_incident(
+            incident_id=inc.incident_id, resolution="resolved"
+        )
+    rec.mark_p0_incidents_resolved()
+    rec.exit_protection_mode(reason="operator_resume_1")
+    rec.confirm_operator_resume(reason="operator_resume_1")
+    assert rec.operator_resume_confirmed is True
+
+    # P0 #2 fires BEFORE the latch clears (e.g. another ghost
+    # position pops up on a different symbol).
+    rec.reconcile(local=LocalSnapshot(), remote=_ghost_remote("BETAUSDT"))
+    # The stale confirmation from #1 MUST NOT survive.
+    assert rec.operator_resume_confirmed is False
+    assert rec.p0_latched_pause is True
+
+
+def test_has_open_p0_incident_reads_from_incident_repository_when_wired(wired):
+    """Hole #2: ``has_open_p0_incident`` must read from the wired
+    :class:`IncidentRepository` (the on-disk source of truth), NOT
+    from a process-local boolean. This prevents an operator who
+    calls ``mark_p0_incidents_resolved()`` without ALSO resolving
+    the incidents in the repository from prematurely clearing the
+    latch.
+    """
+    rec, incidents, _ = wired
+    rec.reconcile(local=LocalSnapshot(), remote=_ghost_remote())
+    assert rec.has_open_p0_incident is True
+
+    # Operator calls mark_p0_incidents_resolved on the reconciler
+    # but does NOT actually resolve the incidents in the repository.
+    rec.mark_p0_incidents_resolved()
+    # Canonical source still shows open P0 -> has_open_p0_incident
+    # MUST still be True.
+    assert rec.has_open_p0_incident is True
+
+    # Now genuinely resolve the incidents.
+    for inc in incidents.list_open_incidents(level=IncidentLevel.P0):
+        incidents.resolve_incident(
+            incident_id=inc.incident_id, resolution="genuine_resolution"
+        )
+    # Now the canonical source is empty.
+    assert rec.has_open_p0_incident is False
+
+
+def test_premature_mark_p0_resolved_does_not_clear_pause_when_repo_still_open(wired):
+    """End-to-end: an operator who lies about resolving the P0
+    cannot use the latch-clear API to silently resume new opens.
+    """
+    rec, incidents, _ = wired
+    rec.reconcile(local=LocalSnapshot(), remote=_ghost_remote())
+    # Operator skips the actual repo resolution.
+    rec.mark_p0_incidents_resolved(note="i swear i fixed it")
+    rec.exit_protection_mode(reason="operator_resume")
+    rec.confirm_operator_resume(reason="operator_resume")
+
+    # Even with the local boolean cleared, the canonical source still
+    # holds open P0 incidents, so the next clean pass keeps the latch.
+    decision = rec.reconcile(local=LocalSnapshot(), remote=RemoteSnapshot())
+    assert decision.new_opens_paused is True
+    assert rec.p0_latched_pause is True
+    assert rec.has_open_p0_incident is True
+
+
+def test_can_clear_pause_helper_returns_true_only_when_all_conditions_met(wired):
+    """Direct unit test for ``can_clear_pause_after_clean_reconciliation()``.
+    """
+    rec, incidents, _ = wired
+    # Initially no latch -> always clearable.
+    assert rec.can_clear_pause_after_clean_reconciliation() is True
+
+    # Latch a P0.
+    rec.reconcile(local=LocalSnapshot(), remote=_ghost_remote())
+    # All three blockers active -> not clearable.
+    assert rec.can_clear_pause_after_clean_reconciliation() is False
+
+    # Resolve P0 only.
+    for inc in incidents.list_open_incidents(level=IncidentLevel.P0):
+        incidents.resolve_incident(
+            incident_id=inc.incident_id, resolution="resolved"
+        )
+    rec.mark_p0_incidents_resolved()
+    assert rec.can_clear_pause_after_clean_reconciliation() is False  # protection / confirmation
+
+    # Add protection-mode exit.
+    rec.exit_protection_mode(reason="op_resume")
+    assert rec.can_clear_pause_after_clean_reconciliation() is False  # confirmation still missing
+
+    # Add operator confirmation.
+    rec.confirm_operator_resume()
+    assert rec.can_clear_pause_after_clean_reconciliation() is True
