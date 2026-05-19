@@ -1,22 +1,22 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 10C - LLM Guarded Interpreter (Issue #10 Part 3).
-> **Paper / mock execution only.** Phase 10C adds the receive-only,
-> sandboxed :mod:`app.llm` package on top of every Phase 1-10B
-> contract. The :class:`LLMGuardedInterpreter` compresses
-> community / catalyst / narrative text into a small, **strictly
-> typed** intelligence payload (Spec §22). The output is *purely
-> informational*: it never carries a trade direction, a leverage,
-> a target price, an order, a stop, or any other field that could
-> move money. **The Risk Engine remains the single gate.** The
-> default boot path keeps ``llm_enabled=False`` (Phase 1 safety
-> lock) - the Phase 10C boot self-check exercises the orchestrator
-> against a deterministic :class:`FakeLLMClient` and produces a
-> degraded result tagged ``llm_disabled``, persisted as exactly one
-> ``LLM_DEGRADED`` event. The interpreter NEVER raises into the
-> caller; every transport / schema / guardrail failure is wrapped
-> into a degraded :class:`LLMInterpretationResult`. Issue #10 Part
-> 10D (Telegram outbound + Export commands) ships in a separate PR.
+> **Phase status:** Phase 10D - Telegram Outbound + Export Commands (Issue #10 Part 4).
+> **Paper / mock execution only.** Phase 10D adds the operator-facing
+> :mod:`app.telegram` outbound layer + the file-export bridge layered
+> on top of every Phase 1-10C contract. The dispatcher proactively
+> pushes formatter-rendered alerts (regime flips, candidate symbols,
+> state transitions, order events, risk rejections, profit locks,
+> capital rebases, P0/P1 incidents, daily reports). The command
+> center accepts 16 operator commands (status / positions / pnl /
+> risk / capital / incidents / pause / resume / kill_all / rebase +
+> 6 ``/export_*``). The export bridge connects ``/export_*`` to the
+> Phase 8.5 :class:`TestDataExportService` and sends a SHORT
+> generating summary + the redacted ``.zip`` document attachment;
+> never a raw chat dump. **The Risk Engine remains the single gate.**
+> The default boot path keeps ``outbound_enabled=False`` (Phase 1
+> safety lock + Phase 10D refusal-only HTTP skeleton); the Phase 10D
+> boot self-check exercises every public path against a deterministic
+> :class:`FakeTelegramClient` that opens NO socket. **Closes Issue #10**.
 >
 > The Phase 1 safety lock (`mode=paper`,
 > `live_trading_enabled=False`, `right_tail_enabled=False`,
@@ -24,8 +24,9 @@
 > every later boundary remain in force. The four
 > ``ExchangeClientBase`` write surfaces (``create_order``,
 > ``cancel_order``, ``set_leverage``, ``set_margin_mode``)
-> **continue to raise** ``SafeModeViolation`` and Phase 10C NEVER
-> overrides them.
+> **continue to raise** ``SafeModeViolation`` and Phase 10D NEVER
+> overrides them. ``/kill_all`` and ``/rebase`` write audit events
+> only; no real exchange order is placed.
 
 ---
 
@@ -48,8 +49,88 @@ This is the implementation of the production specification in
 | Phase 9 - Execution FSM / Reconciliation | #9  | merged | `feature/phase-9-execution-fsm-reconciliation` (PR #21, hardening PR #22) |
 | Phase 10A - Replay Engine (Part 1 of Issue #10) | #10 (Part A) | merged | `feature/phase-10a-replay-engine` (PR #23) |
 | Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | merged | `feature/phase-10b-reflection-engine` (PR #24) |
-| Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | this branch | `feature/phase-10c-llm-guarded-interpreter` |
-| Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | open | - |
+| Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | merged | `feature/phase-10c-llm-guarded-interpreter` (PR #25) |
+| Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | this branch | `feature/phase-10d-telegram-outbound-export-commands` |
+
+## Phase 10D deliverable - Telegram Outbound + Export Commands (Issue #10 Part 4)
+
+Phase 10D extends the existing :mod:`app.telegram` Phase 1 skeleton
+with the full operator-facing surface plus the file-export bridge
+layered on top of the Phase 8.5 :class:`TestDataExportService`. It
+**closes Issue #10**.
+
+### `app/telegram/` public surface
+
+| Surface | Contract |
+| --- | --- |
+| `format_*` (10) | `format_system_status`, `format_market_regime`, `format_candidate_symbol`, `format_state_transition`, `format_order_event`, `format_risk_rejection`, `format_profit_lock`, `format_capital_rebase`, `format_incident_alert`, `format_daily_report`. Pure functions; short output; banner-tagged with `mode=PAPER\|LIVE_LIMITED\|LIVE`; redacted via `app.exports.redaction.redact()` before return. |
+| `TelegramOutboundClient` | ABC. Two methods only: `send_message`, `send_document`. No `send_photo`, no third surface. |
+| `FakeTelegramClient(outbound_enabled=False)` | Deterministic in-process recorder. Default transport for paper mode + boot drill + every test. |
+| `TelegramHttpClient(outbound_enabled=False, token_provided=False)` | Refusal-only HTTP skeleton. Every method raises `TelegramTransportError`. The real transport ships behind Spec §41 Go/No-Go in a separate PR. |
+| `AlertDispatcher` | Proactive push pipeline. Throttle + dedupe + severity (INFO / WARNING / CRITICAL); CRITICAL bypasses cooldown; `stop_unconfirmed` / `unknown_position` auto-promoted to CRITICAL; low-severity risk rejections aggregated into a 10-minute summary. NEVER raises - every failure becomes a `TELEGRAM_SEND_FAILED` audit row. |
+| `TelegramCommandCenter` | 16 commands: `/status`, `/positions`, `/pnl`, `/risk`, `/capital`, `/incidents`, `/pause`, `/resume`, `/kill_all`, `/rebase`, plus 6 `/export_*`. Operator allow-list. Two-step confirmation for `/resume` + `/rebase`. Audit events: `TELEGRAM_COMMAND_RECEIVED`, `TELEGRAM_COMMAND_REJECTED`. |
+| `TelegramExportBridge` | Connects `/export_*` to Phase 8.5 `TestDataExportService`. Sends a SHORT generating-summary caption + the redacted `.zip` as a Telegram **document attachment** (single `send_document` call, no chat dump). Audit events: `DATA_EXPORT_GENERATED` / `DATA_EXPORT_FAILED`. |
+
+### Five new EventType values
+
+`TELEGRAM_COMMAND_REJECTED`, `TELEGRAM_MESSAGE_SENT`,
+`TELEGRAM_SEND_FAILED`, `DATA_EXPORT_GENERATED`,
+`DATA_EXPORT_FAILED`.
+
+### Phase 10D boundary (every clause enforced by tests)
+
+  1. **No real network call.** AST scan of `app/telegram/` blocks
+     `aiohttp` / `httpx` / `requests` / `websockets` / `ccxt` /
+     `binance` / `openai` / `anthropic` / `deepseek` /
+     `python_telegram_bot` / `telebot` / `aiogram`.
+  2. **No write surface.** No file under `app/telegram/` defines
+     `create_order` / `cancel_order` / `set_leverage` /
+     `set_margin_mode`.
+  3. **No Telegram command bypasses the Risk Engine.** `/pause` /
+     `/resume` flip an in-process advisory flag; the Risk Engine
+     remains the single trading-decision gate.
+  4. **`/kill_all`** writes audit events but does NOT call any real
+     exchange write surface in Phase 10D.
+  5. **`/rebase`** does NOT execute a real withdrawal; the Phase 8
+     Capital Flow Engine remains the only entry point.
+  6. **No state-mutating component import** under `app/telegram/`.
+  7. **No `os.environ` reads** under `app/telegram/`. Credentials
+     must be passed in explicitly.
+  8. **No hard-coded secret.** AST scan blocks `api_key` /
+     `api_secret` / `bot_token` parameters or env-var literals.
+  9. **No exception escapes.** Dispatcher / command center / export
+     bridge NEVER raise into the caller.
+  10. **Defence-in-depth redaction.** Every outbound message and
+      caption is run through
+      `app.exports.redaction.assert_no_forbidden_substrings` before
+      reaching the transport.
+  11. **No raw chat dump.** Export bridge attaches the `.zip` as a
+      Telegram document; size-cap exceeded paths reply with a SHORT
+      error message and write `DATA_EXPORT_FAILED`.
+
+### Boot drill (`python -m app.main`)
+
+```
+[AMA-RT] Phase 10D - Telegram Outbound + Export Commands v1.4.0a10d \
+  mode=paper live_trading=False right_tail=False llm=False \
+  exchange_live_orders=False ... (Phase 1-10C fields unchanged) ... \
+  telegram_outbound_enabled=False telegram_messages_sent=10 \
+  telegram_documents_sent=1 telegram_send_failed_count=0 \
+  telegram_redaction_blocked=0 telegram_message_sent_events=11 \
+  telegram_send_failed_events=0 telegram_command_rejected_events=1 \
+  data_export_generated=1 data_export_failed=0 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+The Phase 10D boot self-check runs after the Phase 10C self-check. It:
+
+  - dispatches one alert through every formatter (10 messages_sent),
+  - drives one `/export_test_data 24h` end-to-end through the bridge
+    (1 documents_sent + 1 `DATA_EXPORT_GENERATED`),
+  - drives one unauthorised `/status` (1 `TELEGRAM_COMMAND_REJECTED`),
+  - asserts zero `TELEGRAM_SEND_FAILED`, zero `redaction_blocked`,
+  - asserts every recorded outbound call is free of forbidden
+    literals (`BINANCE_API_KEY=`, `TELEGRAM_BOT_TOKEN=`, etc.).
 
 ## Phase 10C deliverable - LLM Guarded Interpreter (Issue #10 Part 3)
 

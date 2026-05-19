@@ -86,3 +86,44 @@ class ExchangeConnectionError(ExchangeError):
     downstream modules treat this as a `DATA_UNRELIABLE` signal and stop
     new openings.
     """
+
+
+# ---------------------------------------------------------------------------
+# Phase 10D - Telegram Outbound + Export Commands (Issue #10 Part 4)
+# ---------------------------------------------------------------------------
+class TelegramTransportError(AMARTError):
+    """Raised when the Telegram outbound transport cannot deliver a message.
+
+    Phase 10D introduces the receive-only Telegram outbound layer. This
+    exception is the typed failure surface the alert dispatcher catches
+    and downgrades into a ``TELEGRAM_SEND_FAILED`` audit event - it is
+    NOT a safety violation, just a recoverable transport problem
+    (timeout, rate-limit, network drop, refusal-only HTTP skeleton).
+
+    ``TelegramTransportError`` is intentionally NOT a subclass of
+    :class:`SafetyViolation`. The Phase 10D contract: a Telegram send
+    failure must NEVER bring down the trading process or interfere with
+    Risk Engine / Execution FSM / Capital Flow Engine. The dispatcher
+    swallows the exception, writes the audit event, and continues.
+    """
+
+
+class TelegramAuthError(SafetyViolation):
+    """Raised when an unauthorised user attempts a Telegram command.
+
+    Phase 10D enforces the operator allow-list. Calls from non-admin
+    users are rejected and recorded as ``TELEGRAM_COMMAND_REJECTED``.
+    The exception is a :class:`SafetyViolation` so any Phase 1 / Phase 9
+    handler that catches the broader safety hierarchy continues to
+    catch it.
+    """
+
+
+class DataExportError(AMARTError):
+    """Phase 10D: an export command failed to deliver its document.
+
+    This is the typed failure for the Telegram export bridge layered
+    on top of Phase 8.5 :class:`app.exports.service.ExportError`. It
+    converts into a ``DATA_EXPORT_FAILED`` audit event; the dispatcher
+    never escalates to the Risk Engine or interrupts trading.
+    """
