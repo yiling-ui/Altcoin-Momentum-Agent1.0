@@ -1,20 +1,17 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 6 - Scanner / Confirmation / Manipulation.
-> **Paper mode only.** Phase 6 adds four pure stateless classifiers
-> on top of the Phase 4 `MarketDataBuffer` and the Phase 5
-> `RegimeSnapshot`: `PreAnomalyScanner`, `AnomalyScanner`,
-> `RealTradeConfirmation`, and `ManipulationDetector`. None of them
-> trade. None of them open a socket. None of them call an LLM. The
-> Risk Engine grew three optional Phase 6 hooks (M3 -> reject all,
-> M2 -> reject ATTACK, T0/T1 -> reject ATTACK) but **adds no new
-> rejection that weakens the Phase 1 safety lock**. This repository
-> still does **not** trade real money, does **not** open any
-> outbound network socket, does **not** import any exchange SDK
-> (`ccxt`, `binance-connector`, `python-binance` are intentionally
-> absent from `requirements.txt`), does **not** call any LLM, and
-> does **not** read real API keys. The four write surfaces on
-> `ExchangeClientBase` (`create_order`, `cancel_order`,
+> **Phase status:** Phase 7 - State Machine + Risk Engine.
+> **Paper mode only.** Phase 7 ships the full Trade State Machine
+> (Spec §26), the full Risk Engine with No-Trade Gate, Account Life
+> Tier policy, Daily-Loss + Consecutive-Loss Circuit Breakers, and
+> typed `RiskRejectReason` audit events. The engine is **additive**
+> on top of Phase 1 / Phase 6: every existing caller keeps working
+> unchanged. This repository still does **not** trade real money,
+> does **not** open any outbound network socket, does **not** import
+> any exchange SDK (`ccxt`, `binance-connector`, `python-binance`
+> are intentionally absent from `requirements.txt`), does **not**
+> call any LLM, and does **not** read real API keys. The four write
+> surfaces on `ExchangeClientBase` (`create_order`, `cancel_order`,
 > `set_leverage`, `set_margin_mode`) continue to raise
 > `SafeModeViolation` from the base class.
 
@@ -32,11 +29,225 @@ This is the implementation of the production specification in
 | Phase 3 - Exchange Gateway Read-Only | #3  | merged | `feature/phase-3-exchange-gateway-read-only` (PR #14) |
 | Phase 4 - Market Data Buffer | #4  | merged | `feature/phase-4-market-data-buffer` (PR #15) |
 | Phase 5 - Regime / Universe / Liquidity | #5  | merged | `feature/phase-5-regime-universe-liquidity` (PR #16) |
-| Phase 6 - Scanner / Confirmation / Manipulation | #6  | this branch | `feature/phase-6-scanner-confirmation-manipulation` |
-| Phase 7 - State Machine / Risk Engine | #7  | open | - |
+| Phase 6 - Scanner / Confirmation / Manipulation | #6  | merged | `feature/phase-6-scanner-confirmation-manipulation` (PR #17) |
+| Phase 7 - State Machine / Risk Engine | #7  | this branch | `feature/phase-7-state-machine-risk-engine` |
 | Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | open | - |
 | Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+
+## Phase 7 deliverable
+
+Phase 7 ships the full **Trade State Machine** (Spec §26) and the
+full **Risk Engine** (Spec §27) on top of Phase 5 / Phase 6. None
+of it trades. None of it opens a socket. None of it calls an LLM.
+None of it touches a credential. Every defensive condition listed
+in Spec §27.2 is enforced by typed
+`app.core.enums.RiskRejectReason` values; every TradeState
+transition is whitelisted; every reject and every transition is
+persisted as an event so Replay (Issue #10) can rebuild the
+behaviour from `events.db` alone.
+
+### Trade State Machine - `app/state_machine/`
+
+`TradeStateMachine` tracks the trade-level intent for a single
+candidate or position. The Spec §26.1 ladder is:
+
+```
+NO_TRADE -> OBSERVE -> SCOUT -> CONFIRM -> ATTACK ->
+  RIGHT_TAIL_AMPLIFY -> LOCK_PROFIT -> DISTRIBUTION_ALERT ->
+  FORCED_EXIT
+```
+
+Phase 7 hard rules enforced by the whitelisted transition table in
+`app/state_machine/machine.py`:
+
+1. **No level skipping.** Every attempt outside the table raises
+   `IllegalStateTransition`. OBSERVE cannot directly become
+   RIGHT_TAIL_AMPLIFY. SCOUT cannot directly become ATTACK; it
+   must go through CONFIRM.
+2. **CONFIRM failures downgrade.** `record_breakout_failure()`
+   drops back to SCOUT after the configured number of consecutive
+   failures (default 2 per Spec §26.4).
+3. **DISTRIBUTION_ALERT cannot promote.** No add-size from a
+   distribution warning.
+4. **FORCED_EXIT is sticky.** It can only be cleared by a hard
+   `reset()` (Reconciliation / human, Issue #9 / #10). LLM and
+   ordinary operator commands cannot cancel a forced exit.
+5. **A losing position cannot enter RIGHT_TAIL_AMPLIFY.** Refused
+   when `unrealized_pnl <= 0`.
+6. **Right-tail amplification must come from floating profit, not
+   principal.** Phase 7 enforces this on the State Machine
+   (refused at promotion) AND on the Risk Engine (refused via
+   `right_tail_from_principal_forbidden`).
+7. **Every transition writes a `STATE_TRANSITION` event** with the
+   `from / to / trigger / reasons` payload.
+8. **Timeouts (Spec §26.4) are deterministic.** `tick(now_ms)`
+   advances state automatically: OBSERVE -> NO_TRADE after 30 min,
+   SCOUT -> NO_TRADE after 12 min (mid of 10-15), ATTACK ->
+   LOCK_PROFIT on `cvd_weakening=True`, RIGHT_TAIL_AMPLIFY ->
+   LOCK_PROFIT on `right_tail_core_failed=True`.
+9. **DISTRIBUTION_ALERT bar accumulation** (Spec §26.4): three
+   confirming bars trigger FORCED_EXIT.
+
+### Risk Engine - `app/risk/engine.py`
+
+The Phase 7 Risk Engine composes:
+
+- **Phase 1 hard flags** (live trading off, right-tail off,
+  `stop_unconfirmed`, `unknown_position`) - byte-compatible with
+  Phase 1.
+- **Phase 6 hard rules** (M3 -> reject all new openings, M2 ->
+  reject ATTACK, T0/T1 -> reject ATTACK) - byte-compatible with
+  Phase 6.
+- **Phase 7 No-Trade Gate** - composed in
+  `app/risk/no_trade_gate.py`. Walks every Spec §27.2 condition in
+  stable order, returns a typed `RiskRejectReason` list:
+  `EXCHANGE_DISCONNECTED`, `STOP_UNCONFIRMED`, `UNKNOWN_POSITION`,
+  `DATA_DEGRADED`, `REGIME_BLOCK_ALL`,
+  `REGIME_OBSERVE_ONLY_FOR_NEW_OPEN`,
+  `REGIME_SCOUT_ONLY_FOR_ATTACK`, `UNIVERSE_INELIGIBLE`,
+  `LIQUIDITY_REJECTED`, `NO_EXIT_CHANNEL`, `MANIPULATION_M3`,
+  `MANIPULATION_M2_ATTACK`,
+  `TRADE_CONFIRMATION_TOO_LOW_FOR_ATTACK`,
+  `DAILY_LOSS_BREAKER_OPEN`,
+  `CONSECUTIVE_LOSS_BREAKER_OPEN`.
+- **Account Life Tier policy** - `app/risk/account_tier.py`. Spec
+  §27.4 ladder A..F:
+
+  | Tier | Equity ratio | New open | Attack | Right-tail | Notes |
+  |---|---|---|---|---|---|
+  | A | >= 1.5x | yes | yes | yes | full ladder |
+  | B | 1.0-1.5x | yes | yes | no | normal |
+  | C | 0.7-1.0x | yes | yes | no | reduce frequency |
+  | D | 0.5-0.7x | yes | yes | no | no right-tail |
+  | E | 0.3-0.5x | no  | no  | no | observe / paper only |
+  | F | < 0.3x   | no  | no  | no | halt for review |
+
+- **Circuit Breakers** - `app/risk/circuit_breaker.py`:
+  - `ConsecutiveLossCircuitBreaker` opens after N consecutive
+    losses (default 5, from `risk.yaml`).
+  - `DailyLossCircuitBreaker` opens once cumulative gross daily
+    loss exceeds `max_daily_loss_pct * initial_capital` (default
+    5%). Rolls over on UTC date change. A winning trade does NOT
+    auto-close either breaker; only an explicit `reset()` does.
+
+The engine writes one `RISK_APPROVED` or `RISK_REJECTED` event per
+call. The Phase 7 audit payload extends Phase 6's with
+`account_tier`, `is_new_open`, `regime`, `risk_permission`,
+`exchange_connection_state`, `daily_loss_breaker_state`,
+`consecutive_loss_breaker_state`, `no_trade_gate_reasons`, and
+`no_trade_gate_notes`.
+
+### Phase 7 protective-exit caveat (M3 + DATA_DEGRADED)
+
+The M3 / DATA_DEGRADED / regime branches above block **NEW
+openings** only. Phase 7 introduces an explicit `is_new_open` flag
+on `RiskRequest` (default `True` for backwards compat). Phase 9
+(Execution FSM + Reconciliation) MUST set `is_new_open=False` on
+every `LOCK_PROFIT`, `FORCED_EXIT`, `DISTRIBUTION_ALERT`,
+`kill_all`, reduce-only closing-order, and stop-loss
+re-attachment path:
+
+- Refusing those exits under M3 would trap a live position when
+  manipulation is detected and is a P0 incident, not a safety win.
+- Reduce-only closing orders shrink exposure, they never grow it.
+- Reconciliation must be allowed to read / re-attach stop-loss
+  state under M3.
+
+The `is_new_open=False` semantic is exercised end-to-end by
+`tests/unit/test_risk_engine_phase7.py
+::test_m3_does_not_block_protective_exit_when_is_new_open_false`
+and `test_data_degraded_does_not_block_protective_exit`.
+
+### Phase 7 semantic locks (Issue #7 mandate)
+
+1. `RiskPermission.ALLOW_ATTACK` is a regime-cycle permission, NOT
+   a trade approval. The Risk Engine still rejects
+   `live_trading_required=True` because Phase 1 keeps
+   `live_trading_enabled=False`.
+2. `T3 / T4` is a confirmation LEVEL, NOT a trade approval. Same
+   as above - it is a NECESSARY condition, not a sufficient one.
+3. `pre_anomaly_score` / `anomaly_score` are CANDIDATE / ANOMALY
+   INDICATORS, NOT entry signals. Pinned by
+   `tests/unit/test_phase6_non_generation_invariant.py` and
+   carried through Phase 7 via the Risk Engine's typed reject
+   payload.
+4. `ManipulationLevel.M3` blocks NEW openings only;
+   protective-exit and reduce-only flows must be preserved (see
+   the caveat above). Pinned by
+   `test_m3_does_not_block_protective_exit`.
+5. `ALT_RISK_OFF -> ALLOW_SCOUT` permits OBSERVE / SCOUT only -
+   NOT ATTACK, NOT RIGHT_TAIL_AMPLIFY. Pinned by
+   `test_alt_risk_off_allow_scout_blocks_attack`.
+6. `SYSTEMIC_RISK` overrides single-symbol strength. Pinned by
+   `test_systemic_risk_overrides_strong_individual_signal`.
+7. BTC / ETH only feed `RegimeEngine` and the No-Trade Gate;
+   Phase 7 does NOT add a stand-alone BTC trading module. Pinned
+   by `test_phase7_packages_do_not_introduce_new_btc_eth_modules`.
+
+### Phase 7 boundary (declared explicitly to avoid drift)
+
+1. State Machine + Risk Engine ONLY. No Capital Flow Engine
+   (Issue #8), no full Execution FSM driver / Reconciliation
+   (Issue #9), no LLM / Telegram outbound / Replay / Reflection
+   (Issue #10).
+2. Reads only. **No write surface added.** The four
+   `SafeModeViolation` refusals on `ExchangeClientBase` are
+   unchanged.
+3. **No real Binance WebSocket and no real REST.** The boot path
+   continues to drive the deterministic `MockExchangeClient`.
+4. **No API key.** No file under `app/state_machine/` or
+   `app/risk/` reads `os.environ` for a credential, accepts an
+   `api_key` keyword argument, or persists a key (an AST scan in
+   `tests/unit/test_phase7_no_network.py` enforces this).
+5. **No LLM.** No source file under `app/state_machine/` or
+   `app/risk/` imports `openai`, `anthropic`, `deepseek`, or any
+   other LLM client.
+6. **No new BTC/ETH stand-alone module.**
+7. **No new persistent database file.** The five Phase 2
+   databases remain the only data plane.
+8. Tests do not depend on real network -
+   `test_phase7_no_network.py` enforces this at the source-tree
+   level and cooperates with every prior phase's no-network test.
+
+### Phase 7 boot self-check in `python -m app.main`
+
+After the Phase 6 classifier loop, the entrypoint:
+
+- Instantiates a `TradeStateMachine` for the first mock symbol
+  and drives it `NO_TRADE -> OBSERVE`. One additional
+  `STATE_TRANSITION` event is written (the Phase 6 boot drill
+  already writes one `IDLE -> IDLE` marker; Phase 7 raises the
+  total to two by writing the trade-state transition through the
+  state-machine module).
+- Calls `RiskEngine.evaluate(...)` with the Phase 5 regime
+  snapshot, the Phase 6 manipulation + confirmation levels, the
+  exchange-link state, and `is_new_open=False` (paper-mode
+  bookkeeping, not a real opening). The engine writes one
+  `RISK_APPROVED` audit row whose payload exercises the Phase 7
+  fields.
+- Banner extended with four new fields: `state_transitions`,
+  `trade_state`, `daily_loss_breaker`,
+  `consecutive_loss_breaker`.
+
+Sample boot output:
+
+```
+[AMA-RT] Phase 7 - State Machine Risk Engine v1.4.0a7 mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  databases=5 events_count=32 capital_events=1 \
+  exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+  market_data=3/0 market_snapshots=3 data_unreliable=1 \
+  regime=ALT_RISK_OFF/ALLOW_SCOUT regime_events=1 \
+  universe=0/3 universe_events=3 liquidity_events=6 \
+  pre_anomaly_events=3 anomaly_events=3 trade_confirmed_events=3 \
+  manipulation_events=3 \
+  state_transitions=2 trade_state=observe \
+  daily_loss_breaker=closed consecutive_loss_breaker=closed \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+
 
 ## Phase 6 deliverable
 

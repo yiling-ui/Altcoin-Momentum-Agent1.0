@@ -363,6 +363,103 @@ class AccountLifeTier(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 - Circuit Breaker state (Issue #7, Spec §27.2)
+# ---------------------------------------------------------------------------
+class CircuitBreakerState(str, Enum):
+    """Status of a Phase 7 Risk Engine circuit breaker.
+
+    Phase 7 ships two breakers:
+
+      - ``DailyLossCircuitBreaker`` (daily realised-loss budget,
+        Spec §27.2 hard rule "单日回撤达到阈值").
+      - ``ConsecutiveLossCircuitBreaker`` (5 consecutive losing
+        trades, Spec §27.2 hard rule "连续亏损达到阈值").
+
+    A breaker is ``CLOSED`` while business as usual; it opens once its
+    threshold is crossed. ``COOL_DOWN`` is reserved for the operator
+    to inspect before manually re-arming. In Phase 7 we ship the
+    semantics; Phase 9 (Reconciliation) and Phase 10 (Telegram) will
+    surface the breaker state to the operator interface.
+    """
+
+    CLOSED = "closed"
+    OPEN_DAILY_LOSS = "open_daily_loss"
+    OPEN_CONSECUTIVE_LOSS = "open_consecutive_loss"
+    COOL_DOWN = "cool_down"
+
+    @property
+    def is_open(self) -> bool:
+        return self is not CircuitBreakerState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 - State-machine transition triggers (Issue #7, Spec §26)
+# ---------------------------------------------------------------------------
+class TradeStateTrigger(str, Enum):
+    """Why a TradeState transition was attempted.
+
+    Recorded on every ``STATE_TRANSITION`` event payload so Reflection
+    (Issue #10) and Replay can rebuild the trade-state ladder from
+    events.db alone. Phase 7 keeps the vocabulary deliberately small;
+    Issue #9 / #10 may extend it (e.g. ``RECONCILIATION_FORCED``).
+    """
+
+    SIGNAL = "signal"
+    PROMOTE = "promote"
+    DOWNGRADE = "downgrade"
+    TIMEOUT = "timeout"
+    LOCK_PROFIT = "lock_profit"
+    DISTRIBUTION_ALERT = "distribution_alert"
+    FORCED_EXIT = "forced_exit"
+    KILL_SWITCH = "kill_switch"
+    RESET = "reset"
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 - Typed Risk Engine reject reasons (Issue #7, Spec §27)
+# ---------------------------------------------------------------------------
+class RiskRejectReason(str, Enum):
+    """Typed reason tags emitted by the Phase 7 Risk Engine.
+
+    Issue #7 hard rule: "所有拒绝必须有明确 reason_tags". Phase 7
+    therefore promotes the Phase 1 / Phase 6 free-form strings to a
+    typed enum so Reflection (Issue #10) can group / count rejects
+    without parsing strings. The Phase 1 / Phase 6 string reasons are
+    preserved as the enum *value* strings so existing tests and the
+    audit trail stay byte-for-byte compatible.
+    """
+
+    # Phase 1 hard rejections.
+    LIVE_TRADING_DISABLED = "live_trading_disabled"
+    RIGHT_TAIL_DISABLED = "right_tail_disabled"
+    STOP_UNCONFIRMED = "stop_unconfirmed"
+    UNKNOWN_POSITION = "unknown_position"
+    TRADING_MODE_INCONSISTENT = "trading_mode_inconsistent"
+    # Phase 6 hard rejections.
+    MANIPULATION_M3 = "manipulation_m3"
+    MANIPULATION_M2_ATTACK = "manipulation_m2_attack"
+    TRADE_CONFIRMATION_TOO_LOW_FOR_ATTACK = "trade_confirmation_too_low_for_attack"
+    # Phase 7 No-Trade Gate.
+    REGIME_BLOCK_ALL = "regime_block_all"
+    REGIME_OBSERVE_ONLY_FOR_NEW_OPEN = "regime_observe_only_for_new_open"
+    REGIME_SCOUT_ONLY_FOR_ATTACK = "regime_scout_only_for_attack"
+    REGIME_SCOUT_ONLY_FOR_RIGHT_TAIL = "regime_scout_only_for_right_tail"
+    UNIVERSE_INELIGIBLE = "universe_ineligible"
+    LIQUIDITY_REJECTED = "liquidity_rejected"
+    NO_EXIT_CHANNEL = "no_exit_channel"
+    DATA_DEGRADED = "data_degraded"
+    EXCHANGE_DISCONNECTED = "exchange_disconnected"
+    DAILY_LOSS_BREAKER_OPEN = "daily_loss_breaker_open"
+    CONSECUTIVE_LOSS_BREAKER_OPEN = "consecutive_loss_breaker_open"
+    ACCOUNT_TIER_HALT = "account_tier_halt"
+    ACCOUNT_TIER_NO_NEW_OPEN = "account_tier_no_new_open"
+    ACCOUNT_TIER_NO_RIGHT_TAIL = "account_tier_no_right_tail"
+    ACCOUNT_TIER_PAPER_ONLY = "account_tier_paper_only"
+    RIGHT_TAIL_FROM_PRINCIPAL_FORBIDDEN = "right_tail_from_principal_forbidden"
+    LOSING_POSITION_CANNOT_AMPLIFY = "losing_position_cannot_amplify"
+
+
+# ---------------------------------------------------------------------------
 # Data reliability (Spec §13.3)
 # ---------------------------------------------------------------------------
 class DataReliability(str, Enum):

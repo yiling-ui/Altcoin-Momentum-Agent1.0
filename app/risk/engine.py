@@ -1,68 +1,60 @@
-"""Risk Engine skeleton (Spec §27, Issue #1; extended in Issue #6).
+"""Risk Engine (Spec §27, Issue #7).
 
-Phase 1 contract
+Phase 1 contract (preserved verbatim)
+-------------------------------------
+The Risk Engine has *final authority*. No module may bypass it.
+
+Phase 7 contract (Issue #7)
+---------------------------
+Phase 7 turns the Phase 1 / Phase 6 skeleton into a real Risk Engine
+by composing:
+
+  - The Phase 1 hard flags (live trading off, right-tail off,
+    stop_unconfirmed, unknown_position) - **unchanged**.
+  - The Phase 6 manipulation / confirmation hard rules - **unchanged**.
+  - The new Phase 7 :func:`no_trade_gate.evaluate_no_trade_gate`
+    composer that consumes the Phase 5 (Regime / Universe / Liquidity)
+    + Phase 6 (Manipulation / Confirmation) decisions plus the
+    exchange-link health, the data-degraded view, and the Account
+    Life Tier policy + Circuit Breaker state.
+
+The engine is **additive**. Every Phase 1 + Phase 6 caller that does
+not pass the new fields keeps working unchanged - the Phase 7 gate
+simply does not fire when the relevant input is missing. Tests pin
+this in :file:`tests/unit/test_risk_engine.py` and
+:file:`tests/unit/test_risk_engine_phase6.py`.
+
+Phase 7 boundary
 ----------------
-The Risk Engine has *final authority*. No module may bypass it. In Phase 1
-we ship a minimal but real implementation that:
+The Risk Engine does NOT trade. It does NOT call any exchange. It
+does NOT call any LLM. It does NOT amplify a position. It only
+adjudicates a :class:`RiskRequest` and writes one
+``RISK_APPROVED`` or ``RISK_REJECTED`` audit event. Phase 7 ALSO
+does not implement Issue #8 (Capital Flow), Issue #9 (Execution FSM
++ Reconciliation) or Issue #10 (LLM / Telegram outbound / Replay /
+Reflection).
 
-    1. Refuses any action whose `live_trading_required` flag is True while
-       the system is not in a live mode (always the case in Phase 1).
-    2. Refuses any action requesting `right_tail_amplify=True` while
-       `right_tail_enabled` is False (always the case in Phase 1).
-    3. Approves anything else with a `paper_only` annotation, and writes
-       a `RISK_APPROVED` or `RISK_REJECTED` event when an `EventRepository`
-       is supplied.
+Manipulation M3 protective-exit caveat
+--------------------------------------
 
-This skeleton is intentionally conservative: no thresholds, no portfolio
-heat, no circuit breaker. Those land with Issue #7.
+The M3 branch below blocks **NEW openings** only. Phase 7 **adds**
+the explicit ``is_new_open`` flag on :class:`RiskRequest` (default
+``True`` for backwards compat) so the M3 / M2 / regime / liquidity
+gates can be turned off when the caller is closing / reducing / running
+a protective exit. Phase 9 (Execution FSM + Reconciliation) MUST set
+``is_new_open=False`` on every kill_all / LOCK_PROFIT / FORCED_EXIT /
+DISTRIBUTION_ALERT / stop-loss re-attachment path:
 
-Phase 6 extension (Issue #6)
-----------------------------
-Issue #6 requires the Risk Engine to honour the manipulation level and
-the real-trade confirmation level produced by the Phase 6 classifiers:
+  * Refusing those exits under M3 would trap a live position when
+    manipulation is detected and is a P0 incident, not a safety win.
+  * Reduce-only closing orders shrink exposure, they never grow it.
+  * Reconciliation must be allowed to re-attach stop-loss state under
+    M3.
 
-    - ManipulationLevel.M3 -> reject ALL **new** openings (Spec §21.3
-      hard rule "M3 禁止交易"). M3 is a hard wall on new openings.
-
-      **IMPORTANT - Phase 6 only implements the new-opening
-      protection semantic.** Phase 7 (State Machine + full Risk
-      Engine) and Phase 9 (Execution FSM + Reconciliation) MUST
-      preserve protective-exit and reduce-only closing flows under
-      M3:
-
-        * `LOCK_PROFIT`, `FORCED_EXIT`, `DISTRIBUTION_ALERT` -> exit
-          transitions and stop-confirmation routing must remain
-          allowed when manipulation_level=M3. Refusing them would
-          trap a live position when manipulation is detected and is
-          a P0 incident, not a safety win.
-        * `kill_all` and reduce-only closing orders must remain
-          allowed regardless of manipulation_level - they shrink
-          exposure, never grow it.
-        * Reconciliation (Issue #9) must be allowed to read /
-          re-attach stop-loss state under M3.
-
-      Phase 7 will add an explicit `is_protective_exit=True` (or
-      equivalent) flag on `RiskRequest` so the M3 branch can
-      distinguish "open" from "close / reduce / protect". Phase 6
-      does NOT ship that flag because Phase 6 has no exit path of
-      its own - every Phase 6 caller is a non-attack self-check or
-      a forward-looking opening adjudication.
-    - ManipulationLevel.M2 -> reject ATTACK / RIGHT_TAIL_AMPLIFY
-      candidates (Spec §21.3 hard rule "M2 禁止进攻"). Smaller scout /
-      observe candidates may continue.
-    - TradeConfirmationLevel.T0 / T1 -> reject ATTACK candidates
-      (Issue #6 hard rule "T0/T1 不允许进攻"). T0 / T1 + scout /
-      observe is allowed; the scanner output is also captured in the
-      RISK_REJECTED audit payload regardless.
-
-The new check is gated by ``attack_intent`` so a non-attack action
-(e.g. observe, scout, exit, kill_all) is never blocked by an M2 or
-T0/T1 reading. ``right_tail_amplify=True`` always implies
-``attack_intent`` for the purposes of this gate.
-
-Issue #7 will replace these point-checks with a real No-Trade Gate.
-The Phase 6 hooks here are deliberately additive: they extend the
-Phase 1 hard rejection set without removing or weakening any of it.
+Phase 7 keeps the contract narrow: ``is_new_open=True`` exercises
+every defensive gate; ``is_new_open=False`` only exercises the
+non-position-opening rejections (live_trading_required, kill_all is
+explicitly enabled by Phase 1 anyway).
 """
 
 from __future__ import annotations
@@ -72,45 +64,74 @@ from typing import Any
 
 from app.config.settings import Settings, get_settings
 from app.core.enums import (
+    AccountLifeTier,
+    CircuitBreakerState,
+    ExchangeConnectionState,
     ManipulationLevel,
+    RiskRejectReason,
     TradeConfirmationLevel,
     TradingMode,
 )
 from app.core.events import Event, EventType
 from app.database.repositories import EventRepository
+from app.liquidity.models import ExitPlan, LiquidityDecision
+from app.regime.models import RegimeSnapshot
+from app.risk.account_tier import (
+    classify_account_tier,
+    policy_for,
+)
+from app.risk.circuit_breaker import (
+    ConsecutiveLossCircuitBreaker,
+    DailyLossCircuitBreaker,
+)
+from app.risk.no_trade_gate import (
+    NoTradeGateDecision,
+    NoTradeGateInput,
+    evaluate_no_trade_gate,
+)
+from app.universe.models import UniverseDecision
 
 
 @dataclass(frozen=True)
 class RiskRequest:
     """Request submitted to the Risk Engine for adjudication.
 
-    The Phase 1 skeleton recognises four hard-rejection flags drawn from
-    Spec §27.2 (No-Trade Gate) and Spec §31.3 (Reconciliation):
+    Phase 1 hard flags
+    ------------------
+    - live_trading_required: caller wants a real exchange order. Always
+      rejected in Phase 1+.
+    - right_tail_amplify: caller wants right-tail amplification. Always
+      rejected in Phase 1+.
+    - stop_unconfirmed: stop-loss not confirmed.
+    - unknown_position: local/exchange position state unknown.
 
-        - live_trading_required: caller wants a real exchange order.
-          Always rejected in Phase 1 (live_trading_enabled=False).
-        - right_tail_amplify:    caller wants right-tail amplification.
-          Always rejected in Phase 1 (right_tail_enabled=False).
-        - stop_unconfirmed:      stop-loss state is not confirmed.
-          Spec §4.2 + §27.2: forbid new positions until confirmed.
-        - unknown_position:      local/exchange position state unknown.
-          Spec §31.3: 'positions unknown -> trading forbidden'.
+    Phase 6 hooks (Issue #6)
+    ------------------------
+    - manipulation_level: from the Phase 6 ManipulationDetector.
+    - trade_confirmation_level: from the Phase 6 RealTradeConfirmation.
+    - attack_intent: caller intends an ATTACK / RIGHT_TAIL_AMPLIFY
+      transition. ``right_tail_amplify=True`` always implies attack
+      intent.
 
-    Phase 6 (Issue #6) adds three optional fields that let the engine
-    honour the manipulation level and the real-trade confirmation level
-    produced by the Phase 6 classifiers:
-
-        - manipulation_level: result of Spec §21 ManipulationDetector.
-        - trade_confirmation_level: result of Spec §20
-          RealTradeConfirmation.
-        - attack_intent: caller intends an ATTACK / RIGHT_TAIL_AMPLIFY
-          transition (or any action that opens / scales an attack
-          position). When False, the M2 / T0 / T1 attack guards do
-          NOT fire because they are size-class gates, not blanket
-          bans. Setting ``right_tail_amplify=True`` implicitly raises
-          ``attack_intent`` for the duration of the call.
-
-    Issue #7 will replace these point-checks with a real No-Trade Gate.
+    Phase 7 hooks (Issue #7)
+    ------------------------
+    - is_new_open: caller is opening a *new* position. Defaults to
+      ``True`` so existing callers retain Phase 1/6 behaviour. Phase 9
+      will set this to ``False`` on reduce-only / kill_all /
+      protective-exit paths so the M3 / regime / liquidity gates do
+      not block a forced exit.
+    - regime_snapshot: latest :class:`RegimeSnapshot`.
+    - universe_decision: per-symbol :class:`UniverseDecision`.
+    - liquidity_decision: latest :class:`LiquidityDecision`.
+    - exit_plan: latest :class:`ExitPlan` from
+      :meth:`LiquidityFilter.can_exit_position`.
+    - is_data_degraded: ``MarketDataBuffer.is_degraded(symbol)``.
+    - exchange_connection_state: latest exchange-link state.
+    - current_equity / initial_capital: Account Life Tier inputs.
+      Phase 7 ships the classifier; Issue #8 will populate these from
+      ``capital.db.capital_snapshots``.
+    - account_tier_override: optional explicit tier override (tests
+      pass this without populating equity numbers).
     """
 
     source_module: str
@@ -124,6 +145,17 @@ class RiskRequest:
     manipulation_level: ManipulationLevel | None = None
     trade_confirmation_level: TradeConfirmationLevel | None = None
     attack_intent: bool = False
+    # Phase 7 hooks (Issue #7).
+    is_new_open: bool = True
+    regime_snapshot: RegimeSnapshot | None = None
+    universe_decision: UniverseDecision | None = None
+    liquidity_decision: LiquidityDecision | None = None
+    exit_plan: ExitPlan | None = None
+    is_data_degraded: bool = False
+    exchange_connection_state: ExchangeConnectionState | None = None
+    current_equity: float | None = None
+    initial_capital: float | None = None
+    account_tier_override: AccountLifeTier | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -137,6 +169,8 @@ class RiskDecision:
     approved: bool
     reasons: list[str]
     request: RiskRequest
+    account_tier: AccountLifeTier | None = None
+    no_trade_gate_decision: NoTradeGateDecision | None = None
 
     @property
     def rejected(self) -> bool:
@@ -144,81 +178,215 @@ class RiskDecision:
 
 
 class RiskEngine:
-    """Phase 1 skeleton with hard-coded safety checks."""
+    """Phase 7 Risk Engine.
+
+    Composes Phase 1 hard flags + Phase 6 hard rules + the Phase 7
+    No-Trade Gate + the Account Life Tier policy + the Circuit
+    Breakers. Every reject path returns a typed
+    :class:`RiskRejectReason` value (rendered into the audit event as
+    its string value, byte-compatible with Phase 1 / Phase 6).
+    """
 
     def __init__(
         self,
         settings: Settings | None = None,
         event_repo: EventRepository | None = None,
+        *,
+        consecutive_loss_breaker: ConsecutiveLossCircuitBreaker | None = None,
+        daily_loss_breaker: DailyLossCircuitBreaker | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._event_repo = event_repo
+        # Phase 7: circuit breakers are part of the engine instance so
+        # tests / Issue #8 can record realised PnL onto the same engine
+        # that adjudicates new requests. Defaults match the YAML.
+        risk_cfg = self._settings.risk.risk
+        self._consecutive_loss_breaker = (
+            consecutive_loss_breaker
+            or ConsecutiveLossCircuitBreaker(
+                threshold=risk_cfg.max_consecutive_losses
+            )
+        )
+        self._daily_loss_breaker = (
+            daily_loss_breaker
+            or DailyLossCircuitBreaker(
+                max_daily_loss_pct=risk_cfg.max_daily_loss_pct,
+            )
+        )
 
+    # ------------------------------------------------------------------
     @property
     def settings(self) -> Settings:
         return self._settings
 
+    @property
+    def consecutive_loss_breaker(self) -> ConsecutiveLossCircuitBreaker:
+        return self._consecutive_loss_breaker
+
+    @property
+    def daily_loss_breaker(self) -> DailyLossCircuitBreaker:
+        return self._daily_loss_breaker
+
+    # ------------------------------------------------------------------
+    # Public hooks for Issue #8 (Capital Flow): record realised PnL so
+    # the breakers stay current. Phase 7 keeps these simple; Issue #8
+    # will replace the in-memory counters with capital.db lookups.
+    def record_loss(self, *, loss_amount: float) -> None:
+        self._consecutive_loss_breaker.record_loss()
+        self._daily_loss_breaker.record_loss(loss_amount=loss_amount)
+
+    def record_win(self, *, profit_amount: float = 0.0) -> None:
+        self._consecutive_loss_breaker.record_win()
+        self._daily_loss_breaker.record_win(profit_amount=profit_amount)
+
+    def configure_initial_capital(self, *, initial_capital: float) -> None:
+        """Set the daily-loss breaker's initial capital so the
+        threshold can be applied. Phase 7 keeps this explicit; Issue #8
+        will populate it from ``capital.db``."""
+        self._daily_loss_breaker.initial_capital = initial_capital
+
+    # ------------------------------------------------------------------
     def evaluate(self, request: RiskRequest) -> RiskDecision:
         reasons: list[str] = []
+        attack_intent = request.effective_attack_intent
 
+        # ----------------------------------------------------------
+        # 1. Phase 1 hard rejections - byte-compatible with Phase 1.
+        # ----------------------------------------------------------
         if request.live_trading_required and not self._settings.live_trading_enabled:
-            reasons.append("live_trading_disabled")
+            reasons.append(RiskRejectReason.LIVE_TRADING_DISABLED.value)
         if request.right_tail_amplify and not self._settings.right_tail_enabled:
-            reasons.append("right_tail_disabled")
-        if request.stop_unconfirmed:
-            # Spec §4.2 + §27.2: do not open new positions while stop is unconfirmed.
-            reasons.append("stop_unconfirmed")
-        if request.unknown_position:
-            # Spec §31.3: position state unknown -> trading forbidden.
-            reasons.append("unknown_position")
+            reasons.append(RiskRejectReason.RIGHT_TAIL_DISABLED.value)
+        if request.stop_unconfirmed and request.is_new_open:
+            reasons.append(RiskRejectReason.STOP_UNCONFIRMED.value)
+        if request.unknown_position and request.is_new_open:
+            reasons.append(RiskRejectReason.UNKNOWN_POSITION.value)
         if self._settings.trading_mode != TradingMode.PAPER.value and not (
             self._settings.live_trading_enabled
         ):
-            # Defence in depth: trading_mode promoted but live still off.
-            reasons.append("trading_mode_inconsistent")
+            reasons.append(RiskRejectReason.TRADING_MODE_INCONSISTENT.value)
 
-        # Phase 6 hard rules (Issue #6, Spec §21.3 + §20.4).
-        # IMPORTANT: the M3 branch below blocks NEW openings only.
-        # Phase 7 (State Machine + full Risk Engine) and Phase 9
-        # (Execution FSM + Reconciliation) MUST preserve protective
-        # exit and reduce-only closing flows under M3 - LOCK_PROFIT,
-        # FORCED_EXIT, DISTRIBUTION_ALERT, kill_all, and stop-loss
-        # re-attachment paths must remain allowed when
-        # manipulation_level=M3. Phase 6 ships only the new-opening
-        # protection semantic; Phase 7 will add an explicit flag on
-        # RiskRequest so the M3 branch can distinguish "open" from
-        # "close / reduce / protect".
-        attack_intent = request.effective_attack_intent
-        if request.manipulation_level is ManipulationLevel.M3:
-            # M3 is a hard wall: no new opening, no scout, no amplify.
-            reasons.append("manipulation_m3")
+        # ----------------------------------------------------------
+        # 2. Phase 6 hard rules - byte-compatible with Phase 6.
+        #    The M3 branch here protects NEW OPENINGS only. Phase 9
+        #    must call evaluate(...) with is_new_open=False on every
+        #    protective-exit / reduce-only / kill_all path.
+        # ----------------------------------------------------------
+        if (
+            request.manipulation_level is ManipulationLevel.M3
+            and request.is_new_open
+        ):
+            reasons.append(RiskRejectReason.MANIPULATION_M3.value)
         elif (
             request.manipulation_level is ManipulationLevel.M2
             and attack_intent
         ):
-            # M2: forbid attack-class candidates only.
-            reasons.append("manipulation_m2_attack")
+            reasons.append(RiskRejectReason.MANIPULATION_M2_ATTACK.value)
         if attack_intent and request.trade_confirmation_level in (
             TradeConfirmationLevel.T0,
             TradeConfirmationLevel.T1,
         ):
             reasons.append(
-                "trade_confirmation_too_low_for_attack"
+                RiskRejectReason.TRADE_CONFIRMATION_TOO_LOW_FOR_ATTACK.value
             )
 
-        approved = not reasons
-        if approved:
-            reasons = ["paper_only_skeleton_approval"]
+        # ----------------------------------------------------------
+        # 3. Phase 7 No-Trade Gate (composes Phase 5 + Phase 6 +
+        #    exchange / data / breakers).
+        # ----------------------------------------------------------
+        gate_input = NoTradeGateInput(
+            symbol=request.symbol,
+            attack_intent=request.attack_intent,
+            right_tail_amplify_intent=request.right_tail_amplify,
+            is_new_open=request.is_new_open,
+            stop_unconfirmed=request.stop_unconfirmed,
+            unknown_position=request.unknown_position,
+            is_data_degraded=request.is_data_degraded,
+            exchange_connection_state=request.exchange_connection_state,
+            regime_snapshot=request.regime_snapshot,
+            universe_decision=request.universe_decision,
+            liquidity_decision=request.liquidity_decision,
+            exit_plan=request.exit_plan,
+            manipulation_level=request.manipulation_level,
+            trade_confirmation_level=request.trade_confirmation_level,
+            daily_loss_breaker_state=self._daily_loss_breaker.state,
+            consecutive_loss_breaker_state=self._consecutive_loss_breaker.state,
+        )
+        gate_decision = evaluate_no_trade_gate(gate_input)
+        for reason in gate_decision.reasons:
+            if reason.value not in reasons:
+                reasons.append(reason.value)
 
-        decision = RiskDecision(approved=approved, reasons=reasons, request=request)
+        # ----------------------------------------------------------
+        # 4. Account Life Tier policy.
+        # ----------------------------------------------------------
+        tier = self._resolve_tier(request)
+        if tier is not None and request.is_new_open:
+            policy = policy_for(tier)
+            if policy.halt_only:
+                reasons.append(RiskRejectReason.ACCOUNT_TIER_HALT.value)
+            if not policy.allow_new_open:
+                reasons.append(RiskRejectReason.ACCOUNT_TIER_NO_NEW_OPEN.value)
+            if policy.paper_only and self._settings.trading_mode != TradingMode.PAPER.value:
+                reasons.append(RiskRejectReason.ACCOUNT_TIER_PAPER_ONLY.value)
+            if attack_intent and request.right_tail_amplify and not policy.allow_right_tail_amplify:
+                reasons.append(RiskRejectReason.ACCOUNT_TIER_NO_RIGHT_TAIL.value)
+
+        # ----------------------------------------------------------
+        # 5. Right-tail amplification must come from floating profit.
+        #    Phase 7 ships this as a defensive check on the engine
+        #    surface even though Phase 1 already locks
+        #    right_tail_enabled to False. The check fires only when
+        #    the caller has supplied an unrealized_pnl <= 0.
+        # ----------------------------------------------------------
+        if request.right_tail_amplify and request.extra.get(
+            "unrealized_pnl", None
+        ) is not None and request.extra.get("unrealized_pnl", 0.0) <= 0:
+            reasons.append(
+                RiskRejectReason.RIGHT_TAIL_FROM_PRINCIPAL_FORBIDDEN.value
+            )
+
+        # Deduplicate while preserving order.
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for r in reasons:
+            if r not in seen:
+                seen.add(r)
+                ordered.append(r)
+
+        approved = not ordered
+        if approved:
+            ordered = ["paper_only_skeleton_approval"]
+
+        decision = RiskDecision(
+            approved=approved,
+            reasons=ordered,
+            request=request,
+            account_tier=tier,
+            no_trade_gate_decision=gate_decision,
+        )
         self._record(decision)
         return decision
+
+    # ------------------------------------------------------------------
+    def _resolve_tier(self, request: RiskRequest) -> AccountLifeTier | None:
+        if request.account_tier_override is not None:
+            return request.account_tier_override
+        if request.current_equity is None or request.initial_capital is None:
+            return None
+        return classify_account_tier(
+            current_equity=request.current_equity,
+            initial_capital=request.initial_capital,
+        )
 
     # ------------------------------------------------------------------
     def _record(self, decision: RiskDecision) -> None:
         if self._event_repo is None:
             return
-        ev_type = EventType.RISK_APPROVED if decision.approved else EventType.RISK_REJECTED
+        ev_type = (
+            EventType.RISK_APPROVED if decision.approved else EventType.RISK_REJECTED
+        )
+        gate = decision.no_trade_gate_decision
         self._event_repo.append(
             Event(
                 event_type=ev_type,
@@ -233,6 +401,7 @@ class RiskEngine:
                     "stop_unconfirmed": decision.request.stop_unconfirmed,
                     "unknown_position": decision.request.unknown_position,
                     "attack_intent": decision.request.effective_attack_intent,
+                    "is_new_open": decision.request.is_new_open,
                     "manipulation_level": (
                         decision.request.manipulation_level.value
                         if decision.request.manipulation_level is not None
@@ -243,6 +412,49 @@ class RiskEngine:
                         if decision.request.trade_confirmation_level is not None
                         else None
                     ),
+                    # Phase 7 audit additions.
+                    "account_tier": (
+                        decision.account_tier.value
+                        if decision.account_tier is not None
+                        else None
+                    ),
+                    "no_trade_gate_reasons": (
+                        [r.value for r in gate.reasons] if gate is not None else []
+                    ),
+                    "no_trade_gate_notes": (
+                        list(gate.notes) if gate is not None else []
+                    ),
+                    "daily_loss_breaker_state": self._daily_loss_breaker.state.value,
+                    "consecutive_loss_breaker_state": self._consecutive_loss_breaker.state.value,
+                    "regime": (
+                        decision.request.regime_snapshot.market_regime.value
+                        if decision.request.regime_snapshot is not None
+                        else None
+                    ),
+                    "risk_permission": (
+                        decision.request.regime_snapshot.risk_permission.value
+                        if decision.request.regime_snapshot is not None
+                        else None
+                    ),
+                    "is_data_degraded": decision.request.is_data_degraded,
+                    "exchange_connection_state": (
+                        decision.request.exchange_connection_state.value
+                        if decision.request.exchange_connection_state is not None
+                        else None
+                    ),
                 },
             )
         )
+
+
+# Re-export common breaker symbol so callers can keep the import
+# narrow. ``RiskEngine`` plus the breakers are the public Phase 7
+# surface from this module.
+__all__ = [
+    "RiskDecision",
+    "RiskEngine",
+    "RiskRequest",
+    "ConsecutiveLossCircuitBreaker",
+    "DailyLossCircuitBreaker",
+    "CircuitBreakerState",
+]
