@@ -62,8 +62,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 9 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 9 - Execution FSM Reconciliation" in captured
+    # Phase 10A entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 10A - Replay Engine" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -109,6 +109,12 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "new_opens_paused=False" in captured
     assert "incidents_opened=0" in captured
     assert "protection_mode_entered=" in captured
+    # Phase 10A fields - Replay self-check passed.
+    assert "replay_paper_trade_matched=True" in captured
+    assert "replay_p0_incidents=0" in captured
+    assert "replay_telegram_commands=" in captured
+    assert "replay_state_transitions=" in captured
+    assert "replay_p0_latched_pause_invariant=True" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir

@@ -1,22 +1,35 @@
-"""AMA-RT entrypoint (Phase 9 - Execution FSM Reconciliation).
+"""AMA-RT entrypoint (Phase 10A - Replay Engine).
 
 Run with:
 
     python -m app.main
 
-This entrypoint DOES NOT trade. Phase 9 wires the Execution FSM
-driver and the Reconciliation loop into the boot drill so a single
-paper-mode order is taken from IDLE through POSITION_OPEN and a
-clean reconciliation pass is emitted. Every Phase 1-8.5 contract
-stays in force:
+This entrypoint DOES NOT trade. Phase 10A wires the read-only
+Replay Engine into the boot drill on top of the Phase 9
+Execution FSM + Reconciliation drill. After the paper-mode order
+has been driven through POSITION_OPEN and a clean reconciliation
+pass has landed, Replay reconstructs:
+
+  - the paper trade lifecycle keyed by the boot client_order_id,
+  - the boot CAPITAL_DEPOSIT marker,
+  - the bootstrap RISK_APPROVED decision,
+  - any P0 incidents (boot drill expects zero),
+  - the boot STATE_TRANSITION ladder for the first eligible symbol,
+  - the boot Telegram /status command,
+  - the P0 latched-pause invariant against the boot's clean
+    reconciliation pass.
+
+Every Phase 1-9 contract stays in force:
 
   - The five Phase 1 safety flags remain locked.
   - The four Phase 3 ExchangeClientBase write surfaces still raise
-    SafeModeViolation - Phase 9 NEVER overrides them. Paper-mode
+    SafeModeViolation - Phase 10A NEVER overrides them. Paper-mode
     state lives in a separate :class:`PaperLedger`.
   - Phase 8.5 redaction / export contract is unchanged.
   - LLM remains disabled; Telegram outbound remains deferred to
-    Issue #10.
+    Issue #10 Part 10D.
+  - Replay is read-only - it never writes to events.db, never
+    instantiates an exchange client, never opens a socket.
 """
 
 from __future__ import annotations
@@ -63,6 +76,10 @@ from app.reconciliation import (  # noqa: E402
     remote_snapshot_from_paper_ledger,
 )
 from app.regime import RegimeEngine  # noqa: E402
+from app.replay import (  # noqa: E402
+    P0LatchedPauseInvariantReport,
+    ReplayEngine,
+)
 from app.risk.engine import RiskEngine, RiskRequest  # noqa: E402
 from app.scanner import AnomalyScanner, PreAnomalyScanner  # noqa: E402
 from app.state_machine import (  # noqa: E402
@@ -659,6 +676,101 @@ def run() -> int:
             note="phase9_boot_paper_marker",
         )
 
+        # ---- Phase 10A - Replay Engine boot self-check -----------
+        # Phase 10A is read-only. The Replay Engine never opens a
+        # socket, never imports an exchange / LLM / Telegram client,
+        # never instantiates a state-mutating component, and never
+        # writes to events.db. The boot self-check exercises every
+        # public replay surface on the events the prior Phase 1-9
+        # boot drills already wrote.
+        from app.replay.loaders import (  # noqa: E402  -- local import keeps the boot import block tidy
+            load_capital_flow_events,
+        )
+        replay = ReplayEngine(event_repo=repo)
+        replay_paper_trade = replay.replay_paper_trade(
+            client_order_id=boot_order.client_order_id,
+        )
+        # The boot drill drives the order all the way to POSITION_CLOSED
+        # so the diff against the canonical closed paper-trade chain
+        # MUST be a clean match.
+        if not replay_paper_trade.diff_against_canonical.matched:
+            raise RuntimeError(
+                "Phase 10A boot self-check: paper trade lifecycle diff "
+                "does not match the canonical chain. divergences="
+                f"{replay_paper_trade.diff_against_canonical.divergences!r}"
+            )
+        # The Phase 10A capital-rebase replay needs an actual
+        # CAPITAL_REBASE event; the Phase 9 boot drill does not emit
+        # one (no withdrawal / deposit happens), so we only assert the
+        # capital-flow loader returns the boot CAPITAL_DEPOSIT marker
+        # we just wrote. A future Phase 10A self-check that drives
+        # CapitalFlowEngine.deposit() would exercise replay_capital_rebase
+        # directly; we explicitly do NOT instantiate CapitalFlowEngine
+        # here because Phase 10A is read-only and the Phase 9 boot
+        # drill already exercises the capital-event substrate.
+        boot_capital_flow_events = load_capital_flow_events(repo)
+        if not boot_capital_flow_events:
+            raise RuntimeError(
+                "Phase 10A boot self-check: events.db has no capital "
+                "events even though the Phase 2 marker was emitted."
+            )
+        # Find the bootstrap RISK_APPROVED event (first one written -
+        # the FSM driver writes RISK_APPROVED for every paper-mode
+        # submit_order too, but the bootstrap one comes first by
+        # construction).
+        bootstrap_risk_events = repo.list_events(
+            event_type=EventType.RISK_APPROVED,
+            source_module="risk_engine",
+        )
+        if not bootstrap_risk_events:
+            raise RuntimeError(
+                "Phase 10A boot self-check: events.db has no "
+                "RISK_APPROVED event."
+            )
+        replay_risk = replay.replay_risk_decision(
+            event_id=bootstrap_risk_events[0].event_id,
+        )
+        if not replay_risk.approved:
+            raise RuntimeError(
+                "Phase 10A boot self-check: bootstrap risk decision "
+                "should be RISK_APPROVED."
+            )
+        replay_p0 = replay.replay_p0_incidents()
+        if replay_p0:
+            raise RuntimeError(
+                "Phase 10A boot self-check: clean boot drill should "
+                "produce zero P0 incidents."
+            )
+        replay_state = replay.replay_state_transitions(symbol=first_symbol)
+        if not replay_state.events:
+            raise RuntimeError(
+                "Phase 10A boot self-check: boot drill must produce at "
+                "least one STATE_TRANSITION event."
+            )
+        replay_telegram = replay.replay_telegram_commands()
+        # The Phase 1 Telegram skeleton emits one /status during boot.
+        if not replay_telegram:
+            raise RuntimeError(
+                "Phase 10A boot self-check: boot drill must produce at "
+                "least one TELEGRAM_COMMAND_RECEIVED event."
+            )
+        invariant: P0LatchedPauseInvariantReport = (
+            replay.verify_p0_latched_pause_invariant()
+        )
+        if not invariant.held:
+            raise RuntimeError(
+                "Phase 10A boot self-check: P0 latched-pause invariant "
+                "violation in boot reconciliation pass: "
+                f"{invariant.violations!r}"
+            )
+        replay_paper_trade_count = 1
+        replay_p0_incident_count = len(replay_p0)
+        replay_telegram_command_count = len(replay_telegram)
+        replay_state_transition_count = len(replay_state.events)
+        replay_invariant_held = invariant.held
+        # ----------------------------------------------------------
+
+
         overall, _ = health.evaluate()
         capital_count = repo.count_events(event_type=EventType.CAPITAL_DEPOSIT)
         exchange_connected_count = repo.count_events(
@@ -763,6 +875,11 @@ def run() -> int:
             f"new_opens_paused={reconciler.new_opens_paused} "
             f"incidents_opened={incident_opened_count} "
             f"protection_mode_entered={protection_entered_count} "
+            f"replay_paper_trade_matched={replay_paper_trade.diff_against_canonical.matched} "
+            f"replay_p0_incidents={replay_p0_incident_count} "
+            f"replay_telegram_commands={replay_telegram_command_count} "
+            f"replay_state_transitions={replay_state_transition_count} "
+            f"replay_p0_latched_pause_invariant={replay_invariant_held} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )

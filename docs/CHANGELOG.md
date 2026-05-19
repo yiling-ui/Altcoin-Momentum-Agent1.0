@@ -7,6 +7,193 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 10A - Replay Engine (Issue #10 Part 1)
+
+Phase 10A delivers the read-only Replay Engine on top of every
+Phase 1-9 contract. The engine reconstructs paper trade
+lifecycles, capital rebases, risk decisions, P0 incidents, trade
+state transitions, telegram commands, and Phase 8.5
+learning-ready payloads from `events.db`, plus a P0 latched-pause
+invariant verifier that audits the Phase 9 fix-up rule (PR #22).
+This is **Part 1 of 4** of Issue #10; Parts 10B (Reflection),
+10C (LLM Guarded Interpreter) and 10D (Telegram outbound +
+Export commands) ship in separate PRs.
+
+#### Added
+
+##### `app/replay/` - Replay Engine
+
+- `ReplayEngine(event_repo)` - read-only constructor. The engine
+  holds an :class:`EventRepository` reference but never writes
+  through it. The constructor signature is pinned: a single
+  keyword-only `event_repo` parameter and nothing else. No
+  exchange client, no capital flow engine, no risk engine, no
+  market data buffer, no Telegram bot, no LLM client.
+- Replay value objects (frozen dataclasses, all expose
+  `to_payload()` for JSON-safe serialisation):
+    - `PaperTradeReplay` - the Phase 9 paper trade lifecycle
+      reconstructed from `events.db`. Carries the
+      :class:`PaperLifecycleSummary` produced by the existing
+      `reconstruct_paper_lifecycle` helper plus a
+      :class:`ReplayDiffReport` that compares the observed event
+      chain against the canonical Phase 9 happy-path ordering.
+    - `CapitalRebaseReplay` - one capital rebase plus the
+      surrounding `CAPITAL_DEPOSIT` / `CAPITAL_WITHDRAWAL` /
+      `PROFIT_HARVEST` / `RISK_BUDGET_RECALCULATED` events that
+      land within a 50ms window of the rebase.
+    - `RiskDecisionReplay` - one `RISK_APPROVED` /
+      `RISK_REJECTED` event with every Phase 7 / Phase 8.5
+      payload field surfaced as a typed attribute, plus the
+      Phase 8.5 `learning_ready` block (read back exactly as
+      Phase 8.5 wrote it).
+    - `IncidentReplay` - one incident lifecycle (OPEN +
+      optional RESOLVE + protection-mode entered/exited window)
+      reconstructed from `events.db` alone. The PROTECTION_MODE
+      events are scoped to the incident's open-to-resolve
+      window when an `incident_id` filter is supplied.
+    - `StateTransitionReplay` - the Phase 7 trade-state ladder
+      for one symbol (or all symbols).
+    - `TelegramCommandReplay` - one
+      `TELEGRAM_COMMAND_RECEIVED` event reconstructed; ready
+      for Phase 10D.
+    - `LearningReadyReplay` - the Phase 8.5 learning-ready
+      block extracted from one event, with `has_opportunity` /
+      `has_signal_snapshot` / `has_virtual_trade_plan` /
+      `has_config_versions` / `has_risk_decision` projections.
+    - `P0LatchedPauseInvariantReport` - audit over a sequence
+      of `RECONCILIATION_RESOLVED` events. Flags any clean pass
+      that reports `has_open_p0_incident=True` /
+      `protection_mode_active=True` and
+      `new_opens_paused=False`, or `p0_latched_pause=True` with
+      any blocker active and `new_opens_paused=False`.
+- Diff infrastructure (`app/replay/diff.py`):
+    - `DiffKind` (`MATCH`, `MISSING`, `EXTRA`, `REORDERED`).
+    - `DiffEntry` and `ReplayDiffReport` (frozen dataclasses).
+    - `compare_event_chains(expected, observed, *, label)` -
+      pure-function structural diff over two event-type chains.
+      Uses :class:`difflib.SequenceMatcher` so the result is
+      deterministic across runs.
+- Read-only loaders (`app/replay/loaders.py`) - one helper per
+  Phase 9 lifecycle group:
+    - `load_all_events`, `stream_events` (lazy iterator)
+    - `load_events_for_order`, `load_events_for_position`,
+      `load_events_for_symbol`, `load_events_for_opportunity`
+    - `load_capital_flow_events`, `load_risk_decision_events`,
+      `load_incident_lifecycle_events`,
+      `load_state_transition_events`,
+      `load_telegram_command_events`,
+      `load_reconciliation_events`
+    - `has_learning_ready`, `extract_learning_ready` (returns a
+      shallow copy so callers cannot mutate source payloads),
+      `opportunity_id_for`
+    - `pair_reconciliation_passes` - groups
+      `RECONCILIATION_STARTED` / `RECONCILIATION_MISMATCH` /
+      `RECONCILIATION_RESOLVED` triplets by their `started_at`
+      payload key.
+- Canonical chains pinned at module level so future PRs cannot
+  silently drift them: `CANONICAL_CLOSED_PAPER_TRADE_CHAIN`,
+  `CANONICAL_OPEN_PAPER_TRADE_CHAIN`. The Replay diff
+  normalises the observed chain into canonical progression
+  order before comparing because Phase 9 emits the entire paper
+  trade lifecycle inside a single millisecond and
+  `EventRepository` ties on `(timestamp, event_id)` where the
+  secondary sort is a random UUID.
+
+##### Boot drill (`python -m app.main`)
+
+The entrypoint runs the Phase 10A self-check after the Phase 9
+paper-trade and reconciliation drill. It exercises every public
+replay surface:
+
+  - replay the boot paper trade (must match the canonical chain),
+  - confirm at least one capital event landed,
+  - replay the bootstrap RISK_APPROVED decision,
+  - confirm zero P0 incidents,
+  - replay the boot STATE_TRANSITION ladder,
+  - replay the boot Telegram /status command,
+  - verify the P0 latched-pause invariant against the boot's
+    clean reconciliation pass.
+
+The boot banner gains five new fields:
+
+```
+replay_paper_trade_matched=True
+replay_p0_incidents=0
+replay_telegram_commands=1
+replay_state_transitions=1
+replay_p0_latched_pause_invariant=True
+```
+
+#### Phase 10A boundary
+
+Phase 10A is **read-only**:
+
+  - opens NO socket
+  - imports NO exchange SDK / HTTP / WebSocket / LLM client /
+    Telegram bot library
+  - reads NO `os.environ`
+  - defines NO `create_order` / `cancel_order` / `set_leverage` /
+    `set_margin_mode` method
+  - does NOT subclass `ExchangeClientBase`
+  - does NOT instantiate any state-mutating component (the AST
+    scan in `tests/unit/test_phase10a_boundary.py` enforces
+    this against every file under `app/replay/`)
+  - does NOT call `EventRepository.append_event` /
+    `append_many` (AST scan in
+    `tests/unit/test_phase10a_no_network.py`)
+
+#### Tests
+
+`+119` new Phase 10A tests on top of `1130` retained from
+Phase 1-9 = **`1249` total**.
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_replay_diff.py` | 13 | DiffKind vocabulary, DiffEntry payload, identical/empty/missing/extra/reordered combinations, determinism, JSON round-trip, frozen dataclass. |
+| `test_replay_loaders.py` | 21 | Every event-type tuple matches its phase, every loader produces the right filter behaviour, learning-ready reads, opportunity_id extraction (top-level + nested in learning_ready), reconciliation pass pairing. |
+| `test_replay_engine.py` | 22 | Acceptance criteria 1-7: replay one paper trade, replay capital rebase (event_id and timestamp), replay risk rejection under M3, replay risk decision by event_id, replay P0 incident lifecycle (with protection-mode events scoped to the incident window), replay STATE_TRANSITION ladder, replay TELEGRAM_COMMAND_RECEIVED, read Phase 8.5 learning-ready payload. Plus determinism, JSON-safety, no event-stream writes, constructor pin (event_repo only). |
+| `test_replay_p0_latched_pause.py` | 10 | Empty trail / clean passes / P0 latched + pause kept / full operator resume protocol / synthesised violations (blocker_active_but_unpaused, latched_but_unpaused) / window filters / JSON round-trip. |
+| `test_phase10a_boundary.py` | 14 | Phase 1 / 3 / 9 invariants, package does not subclass ExchangeClientBase, no write surface method definitions, public exports complete, canonical chains pinned. Replay engine constructor accepts only `event_repo`. |
+| `test_phase10a_no_network.py` | ~50 | Per-file AST scan of every `.py` under `app/replay/`: no forbidden import, no write-surface method definition, no `api_key` / `api_secret` / `bot_token` parameter or literal, no `os.environ.get` / `getenv()`, no `send_message` / `send_document` / `send_photo` reference, no other-DB `sqlite3.connect`, no `EventRepository.append_event` / `append_many` call, no state-mutating component import. |
+
+`tests/unit/test_main_entrypoint.py` extended (one assertion
+flip) for the Phase 10A boot banner string and the five new
+banner fields.
+
+### Issue #10 acceptance criteria (Part 10A subset)
+
+| # | Criterion | Test |
+| --- | --- | --- |
+| 1 | Replay can rebuild a mock paper trade | `test_replay_paper_trade_returns_summary_and_clean_diff` |
+| 2 | Replay can rebuild a Capital Rebase | `test_replay_capital_rebase_after_deposit` |
+| 3 | Replay can rebuild a Risk rejection | `test_replay_risk_rejection_under_m3` |
+| 4 | Replay can rebuild a P0 incident | `test_replay_p0_incident_reconstructs_open_and_resolve` |
+| 5 | Replay can read Phase 8.5 learning-ready payload | `test_replay_reads_learning_ready_block` |
+| 6 | Replay does not trigger trading actions | `test_replay_does_not_write_to_events_db` + AST scan |
+| 7 | Replay does not depend on real network | `test_phase10a_no_network.py::test_no_forbidden_imports` |
+| 8 | pytest 全部通过 | 1249 passed |
+
+### Boundary preserved
+
+  - No new exchange SDK / HTTP / WebSocket / LLM client /
+    Telegram bot library in `requirements.txt` /
+    `pyproject.toml`.
+  - No new `create_order` / `cancel_order` / `set_leverage` /
+    `set_margin_mode` call site.
+  - No change to the Phase 1 safety lock.
+  - No change to the Phase 3 read-only invariant.
+  - No change to the Phase 9 Execution FSM driver / Reconciler
+    contract. Replay reads but never writes.
+  - No real-trade persistence into `trades.db` / `positions.db`.
+  - No LLM in trade decisions.
+  - No Telegram outbound; the Phase 1 in-process command bus
+    skeleton is unchanged.
+
+#### Version
+
+`app/__init__.py` -> `1.4.0a10` /
+`Phase 10A - Replay Engine`. `pyproject.toml` -> `1.4.0a10`.
+
 ### Phase 9 - Execution FSM + Reconciliation
 
 Phase 9 wires the Execution FSM driver and the Reconciliation

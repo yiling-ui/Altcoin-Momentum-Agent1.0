@@ -1,29 +1,27 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 9 - Execution FSM + Reconciliation.
-> **Paper / mock execution only.** Phase 9 wires the Execution FSM
-> driver and the Reconciliation loop on top of every Phase 1-8.5
-> contract. The driver advances per-order sessions through the 15
-> :class:`ExecutionState` values, emits the matching ``ORDER_*`` /
-> ``STOP_*`` / ``POSITION_*`` events, and consults the Risk Engine
-> on every NEW open AND on every reduce-only / protective-exit /
-> kill_all path. Paper-mode state lives in a separate
-> :class:`PaperLedger`; the four ``ExchangeClientBase`` write
-> surfaces (``create_order``, ``cancel_order``, ``set_leverage``,
-> ``set_margin_mode``) **continue to raise** ``SafeModeViolation``
-> and Phase 9 NEVER overrides them. The Reconciliation loop emits
-> ``RECONCILIATION_STARTED`` / ``RECONCILIATION_MISMATCH`` /
-> ``RECONCILIATION_RESOLVED`` events and opens P0 incidents on
-> ghost positions / unattached stops via the new
-> :class:`IncidentRepository` (first writer of ``incidents.db``).
-> This repository still does **not** trade real money, does **not**
-> open any outbound network socket, does **not** import any
-> exchange SDK (`ccxt`, `binance-connector`, `python-binance` are
-> intentionally absent from `requirements.txt`), does **not** call
-> any LLM, and does **not** read real API keys. The Phase 1 safety
-> lock (`mode=paper`, `live_trading_enabled=False`,
-> `right_tail_enabled=False`, `llm_enabled=False`,
-> `exchange_live_order_enabled=False`) remains in force.
+> **Phase status:** Phase 10A - Replay Engine (Issue #10 Part 1).
+> **Paper / mock execution only.** Phase 10A adds the read-only
+> :mod:`app.replay` package on top of every Phase 1-9 contract.
+> The Replay Engine reconstructs paper trade lifecycles, capital
+> rebases, risk decisions, P0 incidents, trade state transitions,
+> telegram commands, and Phase 8.5 learning-ready payloads from
+> ``events.db``, plus a P0 latched-pause invariant verifier
+> (Phase 9 fix-up, PR #22). Replay opens **no socket**, imports
+> **no exchange SDK**, **no LLM client**, **no Telegram bot
+> library**, defines **no write surface**, and never instantiates
+> any state-mutating component. Issue #10 Parts 10B (Reflection),
+> 10C (LLM Guarded Interpreter) and 10D (Telegram outbound +
+> Export commands) ship in separate PRs.
+>
+> The Phase 1 safety lock (`mode=paper`,
+> `live_trading_enabled=False`, `right_tail_enabled=False`,
+> `llm_enabled=False`, `exchange_live_order_enabled=False`) and
+> every later boundary remain in force. The four
+> ``ExchangeClientBase`` write surfaces (``create_order``,
+> ``cancel_order``, ``set_leverage``, ``set_margin_mode``)
+> **continue to raise** ``SafeModeViolation`` and Phase 10A NEVER
+> overrides them.
 
 ---
 
@@ -43,8 +41,139 @@ This is the implementation of the production specification in
 | Phase 7 - State Machine / Risk Engine | #7  | merged | `feature/phase-7-state-machine-risk-engine` (PR #18) |
 | Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | merged | `feature/phase-8-capital-flow-profit-harvest-rebase` (PR #19) |
 | Phase 8.5 - Learning-Ready Data Contract + Test Data Export | #8.5 | merged | `feature/phase-8-5-learning-ready-data-contract` (PR #20) |
-| Phase 9 - Execution FSM / Reconciliation | #9  | this branch | `feature/phase-9-execution-fsm-reconciliation` |
-| Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+| Phase 9 - Execution FSM / Reconciliation | #9  | merged | `feature/phase-9-execution-fsm-reconciliation` (PR #21, hardening PR #22) |
+| Phase 10A - Replay Engine (Part 1 of Issue #10) | #10 (Part A) | this branch | `feature/phase-10a-replay-engine` |
+| Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | open | - |
+| Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | open | - |
+| Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | open | - |
+
+## Phase 10A deliverable - Replay Engine (Issue #10 Part 1)
+
+Phase 10A adds one new package on top of the Phase 9 substrate:
+
+  - **`app/replay/`** - the read-only Replay Engine. Reconstructs
+    paper trade lifecycles, capital rebases, risk decisions, P0
+    incidents, trade state transitions, telegram commands, and
+    Phase 8.5 learning-ready payloads from `events.db`. Includes
+    a P0 latched-pause invariant verifier that audits the Phase 9
+    fix-up rule (PR #22): once a P0 mismatch latches the
+    `new_opens_paused` flag, a clean reconciliation alone must NOT
+    auto-clear it - the operator must also resolve the incident,
+    exit protection mode, and confirm resume.
+
+The package is **read-only**: no socket, no exchange SDK, no LLM
+client, no Telegram bot library, no write surface, no
+`os.environ` access, and no `EventRepository.append_event` /
+`append_many` call anywhere in `app/replay/`. AST scans in
+`tests/unit/test_phase10a_no_network.py` enforce every clause at
+the source-tree level on every file under `app/replay/`.
+
+### Replay public surface
+
+```python
+from app.replay import (
+    ReplayEngine,
+    PaperTradeReplay,
+    CapitalRebaseReplay,
+    RiskDecisionReplay,
+    IncidentReplay,
+    StateTransitionReplay,
+    TelegramCommandReplay,
+    LearningReadyReplay,
+    P0LatchedPauseInvariantReport,
+    ReplayDiffReport,
+    DiffKind,
+    DiffEntry,
+    compare_event_chains,
+)
+from app.database.repositories import EventRepository
+
+# read-only constructor: no exchange client, no risk engine,
+# no capital flow engine, no market data buffer.
+replay = ReplayEngine(event_repo=event_repo)
+
+# Paper trade lifecycle keyed by client_order_id OR opportunity_id
+trade = replay.replay_paper_trade(client_order_id="phase9_boot_xxx")
+assert trade.summary.final_status == "closed"
+assert trade.diff_against_canonical.matched is True
+
+# Capital Rebase keyed by event_id OR timestamp
+rebase = replay.replay_capital_rebase(rebase_event_id="...")
+print(rebase.trigger, rebase.new_exchange_equity)
+
+# Risk decisions
+rejected = replay.replay_risk_rejections(symbol="PEPEUSDT")
+assert rejected[0].reasons[0] == "manipulation_m3"
+
+# P0 incidents
+for incident in replay.replay_p0_incidents():
+    print(incident.incident_id, incident.level, incident.resolution)
+
+# Trade state ladder (with `from -> to` pairs)
+ladder = replay.replay_state_transitions(symbol="PEPEUSDT")
+
+# Telegram commands (audit only)
+commands = replay.replay_telegram_commands(name="/status")
+
+# Phase 8.5 learning-ready payload
+lr = replay.extract_learning_ready_for(event_id=event_id)
+if lr is not None:
+    print(lr.opportunity_id, lr.has_signal_snapshot)
+
+# P0 latched-pause invariant audit
+report = replay.verify_p0_latched_pause_invariant()
+assert report.held is True
+```
+
+### Phase 10A hard boundary
+
+  1. **Read-only.** Replay imports no state-mutating component
+     (no CapitalFlowEngine, no ExecutionFSMDriver, no Reconciler,
+     no RiskEngine, no IncidentRepository, no MockExchangeClient,
+     no BinanceClient, no MarketDataBuffer, no
+     TelegramCommandCenter). AST scan enforces this on every
+     file under `app/replay/`.
+  2. **No write surface.** No file under `app/replay/` defines
+     `create_order` / `cancel_order` / `set_leverage` /
+     `set_margin_mode`. AST scan enforces this.
+  3. **No `EventRepository.append_event` / `append_many` call**
+     anywhere in `app/replay/`. AST scan enforces this; the
+     boot self-check confirms `events.count` is unchanged after
+     the full Replay self-check runs.
+  4. **No socket / no exchange SDK / no LLM client / no Telegram
+     bot library.** AST scan enforces this.
+  5. **No `os.environ` / `getenv` reads** anywhere in
+     `app/replay/`. AST scan enforces this.
+  6. **No `api_key` / `api_secret` / `bot_token` parameter or
+     concrete literal** anywhere in `app/replay/`. AST scan
+     enforces this.
+  7. **Read-only against `events.db` only.** No file under
+     `app/replay/` opens `trades.db` / `positions.db` /
+     `market.db` / `orders.db` / `reflection.db` /
+     `llm_cache.db` / `capital.db` / `incidents.db` directly.
+  8. **No Issue #10 Part 10B / 10C / 10D work.** No Reflection
+     engine, no LLM client, no Telegram outbound, no Export
+     commands. Those land in separate PRs.
+
+### Boot drill output (`python -m app.main`)
+
+```
+[AMA-RT] Phase 10A - Replay Engine v1.4.0a10 mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  ... (Phase 1-9 fields unchanged) ... \
+  replay_paper_trade_matched=True \
+  replay_p0_incidents=0 \
+  replay_telegram_commands=1 \
+  replay_state_transitions=1 \
+  replay_p0_latched_pause_invariant=True \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+The Phase 10A self-check exercises every public replay surface
+on the events the Phase 1-9 boot drill writes; if any of them
+diverges from the canonical contract, the entrypoint refuses to
+print the banner and exits non-zero. Parts 10B / 10C / 10D will
+extend the boot drill in their respective PRs.
 
 ## Phase 9 deliverable - Execution FSM + Reconciliation
 
