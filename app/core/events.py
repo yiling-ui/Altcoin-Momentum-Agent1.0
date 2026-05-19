@@ -104,6 +104,14 @@ class EventType(str, Enum):
 
     # ---- Telegram --------------------------------------------------------
     TELEGRAM_COMMAND_RECEIVED = "TELEGRAM_COMMAND_RECEIVED"
+    # Phase 10D - Telegram Outbound + Export Commands (Issue #10 Part 4)
+    TELEGRAM_COMMAND_REJECTED = "TELEGRAM_COMMAND_REJECTED"
+    TELEGRAM_MESSAGE_SENT = "TELEGRAM_MESSAGE_SENT"
+    TELEGRAM_SEND_FAILED = "TELEGRAM_SEND_FAILED"
+
+    # ---- Data export (Phase 10D - Issue #10 Part 4) ----------------------
+    DATA_EXPORT_GENERATED = "DATA_EXPORT_GENERATED"
+    DATA_EXPORT_FAILED = "DATA_EXPORT_FAILED"
 
 
 # Capital-flow event types per Issue #2 / Spec §28.3.

@@ -1,29 +1,43 @@
-"""AMA-RT entrypoint (Phase 10B - Reflection Engine).
+"""AMA-RT entrypoint (Phase 10D - Telegram Outbound + Export Commands).
 
 Run with:
 
     python -m app.main
 
-This entrypoint DOES NOT trade. Phase 10B wires the read-only
-Reflection Engine into the boot drill on top of the Phase 10A
-Replay self-check. After the paper-mode order has been driven
-through POSITION_CLOSED and Replay has reconstructed the
-lifecycle, Reflection produces ONE structured
-:class:`ReflectionResult` for the boot trade.
+This entrypoint DOES NOT trade. Phase 10D wires the receive-only
+Telegram outbound layer + the file-export bridge into the boot drill
+on top of every Phase 1-10C contract. The drill exercises:
 
-Every Phase 1-10A contract stays in force:
+  - Every Phase 10D formatter (10 of them) once via the
+    AlertDispatcher against a deterministic FakeTelegramClient.
+  - One ``/export_test_data 24h`` command end-to-end through the
+    TelegramExportBridge -> TestDataExportService path: short
+    generating-summary caption + the redacted ``.zip`` document
+    attachment, NEVER a chat dump.
+  - One unauthorised-user rejection so the
+    ``TELEGRAM_COMMAND_REJECTED`` audit path is alive.
+
+Every Phase 1-10C contract stays in force:
 
   - The five Phase 1 safety flags remain locked.
   - The four Phase 3 ExchangeClientBase write surfaces still raise
-    SafeModeViolation - Phase 10B NEVER overrides them. Paper-mode
-    state lives in a separate :class:`PaperLedger`.
-  - Phase 8.5 redaction / export contract is unchanged.
-  - LLM remains disabled; Telegram outbound remains deferred to
-    Issue #10 Part 10D.
-  - Replay (Phase 10A) is read-only - it never writes to events.db.
-  - Reflection (Phase 10B) is read-only - it consumes the Replay
-    output, never writes to events.db, never opens a socket, never
-    instantiates a state-mutating component.
+    SafeModeViolation - Phase 10D NEVER overrides them.
+  - LLM remains disabled; LLM Guarded Interpreter (Phase 10C)
+    short-circuits on the default boot path.
+  - Replay (Phase 10A) + Reflection (Phase 10B) remain read-only.
+  - Phase 8.5 export contract is unchanged; Phase 10D consumes the
+    service rather than re-implementing redaction / manifest /
+    summary.
+
+Phase 10D NEVER:
+
+  - opens a real socket
+  - imports an exchange / LLM / third-party Telegram bot SDK
+  - reads ``os.environ`` for credentials
+  - holds an ``api_key`` / ``api_secret`` / ``bot_token`` parameter
+    or literal anywhere in :mod:`app.telegram`
+  - bypasses the Risk Engine
+  - lets ``/kill_all`` / ``/rebase`` touch a real exchange surface
 """
 
 from __future__ import annotations
@@ -89,6 +103,25 @@ from app.state_machine import (  # noqa: E402
 )
 from app.confirmation import RealTradeConfirmation  # noqa: E402
 from app.telegram.bot import TelegramCommandCenter  # noqa: E402
+from app.telegram import (  # noqa: E402
+    AlertDispatcher,
+    AlertSeverity,
+    Command,
+    FakeTelegramClient,
+    TelegramExportBridge,
+    TAG_CANDIDATE_SYMBOL,
+    TAG_CAPITAL_REBASE,
+    TAG_DAILY_REPORT,
+    TAG_INCIDENT_ALERT,
+    TAG_MARKET_REGIME,
+    TAG_ORDER_EVENT,
+    TAG_PROFIT_LOCK,
+    TAG_RISK_REJECTION,
+    TAG_STATE_TRANSITION,
+    TAG_SYSTEM_STATUS,
+    TRADING_MODE_PAPER,
+)
+from app.exports import TestDataExportService  # noqa: E402
 from app.universe import UniverseFilter  # noqa: E402
 
 
@@ -940,6 +973,270 @@ def run() -> int:
                 else HealthStatus.DEGRADED
             ),
         )
+        # ---- Phase 10D - Telegram Outbound + Export self-check ---
+        # Phase 10D ships the operator-facing Telegram surface plus
+        # the file-export bridge layered on Phase 8.5. The boot drill
+        # exercises every public path against a deterministic
+        # FakeTelegramClient with outbound_enabled=True so we can
+        # observe call counts, but the system-wide
+        # telegram_outbound_enabled flag stays False - the FakeClient
+        # is in-process recorder only and opens NO socket.
+        #   (a) every formatter renders a redacted, banner-tagged
+        #       message and the dispatcher records the send,
+        #   (b) one /export_test_data 24h command produces a redacted
+        #       zip and the bridge sends the SHORT generating-summary
+        #       caption + the document attachment in a single
+        #       send_document call (no chat dump),
+        #   (c) the audit trail carries
+        #       TELEGRAM_MESSAGE_SENT + DATA_EXPORT_GENERATED rows,
+        #   (d) zero TELEGRAM_SEND_FAILED, zero DATA_EXPORT_FAILED,
+        #       zero redaction_blocked.
+        boot_telegram_outbound = FakeTelegramClient(outbound_enabled=True)
+        boot_alert_dispatcher = AlertDispatcher(
+            outbound=boot_telegram_outbound,
+            event_repo=repo,
+            chat_id="phase10d_boot",
+            outbound_enabled=True,
+        )
+        # Drive ONE alert through every formatter so the boot drill
+        # exercises the full registry. Each call asserts the message
+        # is short (<= 1024 chars) and free of forbidden substrings.
+        boot_telegram_payloads = (
+            (TAG_SYSTEM_STATUS, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "status": "running",
+                "new_opens_paused": False,
+                "protection_mode_active": False,
+                "open_positions": 0,
+                "open_orders": 0,
+                "incidents_open": 0,
+                "health": "ok",
+                "app_version": __version__,
+                "phase": __phase__,
+            }),
+            (TAG_MARKET_REGIME, AlertSeverity.WARNING, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "market_regime": regime_snapshot.market_regime.value,
+                "risk_permission": regime_snapshot.risk_permission.value,
+                "btc_trend": regime_snapshot.btc_trend.value,
+                "btc_volatility": regime_snapshot.btc_volatility.value,
+                "alt_liquidity": regime_snapshot.alt_liquidity.value,
+                "reason_tags": list(regime_snapshot.reason_tags or ()),
+            }),
+            (TAG_CANDIDATE_SYMBOL, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "symbol": boot_symbol,
+                "grade": "S",
+                "pre_anomaly_score": 76,
+                "anomaly_score": 80,
+                "trade_confirmation_level": "T2",
+                "manipulation_level": "M0",
+                "regime": regime_snapshot.market_regime.value,
+                "opportunity_id": "opp_phase10d_boot",
+            }),
+            (TAG_STATE_TRANSITION, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "symbol": boot_symbol,
+                "from": "no_trade",
+                "to": "observe",
+                "trigger": "phase10d_boot",
+                "reasons": ["phase10d_boot"],
+            }),
+            (TAG_ORDER_EVENT, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "symbol": boot_symbol,
+                "event": "ORDER_FILLED",
+                "side": "buy",
+                "intent": "new_open",
+                "qty": 0.001,
+                "fill_price": 100.0,
+                "limit_price": 100.0,
+                "client_order_id": boot_order.client_order_id,
+                "opportunity_id": "opp_phase9_boot",
+            }),
+            (TAG_RISK_REJECTION, AlertSeverity.WARNING, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "symbol": boot_symbol,
+                "action": "phase10d_boot_rejection_drill",
+                "regime": regime_snapshot.market_regime.value,
+                "manipulation_level": "M0",
+                "trade_confirmation_level": "T0",
+                "account_tier": "B",
+                # NOTE: stop_unconfirmed and unknown_position are auto-promoted
+                # to CRITICAL by the dispatcher so this drill exercises the
+                # bypass-throttle path.
+                "reasons": [
+                    "stop_unconfirmed",
+                    "unknown_position",
+                    "rebase_in_progress",
+                    "manipulation_m3",
+                    "data_degraded",
+                    "no_exit_channel",
+                ],
+                "opportunity_id": "opp_phase10d_boot_reject",
+            }),
+            (TAG_PROFIT_LOCK, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "symbol": boot_symbol,
+                "action": "lock_profit",
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "entry_price": 100.0,
+                "exit_price": 100.0,
+                "tail_qty": 0.0,
+                "right_tail": False,
+                "opportunity_id": "opp_phase9_boot",
+            }),
+            (TAG_CAPITAL_REBASE, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "event": "CAPITAL_DEPOSIT",
+                "trading_capital": 100.0,
+                "exchange_equity": 100.0,
+                "withdrawn_profit": 0.0,
+                "lifetime_equity": 100.0,
+                "net_trading_pnl": 0.0,
+                "rebase_in_progress": False,
+            }),
+            (TAG_INCIDENT_ALERT, AlertSeverity.CRITICAL, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "level": "P1",
+                "symbol": boot_symbol,
+                "title": "phase10d_boot_drill_synthetic_incident",
+                "incident_id": "phase10d_boot_incident",
+                "protection_mode_active": False,
+                "new_opens_paused": False,
+            }),
+            (TAG_DAILY_REPORT, AlertSeverity.INFO, {
+                "trading_mode": TRADING_MODE_PAPER,
+                "live_trading_enabled": False,
+                "date": "phase10d_boot",
+                "trade_count": 1,
+                "risk_approved_count": 1,
+                "risk_rejected_count": 0,
+                "net_trading_pnl": 0.0,
+                "incidents_count": 0,
+                "protection_mode_active": False,
+            }),
+        )
+        for tag, severity, payload in boot_telegram_payloads:
+            send_result = boot_alert_dispatcher.dispatch(
+                tag=tag,
+                payload=payload,
+                severity=severity,
+            )
+            if not send_result.sent:
+                raise RuntimeError(
+                    "Phase 10D boot self-check: dispatcher refused alert "
+                    f"tag={tag} severity={severity.value}: {send_result.reason}"
+                )
+        # The dispatcher must have sent every formatter exactly once
+        # (no dedupe / cooldown should fire on a single-call drill).
+        if boot_alert_dispatcher.messages_sent != len(boot_telegram_payloads):
+            raise RuntimeError(
+                "Phase 10D boot self-check: messages_sent="
+                f"{boot_alert_dispatcher.messages_sent} but "
+                f"{len(boot_telegram_payloads)} were dispatched."
+            )
+        if boot_alert_dispatcher.send_failed:
+            raise RuntimeError(
+                "Phase 10D boot self-check: send_failed="
+                f"{boot_alert_dispatcher.send_failed} (must be 0)"
+            )
+        if boot_alert_dispatcher.redaction_blocked:
+            raise RuntimeError(
+                "Phase 10D boot self-check: redaction_blocked="
+                f"{boot_alert_dispatcher.redaction_blocked} (must be 0)"
+            )
+        # Build the export service and drive ONE /export_test_data 24h
+        # command end-to-end. The Issue contract: short summary +
+        # document attachment, NEVER chat dump.
+        boot_export_dir = settings.data_dir / "reports" / "exports"
+        boot_export_service = TestDataExportService(
+            event_repo=repo,
+            trading_mode=settings.trading_mode,
+            output_dir=boot_export_dir,
+        )
+        boot_export_bridge = TelegramExportBridge(
+            service=boot_export_service,
+            dispatcher=boot_alert_dispatcher,
+            event_repo=repo,
+        )
+        boot_command_center = TelegramCommandCenter(
+            settings=settings,
+            event_repo=repo,
+            export_handler=boot_export_bridge.handle,
+        )
+        boot_export_command_result = boot_command_center.handle(
+            Command(
+                name="/export_test_data",
+                user_id="phase10d_boot",
+                args=("24h",),
+                chat_id="phase10d_boot",
+            )
+        )
+        if boot_export_command_result.status.value != "ok":
+            raise RuntimeError(
+                "Phase 10D boot self-check: /export_test_data 24h failed: "
+                f"status={boot_export_command_result.status.value} "
+                f"message={boot_export_command_result.message}"
+            )
+        if boot_alert_dispatcher.documents_sent != 1:
+            raise RuntimeError(
+                "Phase 10D boot self-check: documents_sent="
+                f"{boot_alert_dispatcher.documents_sent} (must be 1)"
+            )
+        # Defence-in-depth: every recorded outbound call must carry a
+        # message that does not contain any forbidden literal.
+        for call in boot_telegram_outbound.calls:
+            for needle in (
+                "BINANCE_API_KEY=",
+                "BINANCE_API_SECRET=",
+                "TELEGRAM_BOT_TOKEN=",
+                "DEEPSEEK_API_KEY=",
+                "OPENAI_API_KEY=",
+                "ANTHROPIC_API_KEY=",
+            ):
+                if needle in call.text:
+                    raise RuntimeError(
+                        "Phase 10D boot self-check: outbound call carries "
+                        f"forbidden literal {needle}"
+                    )
+        # Drive ONE rejected (non-admin) command through to verify the
+        # TELEGRAM_COMMAND_REJECTED audit path.
+        boot_command_center_admin = TelegramCommandCenter(
+            settings=settings,
+            event_repo=repo,
+            admin_user_ids=frozenset({"phase10d_admin"}),
+        )
+        boot_rejection = boot_command_center_admin.handle(
+            Command(name="/status", user_id="phase10d_intruder")
+        )
+        if boot_rejection.status.value != "denied":
+            raise RuntimeError(
+                "Phase 10D boot self-check: non-admin /status was not "
+                f"denied; got {boot_rejection.status.value}"
+            )
+        # Counters for the banner.
+        telegram_messages_sent_count = boot_alert_dispatcher.messages_sent
+        telegram_documents_sent_count = boot_alert_dispatcher.documents_sent
+        telegram_send_failed_count = boot_alert_dispatcher.send_failed
+        telegram_redaction_blocked_count = boot_alert_dispatcher.redaction_blocked
+        # Register a Phase 10D health probe. OK when telegram_outbound
+        # is NOT wired to a real transport (FakeTelegramClient or the
+        # refusal-only HTTP skeleton).
+        health.register(
+            "telegram_outbound",
+            lambda: HealthStatus.OK,
+        )
         # ----------------------------------------------------------
 
 
@@ -1013,6 +1310,22 @@ def run() -> int:
         llm_schema_rejected_count = repo.count_events(
             event_type=EventType.LLM_SCHEMA_REJECTED
         )
+        # Phase 10D event counts.
+        telegram_message_sent_event_count = repo.count_events(
+            event_type=EventType.TELEGRAM_MESSAGE_SENT
+        )
+        telegram_send_failed_event_count = repo.count_events(
+            event_type=EventType.TELEGRAM_SEND_FAILED
+        )
+        telegram_command_rejected_event_count = repo.count_events(
+            event_type=EventType.TELEGRAM_COMMAND_REJECTED
+        )
+        data_export_generated_count = repo.count_events(
+            event_type=EventType.DATA_EXPORT_GENERATED
+        )
+        data_export_failed_count = repo.count_events(
+            event_type=EventType.DATA_EXPORT_FAILED
+        )
         stats = buffer.stats()
         print(
             f"[{PROJECT_NAME}] {__phase__} v{__version__} "
@@ -1073,6 +1386,16 @@ def run() -> int:
             f"llm_interpreted_events={llm_interpreted_count} "
             f"llm_degraded_events={llm_degraded_count} "
             f"llm_schema_rejected_events={llm_schema_rejected_count} "
+            f"telegram_outbound_enabled=False "
+            f"telegram_messages_sent={telegram_messages_sent_count} "
+            f"telegram_documents_sent={telegram_documents_sent_count} "
+            f"telegram_send_failed_count={telegram_send_failed_count} "
+            f"telegram_redaction_blocked={telegram_redaction_blocked_count} "
+            f"telegram_message_sent_events={telegram_message_sent_event_count} "
+            f"telegram_send_failed_events={telegram_send_failed_event_count} "
+            f"telegram_command_rejected_events={telegram_command_rejected_event_count} "
+            f"data_export_generated={data_export_generated_count} "
+            f"data_export_failed={data_export_failed_count} "
             f"risk_decision={decision.approved}/{decision.reasons[0]} "
             f"health={overall.value}"
         )

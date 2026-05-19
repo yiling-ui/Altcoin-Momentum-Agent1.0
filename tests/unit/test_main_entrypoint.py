@@ -62,8 +62,9 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 10C entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 10C - LLM Guarded Interpreter" in captured
+    # Phase 10D entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 10D - Telegram Outbound + Export Commands" in captured
+    assert "v1.4.0a10d" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
@@ -128,6 +129,17 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     assert "llm_interpreted_events=0" in captured
     assert "llm_degraded_events=" in captured
     assert "llm_schema_rejected_events=0" in captured
+    # Phase 10D fields - Telegram outbound + export self-check.
+    assert "telegram_outbound_enabled=False" in captured
+    assert "telegram_messages_sent=" in captured
+    assert "telegram_documents_sent=1" in captured
+    assert "telegram_send_failed_count=0" in captured
+    assert "telegram_redaction_blocked=0" in captured
+    assert "telegram_message_sent_events=" in captured
+    assert "telegram_send_failed_events=0" in captured
+    assert "telegram_command_rejected_events=" in captured
+    assert "data_export_generated=1" in captured
+    assert "data_export_failed=0" in captured
 
     settings = load_settings()
     sqlite_dir = settings.sqlite_dir
@@ -248,5 +260,37 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
         }
         for ev in repo.list_events(event_type=EventType.LLM_DEGRADED):
             assert not (forbidden_in_payload & set(ev.payload))
+        # Phase 10D: the boot drill exercises every formatter once
+        # (10 messages_sent) plus one /export_test_data 24h
+        # (1 documents_sent + 1 DATA_EXPORT_GENERATED) plus one
+        # rejected non-admin /status (1 TELEGRAM_COMMAND_REJECTED).
+        # Audit:
+        #   TELEGRAM_MESSAGE_SENT >= 11
+        #   TELEGRAM_SEND_FAILED == 0
+        #   TELEGRAM_COMMAND_REJECTED >= 1
+        #   DATA_EXPORT_GENERATED == 1
+        #   DATA_EXPORT_FAILED == 0
+        assert repo.count_events(event_type=EventType.TELEGRAM_MESSAGE_SENT) >= 11
+        assert repo.count_events(event_type=EventType.TELEGRAM_SEND_FAILED) == 0
+        assert repo.count_events(event_type=EventType.TELEGRAM_COMMAND_REJECTED) >= 1
+        assert repo.count_events(event_type=EventType.DATA_EXPORT_GENERATED) == 1
+        assert repo.count_events(event_type=EventType.DATA_EXPORT_FAILED) == 0
+        # Phase 10D defence-in-depth: every TELEGRAM_MESSAGE_SENT
+        # audit payload must be free of forbidden literals (no
+        # bot_token / api_key / etc.).
+        forbidden_literals = (
+            "BINANCE_API_KEY=",
+            "BINANCE_API_SECRET=",
+            "TELEGRAM_BOT_TOKEN=",
+            "DEEPSEEK_API_KEY=",
+            "OPENAI_API_KEY=",
+            "ANTHROPIC_API_KEY=",
+        )
+        for ev in repo.list_events(event_type=EventType.TELEGRAM_MESSAGE_SENT):
+            preview = str(ev.payload)
+            for needle in forbidden_literals:
+                assert needle not in preview, (
+                    f"TELEGRAM_MESSAGE_SENT audit row leaks {needle}"
+                )
     finally:
         conn.close()

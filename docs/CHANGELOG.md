@@ -7,6 +7,187 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 10D - Telegram Outbound + Export Commands (Issue #10 Part 4)
+
+**Version:** `1.4.0a10d` - Phase 10D - Telegram Outbound + Export Commands.
+
+Phase 10D ships the operator-facing :mod:`app.telegram` outbound
+layer plus the file-export bridge layered on top of the Phase 8.5
+:class:`TestDataExportService`. **Closes Issue #10**.
+
+Public surface
+--------------
+
+  - 10 production-grade formatters that replace the Phase 1
+    placeholders: ``format_system_status``, ``format_market_regime``,
+    ``format_candidate_symbol``, ``format_state_transition``,
+    ``format_order_event``, ``format_risk_rejection``,
+    ``format_profit_lock``, ``format_capital_rebase``,
+    ``format_incident_alert``, ``format_daily_report``. Every
+    formatter is a pure function (string in, string out, no IO),
+    short, banner-tagged with ``mode=PAPER|LIVE_LIMITED|LIVE``,
+    redacted, and free of trade-decision side effects. The
+    risk-rejection formatter MUST surface six high-priority reasons
+    when present: ``stop_unconfirmed``, ``unknown_position``,
+    ``rebase_in_progress``, ``manipulation_m3``, ``data_degraded``,
+    ``no_exit_channel``.
+  - :class:`TelegramOutboundClient` ABC + :class:`FakeTelegramClient`
+    (deterministic in-process recorder; default transport for paper
+    mode) + :class:`TelegramHttpClient` (refusal-only HTTP skeleton -
+    every call raises :class:`TelegramTransportError`; the real
+    transport ships behind Spec §41 Go/No-Go in a separate PR).
+  - :class:`AlertDispatcher` proactive push pipeline. Per-key
+    cooldown + dedupe; ``AlertSeverity`` ladder (INFO / WARNING /
+    CRITICAL); CRITICAL bypasses cooldown; auto-promotion of
+    ``stop_unconfirmed`` / ``unknown_position`` to CRITICAL;
+    aggregation of low-severity risk rejections into a rolling
+    10-minute summary; defence-in-depth redaction gate via
+    :func:`app.exports.redaction.assert_no_forbidden_substrings`.
+  - :class:`TelegramCommandCenter` 16-command operator surface:
+    ``/status`` ``/positions`` ``/pnl`` ``/risk`` ``/capital``
+    ``/incidents`` ``/pause`` ``/resume`` ``/kill_all`` ``/rebase``
+    + 6 ``/export_*`` commands. Operator allow-list, two-step
+    confirmation for ``/resume`` + ``/rebase``, audit events for
+    every command (``TELEGRAM_COMMAND_RECEIVED``,
+    ``TELEGRAM_COMMAND_REJECTED``).
+  - :class:`TelegramExportBridge` connects ``/export_*`` to the
+    Phase 8.5 :class:`TestDataExportService`. Sends a SHORT
+    generating-summary caption + the redacted ``.zip`` document
+    attachment in a single ``send_document`` call. Refuses
+    chat-dump of raw JSONL/CSV. Audit events:
+    ``DATA_EXPORT_GENERATED`` / ``DATA_EXPORT_FAILED``.
+
+Five new EventType values
+-------------------------
+
+  - ``TELEGRAM_COMMAND_REJECTED`` - non-admin / unknown command paths
+  - ``TELEGRAM_MESSAGE_SENT`` - every successful proactive push
+  - ``TELEGRAM_SEND_FAILED`` - every transport / redaction failure
+  - ``DATA_EXPORT_GENERATED`` - successful ``/export_*`` zip + send
+  - ``DATA_EXPORT_FAILED`` - every export failure path
+
+Boot drill (`python -m app.main`)
+---------------------------------
+
+```
+[AMA-RT] Phase 10D - Telegram Outbound + Export Commands v1.4.0a10d \
+  mode=paper live_trading=False right_tail=False llm=False \
+  exchange_live_orders=False ... (Phase 1-10C fields unchanged) ... \
+  telegram_outbound_enabled=False telegram_messages_sent=10 \
+  telegram_documents_sent=1 telegram_send_failed_count=0 \
+  telegram_redaction_blocked=0 telegram_message_sent_events=11 \
+  telegram_send_failed_events=0 telegram_command_rejected_events=1 \
+  data_export_generated=1 data_export_failed=0 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+The Phase 10D self-check runs after the Phase 10C self-check. It:
+
+  - dispatches one alert through every formatter (10 messages_sent),
+  - drives one ``/export_test_data 24h`` end-to-end through the
+    bridge (1 documents_sent + 1 ``DATA_EXPORT_GENERATED``),
+  - drives one unauthorised ``/status`` (1 ``TELEGRAM_COMMAND_REJECTED``),
+  - asserts zero ``TELEGRAM_SEND_FAILED``, zero ``redaction_blocked``,
+  - asserts every recorded outbound call is free of forbidden
+    literals (``BINANCE_API_KEY=``, ``TELEGRAM_BOT_TOKEN=``, etc.),
+  - registers a new ``telegram_outbound`` health probe (always OK
+    when the transport is the FakeClient).
+
+Phase 10D boundary (every clause enforced by tests)
+---------------------------------------------------
+
+  1. **No real network call.** The default outbound transport is
+     :class:`FakeTelegramClient`. The :class:`TelegramHttpClient` is
+     a refusal-only skeleton; even when ``outbound_enabled=True``
+     and ``token_provided=True`` it raises
+     :class:`TelegramTransportError`.
+  2. **No write surface.** No file under ``app/telegram/`` defines
+     ``create_order`` / ``cancel_order`` / ``set_leverage`` /
+     ``set_margin_mode``.
+  3. **No Telegram command bypasses the Risk Engine.** ``/pause`` /
+     ``/resume`` flip an in-process advisory flag only.
+  4. **``/kill_all``** records audit events but does NOT call any
+     real exchange write surface in Phase 10D.
+  5. **``/rebase``** does NOT execute a real withdrawal; the Phase 8
+     Capital Flow Engine remains the only entry point.
+  6. **No state-mutating component import** under
+     ``app/telegram/``. AST scan blocks ``RiskEngine`` /
+     ``ExecutionFSMDriver`` / ``CapitalFlowEngine`` / etc.
+  7. **No third-party Telegram bot library imported.** AST scan
+     blocks ``python_telegram_bot`` / ``telebot`` / ``aiogram``.
+  8. **No HTTP / WebSocket library imported.** AST scan blocks
+     ``aiohttp`` / ``httpx`` / ``requests`` / ``websockets``.
+  9. **No exchange / LLM SDK imported.** AST scan blocks ``ccxt`` /
+     ``binance`` / ``openai`` / ``anthropic`` / ``deepseek``.
+  10. **No ``os.environ`` reads.** Credentials must be passed in
+      explicitly. AST scan blocks ``os.environ.get`` / ``os.getenv``
+      / bare ``getenv()``.
+  11. **No hard-coded secret.** AST scan blocks ``api_key`` /
+      ``api_secret`` / ``bot_token`` / ``telegram_token`` parameters
+      or concrete env-var literals.
+  12. **No exception escapes.** Dispatcher / command center /
+      export bridge NEVER raise into the caller.
+  13. **No raw chat dump.** The bridge attaches the ``.zip`` as a
+      Telegram document; ``ExportError`` / size-cap exceeded paths
+      reply with a SHORT error message and write
+      ``DATA_EXPORT_FAILED``.
+  14. **Defence-in-depth redaction.** Every outbound message goes
+      through :func:`app.exports.redaction.assert_no_forbidden_substrings`
+      before reaching the transport.
+  15. **The Phase 1 safety lock remains in force.**
+
+Tests
+-----
+
+Phase 10D adds the following test files under ``tests/unit/``:
+
+  - ``test_telegram_formatter.py`` (rewritten): 10 formatters, every
+    mandatory tag, every high-priority risk-rejection reason,
+    redaction smoke tests, mode banner + live flag.
+  - ``test_telegram_outbound.py``: ABC cannot be instantiated;
+    FakeTelegramClient records calls; HTTP refuses; failure
+    injection.
+  - ``test_telegram_alerts.py``: throttle / dedupe / severity ladder
+    / cooldown / P0 bypass / aggregation flush / redaction gate.
+  - ``test_telegram_command_center.py`` (extends Phase 1): 16
+    commands; allow-list; two-step confirmation; audit events;
+    ``/kill_all`` / ``/rebase`` paper-mode safety.
+  - ``test_telegram_export_bridge.py``: ``/export_*`` -> service ->
+    generating caption + sendDocument; ``DATA_EXPORT_GENERATED`` /
+    ``DATA_EXPORT_FAILED``; size-cap refusal path.
+  - ``test_phase10d_boundary.py``: cumulative defence-in-depth pins.
+  - ``test_phase10d_no_network.py``: per-file AST scan of
+    ``app/telegram/``.
+
+Live trading risk: NONE.
+
+  - ``requirements.txt`` and ``pyproject.toml`` contain no exchange
+    SDK, no HTTP / WebSocket / LLM client, no Telegram bot library.
+  - No source under ``app/telegram/`` imports ``ccxt``, ``binance``,
+    ``aiohttp``, ``websockets``, ``requests``, ``httpx``,
+    ``openai``, ``anthropic``, ``deepseek``,
+    ``python_telegram_bot``, ``telebot``, or ``aiogram``.
+  - No source under ``app/telegram/`` defines ``create_order`` /
+    ``cancel_order`` / ``set_leverage`` / ``set_margin_mode``.
+  - No source under ``app/telegram/`` reads ``os.environ`` or
+    declares an ``api_key`` / ``api_secret`` / ``bot_token``
+    parameter / concrete env-var literal.
+  - The Phase 1 safety lock and every later boundary remain
+    unchanged.
+
+Real exchange order risk: NONE. ``/kill_all`` and ``/rebase`` write
+audit events only. The four :class:`ExchangeClientBase` write
+surfaces continue to raise :class:`SafeModeViolation`.
+
+Telegram token leak risk: NONE. No token parameter or literal
+anywhere under ``app/telegram/``. The :class:`TelegramHttpClient`
+constructor accepts a boolean ``token_provided`` flag instead of a
+real token.
+
+LLM overreach risk: NONE. Phase 10D does NOT call the LLM Guarded
+Interpreter; the Risk Engine remains the single trading-decision
+gate.
+
 ### Phase 10C - LLM Guarded Interpreter (Issue #10 Part 3)
 
 **Version:** `1.4.0a10c` - Phase 10C - LLM Guarded Interpreter.
