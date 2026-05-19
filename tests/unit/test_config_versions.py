@@ -6,12 +6,14 @@ import json
 
 import pytest
 
+import app
 from app.learning import (
     ConfigVersions,
     config_versions_to_payload,
     payload_to_config_versions,
 )
 from app.learning.versions import (
+    APP_VERSION_LABEL,
     DEFAULT_CAPITAL_STATE_VERSION,
     DEFAULT_LLM_PROMPT_VERSION,
     DEFAULT_RISK_CONFIG_VERSION,
@@ -21,7 +23,25 @@ from app.learning.versions import (
 )
 
 
-def test_config_versions_defaults_match_phase_8_5_label():
+def test_config_versions_defaults_track_app_version():
+    """Phase 8.5 self-check #1: ``ConfigVersions`` defaults must
+    track :data:`app.__version__` at import time so a future
+    ``__version__`` bump (1.4.0a8.5 -> 1.4.0a9 -> 1.5.0 ...) is
+    automatically reflected in every emitted event without needing
+    a parallel edit in this module.
+
+    The labels are formatted ``"v<__version__>"``.
+    """
+    expected = f"v{app.__version__}"
+    assert APP_VERSION_LABEL == expected
+    assert DEFAULT_STRATEGY_VERSION == expected
+    assert DEFAULT_RISK_CONFIG_VERSION == expected
+    assert DEFAULT_SCORING_VERSION == expected
+    assert DEFAULT_CAPITAL_STATE_VERSION == expected
+    assert DEFAULT_STATE_MACHINE_VERSION == expected
+
+
+def test_config_versions_defaults_match_module_constants():
     versions = ConfigVersions.defaults()
     assert versions.strategy_version == DEFAULT_STRATEGY_VERSION
     assert versions.risk_config_version == DEFAULT_RISK_CONFIG_VERSION
@@ -35,6 +55,7 @@ def test_config_versions_defaults_llm_prompt_is_na():
     """Phase 8.5 forbids any LLM trade involvement; the default prompt
     version label must therefore be a non-secret stub."""
     assert ConfigVersions.defaults().llm_prompt_version == "n/a"
+    assert DEFAULT_LLM_PROMPT_VERSION == "n/a"
 
 
 def test_config_versions_payload_has_six_required_fields():
@@ -82,3 +103,26 @@ def test_config_versions_payload_to_handles_legacy_missing_fields():
     assert restored.strategy_version == "v1"
     assert restored.risk_config_version == DEFAULT_RISK_CONFIG_VERSION
     assert restored.llm_prompt_version == DEFAULT_LLM_PROMPT_VERSION
+
+
+def test_config_versions_defaults_have_no_hardcoded_phase_label():
+    """Defence against version-string drift: the labels must not be
+    a frozen ``"v1.4.0a8.5"`` literal that survives a future bump.
+    Anchor: they are the formatted ``app.__version__`` rather than
+    a hard-coded copy.
+
+    If a future maintainer reverts to a hard-coded literal AND bumps
+    ``app.__version__`` separately, this test fires.
+    """
+    if app.__version__ != "1.4.0a8.5":
+        for label in (
+            DEFAULT_STRATEGY_VERSION,
+            DEFAULT_RISK_CONFIG_VERSION,
+            DEFAULT_SCORING_VERSION,
+            DEFAULT_CAPITAL_STATE_VERSION,
+            DEFAULT_STATE_MACHINE_VERSION,
+        ):
+            assert "1.4.0a8.5" not in label, (
+                f"stale Phase 8.5 hard-coded literal in default {label!r}; "
+                f"defaults must track app.__version__"
+            )

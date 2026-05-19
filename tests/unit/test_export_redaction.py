@@ -57,6 +57,59 @@ def test_redact_strips_filesystem_paths():
     assert out["banner"] == REDACTED
 
 
+def test_redact_strips_sandbox_and_dev_paths():
+    """Phase 8.5 self-check #2: server / sandbox absolute paths must
+    never land in an export bundle. Cover the prefix list explicitly
+    so a regression on any one of them fails this test."""
+    cases = [
+        "/home/operator/secret.db",
+        "/root/.ssh/id_rsa",
+        "/Users/alice/Documents/secret",
+        "/projects/sandbox/Altcoin-Momentum-Agent1.0/data/sqlite/events.db",
+        "/data/operator/state",
+        "/tmp/ama-rt-cache/secret",
+        "/var/lib/ama/state",
+        "/etc/secrets/api.yaml",
+        "/usr/local/etc/ama.conf",
+        "/opt/ama/runtime",
+        "/srv/exports/private",
+        "/mnt/data/state",
+        "/private/var/db/secret",
+        "/workspace/dev/key",
+        "/app/runtime/state",
+        "C:\\Users\\Alice\\AppData\\config",
+        "C:/Users/Alice/AppData/config",
+        "D:\\Users\\Alice\\state",
+        "E:/private/path",
+        "~/secrets/key",
+        "~\\AppData\\config",
+        "\\\\fileserver\\share\\secret",
+    ]
+    for raw in cases:
+        out = redact({"some_path": raw})
+        assert out["some_path"] == REDACTED, (
+            f"redaction did not strip absolute path candidate: {raw!r}"
+        )
+
+
+def test_redact_does_not_overstrip_non_paths():
+    """Strings that merely *look* like they could touch the path
+    namespace (without the prefix shape) must not be redacted."""
+    safe_cases = [
+        "BTCUSDT",
+        "PEPEUSDT",
+        "live_trading_disabled",
+        "phase8_5_boot",
+        "ALLOW_ATTACK",
+        "data/sqlite/events.db",  # relative, not absolute
+        "events.jsonl",
+        "v1.4.0a8.5",
+    ]
+    for raw in safe_cases:
+        out = redact({"label": raw})
+        assert out["label"] == raw, f"redaction over-stripped {raw!r}"
+
+
 def test_redact_telegram_token_pattern_matches():
     payload = {"random": "1234567890:abcdefghijklmnopqrstuvwxyz1234567890"}
     out = redact(payload)

@@ -11,9 +11,13 @@ six identifiers covered here are the Issue-mandated set:
   - state_machine_version
   - llm_prompt_version
 
-Phase 8.5 ships sensible defaults pegged to the current code version
-(``v1.4.0a8.5``). Future phases can override per-event by passing
-their own ``ConfigVersions``.
+Default version labels are derived from :data:`app.__version__` at
+import time so a future ``__version__`` bump is automatically
+picked up by every event payload that does not override the value
+explicitly. The labels are formatted ``"v<__version__>"`` (e.g.
+``"v1.4.0a8.5"``). Future phases that promote a sub-config to its
+own release cadence (a rare but supported case) can override per
+event by passing their own :class:`ConfigVersions`.
 
 Phase 8.5 boundary
 ------------------
@@ -32,18 +36,38 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Phase 8.5 default version labels. These intentionally match the
-# project's current code version so the Reflection engine has a
-# single anchor to start from. Future phases bump them per-config.
-DEFAULT_STRATEGY_VERSION = "v1.4.0a8.5"
-DEFAULT_RISK_CONFIG_VERSION = "v1.4.0a8.5"
-DEFAULT_SCORING_VERSION = "v1.4.0a8.5"
-DEFAULT_CAPITAL_STATE_VERSION = "v1.4.0a8.5"
-DEFAULT_STATE_MACHINE_VERSION = "v1.4.0a8.5"
+
+def _resolve_app_version_label() -> str:
+    """Return the canonical default version label.
+
+    Reads :data:`app.__version__` lazily and prefixes a ``"v"`` so
+    every default tracks the running code version automatically.
+    The lookup is wrapped in ``try`` purely for defence-in-depth: if
+    a future packaging bug ever surfaces an ``ImportError`` here we
+    still want :class:`ConfigVersions` to instantiate (the resulting
+    label is a clearly-non-secret placeholder, never a credential).
+    """
+    try:
+        from app import __version__ as _app_version  # local import: no cycle
+    except ImportError:  # pragma: no cover - extremely defensive
+        return "vunknown"
+    return f"v{_app_version}"
+
+
+# Phase 8.5 default version labels. These intentionally track
+# :data:`app.__version__` so the Reflection engine sees a stable
+# anchor that bumps automatically when the codebase advances. Future
+# phases that need a separate cadence override per :class:`ConfigVersions`.
+APP_VERSION_LABEL: str = _resolve_app_version_label()
+DEFAULT_STRATEGY_VERSION: str = APP_VERSION_LABEL
+DEFAULT_RISK_CONFIG_VERSION: str = APP_VERSION_LABEL
+DEFAULT_SCORING_VERSION: str = APP_VERSION_LABEL
+DEFAULT_CAPITAL_STATE_VERSION: str = APP_VERSION_LABEL
+DEFAULT_STATE_MACHINE_VERSION: str = APP_VERSION_LABEL
 # llm_prompt_version is "n/a" by default because Phase 8.5 forbids
 # any LLM trade involvement (Spec rule 7). Issue #10 will replace
 # this with a real prompt version label.
-DEFAULT_LLM_PROMPT_VERSION = "n/a"
+DEFAULT_LLM_PROMPT_VERSION: str = "n/a"
 
 
 class ConfigVersions(BaseModel):

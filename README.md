@@ -55,7 +55,7 @@ A reusable data contract that every future phase will populate:
 | `OpportunityIdentity` | `opportunity_id`, `scan_batch_id`, `symbol`, `first_seen_ts`, `source_phase`. Plus `make_opportunity_id` / `make_scan_batch_id` factories. |
 | `signal_snapshot_to_payload` / `payload_to_signal_snapshot` | Spec §11.2 SignalSnapshot serialisation contract (deterministic JSON-safe round-trip). |
 | `VirtualTradePlan` | `virtual_entry`, `virtual_stop`, `virtual_tp1`, `virtual_tp2`, `invalid_price`, `suggested_leverage`, `risk_budget_pct`, `direction`, `setup_type`. **Paper-only descriptive plan**: constructing one triggers no order. |
-| `ConfigVersions` | `strategy_version`, `risk_config_version`, `scoring_version`, `capital_state_version`, `state_machine_version`, `llm_prompt_version`. Defaults pegged to `v1.4.0a8.5`; `llm_prompt_version` defaults to `n/a` (Phase 8.5 forbids LLM trade involvement). |
+| `ConfigVersions` | `strategy_version`, `risk_config_version`, `scoring_version`, `capital_state_version`, `state_machine_version`, `llm_prompt_version`. Defaults derived from `app.__version__` at import time (e.g. currently `v1.4.0a8.5`) so a future version bump tracks automatically; `llm_prompt_version` defaults to `n/a` (Phase 8.5 forbids LLM trade involvement). |
 | `RiskRejectedLearningPayload` | typed enrichment for `RISK_APPROVED` / `RISK_REJECTED` events: `opportunity_id`, `reject_reasons`, `account_life_tier`, `regime`, `universe_eligible`, `liquidity_state`, `trade_confirmation_level`, `manipulation_level`, `capital_state_version`, `risk_config_version`, plus Phase 7 breaker / `is_new_open` / `attack_intent`. |
 | `LearningReadyContext` + `attach_learning_ready` | aggregator + mutation-free payload merge helper. Existing event-payload keys are preserved bit-for-bit; the enrichment lands under a new `learning_ready` sub-key. |
 | `LEARNING_READY_KEY = "learning_ready"` | the single canonical key constant emitters / consumers index into. |
@@ -137,6 +137,33 @@ The CLI refuses to operate when `trading_mode != paper` and prints
 rejected=... capital=... state_transitions=... redaction_applied=True`
 on success.
 
+### Phase 8.5 export scope: paper-mode only
+
+**Phase 8.5 only supports paper-mode test-data export.** The CLI
+refuses to operate when `trading_mode != paper` (exit code 2) and
+every export bundle's `manifest.json.trading_mode` records the
+running mode at export time. The Phase 1 safety lock keeps that
+value pinned to `"paper"` until the Spec §41 Go/No-Go checklist
+clears.
+
+A future read-only export strategy for `live_limited` / `live`
+modes is **deliberately deferred**. It must NOT be implemented
+before:
+
+1. The Spec §41 Go/No-Go checklist is executed end-to-end.
+2. Operator-allow-list policy for live-mode exports is reviewed
+   (paper exports are operator-only too, but a live export carries
+   meaningfully more sensitive data: real position state,
+   reconciled fills, real PnL).
+3. The `manifest.json.safety_summary` block is extended to record
+   "the export contains live-mode data" so a downstream consumer
+   cannot mistake it for paper.
+4. Telegram-side fragmentation (Issue #10) lands so a multi-MiB
+   live-mode bundle does not fail the 50 MiB cap silently.
+
+Until those gates are met the CLI's `trading_mode != paper`
+refusal is the contract.
+
 ### Telegram outbound (deferred to Issue #10)
 
 The future `/export_test_data 24h`, `/export_test_data 7d`,
@@ -161,11 +188,27 @@ refusal on size cap - is documented in
 5. **No write surface.** No new `create_order`, `cancel_order`,
    `set_leverage`, `set_margin_mode` method.
 6. **No LLM in trade decisions.** `llm_prompt_version` defaults to
-   `"n/a"`. Spec rule 7 still bans LLM participation in trading
+   `"n/a"` (formatted from `app.__version__` for the other five
+   labels so a future bump does not silently freeze the audit
+   trail). Spec rule 7 still bans LLM participation in trading
    actions.
 7. **No Issue #9 work** (Execution FSM driver / Reconciliation).
 8. **No Issue #10 work** (LLM, Telegram outbound, Replay diff
    reports, Reflection).
+9. **No live-mode / live_limited export.** The CLI refuses to run
+   when `trading_mode != paper`. A future read-only live-mode
+   export is gated behind the Go/No-Go checklist (Spec §41) - see
+   "Phase 8.5 export scope: paper-mode only" above.
+10. **No server-path leakage.** The redaction layer strips any
+    string starting with `/home/`, `/root/`, `/Users/`, `/var/`,
+    `/etc/`, `/usr/`, `/opt/`, `/srv/`, `/mnt/`, `/projects/`,
+    `/data/`, `/tmp/`, `/workspace/`, `/app/`, `/private/var/`,
+    `/private/etc/`, a Windows drive letter (`C:\\`, `D:/`, ...),
+    a UNC share (`\\\\server\\share`), or a `~/` user-home tilde.
+    `manifest.files[].name` carries only basenames; the zip
+    filename is `ama_rt_test_data_<ts>_<id>.zip` (no path
+    separators); pinned by
+    `tests/unit/test_export_no_path_leak.py`.
 
 ### Tests
 

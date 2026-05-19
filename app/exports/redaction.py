@@ -135,23 +135,80 @@ def _value_looks_secret(value: str) -> bool:
     return False
 
 
+# Absolute-path prefixes a value MUST NOT start with after redaction.
+# Phase 8.5 over-redacts deliberately: any string starting with one
+# of these segments is replaced wholesale rather than try to extract
+# the relative remainder. Lowercased; matched case-insensitively.
+_ABSOLUTE_PATH_PREFIXES: tuple[str, ...] = (
+    # Unix system + user trees.
+    "/home/",
+    "/root/",
+    "/users/",
+    "/var/",
+    "/etc/",
+    "/usr/",
+    "/opt/",
+    "/srv/",
+    "/mnt/",
+    "/private/var/",
+    "/private/etc/",
+    # Common deployment / sandbox / data roots that may leak the
+    # operator's hostname or directory structure.
+    "/projects/",
+    "/data/",
+    "/tmp/",
+    "/workspace/",
+    "/app/",
+    # Windows drive paths.
+    "c:\\users\\",
+    "c:/users/",
+    "d:\\users\\",
+    "d:/users/",
+)
+
+# Windows drive letter prefix (e.g. ``D:\foo``, ``E:/bar``). Captures
+# any drive letter so we cover unusual mounts too.
+_WINDOWS_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:[\\/]")
+
+# UNC share path: ``\\server\share\...``.
+_UNC_PREFIX = re.compile(r"^\\\\[^\\]+\\")
+
+
 def _looks_like_filesystem_path(value: str) -> bool:
-    """Conservative heuristic for absolute server paths that may leak
-    operator info (``/home/<user>/...``, ``/root/...``,
-    ``/Users/<user>/...``, ``C:\\Users\\<user>\\...``)."""
+    """Conservative heuristic for absolute paths that may leak
+    operator / server info.
+
+    Catches:
+      - Unix absolute paths under common system / user / deployment
+        roots (``/home/``, ``/root/``, ``/Users/``, ``/var/``,
+        ``/etc/``, ``/usr/``, ``/opt/``, ``/srv/``, ``/mnt/``,
+        ``/private/var/``, ``/private/etc/``).
+      - Common deployment / sandbox / data roots that may
+        encode hostname / dir-structure (``/projects/``, ``/data/``,
+        ``/tmp/``, ``/workspace/``, ``/app/``).
+      - Windows drive paths (``C:\\...``, ``D:/...``).
+      - UNC share paths (``\\\\server\\share\\...``).
+      - User-home tilde expansions (``~/...``, ``~\\...``).
+      - Any explicit ``.env`` filename mention.
+
+    The check is intentionally over-broad: we would rather over-
+    redact a benign path than miss a server-side path that leaks
+    the operator's directory structure into an export bundle.
+    """
     if not isinstance(value, str) or len(value) < 2:
         return False
     lowered = value.lower()
-    candidates = (
-        "/home/",
-        "/root/",
-        "/users/",
-        "c:\\users\\",
-        "/var/lib/",
-        "/etc/",
-        "/usr/local/",
-    )
-    return any(lowered.startswith(c) for c in candidates) or "/.env" in lowered or "\\.env" in lowered
+    if any(lowered.startswith(p) for p in _ABSOLUTE_PATH_PREFIXES):
+        return True
+    if _WINDOWS_DRIVE_PREFIX.match(value):
+        return True
+    if _UNC_PREFIX.match(value):
+        return True
+    if value.startswith("~/") or value.startswith("~\\"):
+        return True
+    if "/.env" in lowered or "\\.env" in lowered:
+        return True
+    return False
 
 
 def redact(value: Any) -> Any:
