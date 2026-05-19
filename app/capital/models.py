@@ -60,6 +60,19 @@ class RebaseResult:
 
     Contains the full before/after snapshot so callers can audit
     the transition.
+
+    Phase 8 Issue #8 fix: a withdrawal is now classified before the
+    rebase runs. ``profit_part`` and ``principal_part`` always sum to
+    ``withdrawal_amount``. ``withdrawal_type`` is one of:
+
+      - ``"profit"``    : withdrawal_amount <= available_profit
+      - ``"principal"`` : available_profit == 0
+      - ``"mixed"``     : withdrawal exceeds available_profit but
+                          available_profit > 0
+      - ``""``          : not a withdrawal (e.g. a deposit-triggered rebase)
+
+    The rebase NEVER mis-classifies principal withdrawal as
+    ``withdrawn_profit`` (Issue #8 hard rule).
     """
 
     success: bool
@@ -85,6 +98,20 @@ class RebaseResult:
     deposit_amount: float = 0.0
     note: str = ""
     errors: list[str] = field(default_factory=list)
+
+    # Phase 8 Issue #8 fix - External Capital Flow.
+    profit_part: float = 0.0
+    principal_part: float = 0.0
+    withdrawal_type: str = ""
+    available_profit_before: float = 0.0
+    previous_principal_withdrawn_total: float = 0.0
+    new_principal_withdrawn_total: float = 0.0
+    previous_external_deposits_total: float = 0.0
+    new_external_deposits_total: float = 0.0
+    previous_lifetime_account_value: float = 0.0
+    new_lifetime_account_value: float = 0.0
+    previous_net_trading_pnl: float = 0.0
+    new_net_trading_pnl: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -129,3 +156,33 @@ class CapitalSnapshot:
     account_life_tier: AccountLifeTier
     risk_budget_total: float
     note: str | None = None
+    # Phase 8 Issue #8 fix - External Capital Flow tracking.
+    external_deposits_total: float = 0.0
+    principal_withdrawn_total: float = 0.0
+
+    @property
+    def lifetime_account_value(self) -> float:
+        """exchange_equity + withdrawn_profit + principal_withdrawn_total."""
+        return (
+            self.exchange_equity
+            + self.withdrawn_profit
+            + self.principal_withdrawn_total
+        )
+
+    @property
+    def net_contributed_capital(self) -> float:
+        """initial_capital + external_deposits_total - principal_withdrawn_total."""
+        return (
+            self.initial_capital
+            + self.external_deposits_total
+            - self.principal_withdrawn_total
+        )
+
+    @property
+    def net_trading_pnl(self) -> float:
+        """lifetime_account_value - initial_capital - external_deposits_total."""
+        return (
+            self.lifetime_account_value
+            - self.initial_capital
+            - self.external_deposits_total
+        )

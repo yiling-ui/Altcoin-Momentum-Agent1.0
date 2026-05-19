@@ -689,3 +689,577 @@ class TestPhase8Safety:
         )
         assert result.success is True
         # No exchange calls, just state updates + events
+
+
+
+# ===========================================================================
+# Phase 8 Issue #8 fix - External Capital Flow scenarios
+# ===========================================================================
+#
+# Mandatory scenarios from the Issue #8 fix brief. Each scenario is one
+# end-to-end pass through CapitalFlowEngine.
+#
+# Hard rules these tests pin down:
+#   1. external deposit is NOT trading profit
+#   2. principal withdrawal is NOT a drawdown and never lands in
+#      withdrawn_profit
+#   3. profit withdrawal is NOT a drawdown
+#   4. risk_budget is always = exchange_equity (= trading_capital)
+#   5. initial_capital is immutable after construction
+#   6. capital events alone are sufficient to rebuild the snapshot
+#   7. rebase_in_progress blocks new opens; clearing it does NOT
+#      authorise a new open - the Risk Engine is still the gate.
+
+
+class TestIssue8ProfitWithdrawalScenario:
+    """Test 1: pure profit withdrawal does NOT shrink lifetime account value
+    and does NOT touch principal_withdrawn_total."""
+
+    def test_profit_only_withdrawal(self, capital_engine: CapitalFlowEngine):
+        # initial_capital = 100, exchange_equity = 200, withdrawal = 80
+        capital_engine.update_equity(new_exchange_equity=200.0)
+        result = capital_engine.withdraw(
+            amount=80.0,
+            new_exchange_equity=120.0,
+            positions_clear=True,
+        )
+        assert result.success is True
+        assert result.withdrawal_type == "profit"
+        assert result.profit_part == 80.0
+        assert result.principal_part == 0.0
+
+        s = capital_engine.state
+        assert s.withdrawn_profit == 80.0
+        assert s.principal_withdrawn_total == 0.0
+        assert s.external_deposits_total == 0.0
+        assert s.lifetime_account_value == 200.0
+        assert capital_engine.trading_capital == 120.0
+        assert capital_engine.risk_budget == 120.0
+        assert s.net_trading_pnl == 100.0
+        # initial_capital is preserved
+        assert capital_engine.initial_capital == 100.0
+        assert s.initial_capital == 100.0
+
+
+class TestIssue8MixedWithdrawalScenario:
+    """Test 2: mixed withdrawal must split into profit + principal.
+
+    Setup:
+        initial_capital      = 100
+        exchange_equity      = 120
+        withdrawal           = 50
+        exchange_equity_after = 70
+
+        available_profit = 20
+        => withdrawn_profit          += 20
+        => principal_withdrawn_total += 30
+    """
+
+    def test_mixed_withdrawal_splits_profit_and_principal(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.update_equity(new_exchange_equity=120.0)
+        result = capital_engine.withdraw(
+            amount=50.0,
+            new_exchange_equity=70.0,
+            positions_clear=True,
+        )
+        assert result.success is True
+        assert result.withdrawal_type == "mixed"
+        assert result.available_profit_before == 20.0
+        assert result.profit_part == 20.0
+        assert result.principal_part == 30.0
+
+        s = capital_engine.state
+        # Issue #8 hard rule - principal MUST NOT pollute withdrawn_profit
+        assert s.withdrawn_profit == 20.0
+        assert s.principal_withdrawn_total == 30.0
+        assert s.lifetime_account_value == 120.0  # 70 + 20 + 30
+        assert s.net_trading_pnl == 20.0
+        assert capital_engine.risk_budget == 70.0
+        assert capital_engine.initial_capital == 100.0
+        assert s.initial_capital == 100.0
+
+    def test_pure_principal_withdrawal_no_profit_pollution(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        """Withdraw when account is at-or-below initial: 100% principal."""
+        # exchange_equity stays at 100 (no profit yet)
+        result = capital_engine.withdraw(
+            amount=30.0,
+            new_exchange_equity=70.0,
+            positions_clear=True,
+        )
+        assert result.success is True
+        assert result.withdrawal_type == "principal"
+        assert result.profit_part == 0.0
+        assert result.principal_part == 30.0
+
+        s = capital_engine.state
+        assert s.withdrawn_profit == 0.0
+        assert s.principal_withdrawn_total == 30.0
+        assert s.net_trading_pnl == 0.0
+
+
+class TestIssue8MidStreamDeposit:
+    """Test 3: mid-stream external deposit must NOT count as profit.
+
+    Setup:
+        initial_capital      = 100
+        exchange_equity      = 100
+        deposit              = 50
+        exchange_equity_after = 150
+    """
+
+    def test_external_deposit_is_not_profit(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.deposit(amount=50.0)
+
+        s = capital_engine.state
+        assert s.external_deposits_total == 50.0
+        assert capital_engine.trading_capital == 150.0
+        assert capital_engine.risk_budget == 150.0
+        assert s.lifetime_account_value == 150.0
+        assert s.net_contributed_capital == 150.0
+        # The crucial assertion - net_trading_pnl is 0, NOT 50.
+        assert s.net_trading_pnl == 0.0
+        # External deposit must NEVER show up as withdrawn_profit either.
+        assert s.withdrawn_profit == 0.0
+        assert s.principal_withdrawn_total == 0.0
+        assert capital_engine.initial_capital == 100.0
+
+
+class TestIssue8DepositThenProfit:
+    """Test 4: deposit followed by trading profit must show only the
+    trading portion as P&L (not the deposit).
+
+    Setup:
+        initial_capital            = 100
+        external_deposits_total    = 50
+        exchange_equity            = 200
+    """
+
+    def test_pnl_after_deposit_excludes_deposit(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.deposit(amount=50.0)  # equity now 150
+        capital_engine.update_equity(new_exchange_equity=200.0)
+
+        s = capital_engine.state
+        assert s.lifetime_account_value == 200.0
+        assert s.net_contributed_capital == 150.0
+        # Crucial: gain over net_contributed_capital is 50, NOT 100.
+        assert s.net_trading_pnl == 50.0
+
+
+class TestIssue8DepositThenWithdraw:
+    """Test 5: deposit then partial profit withdrawal.
+
+    Setup:
+        initial_capital              = 100
+        deposit                      = 50
+        exchange_equity              = 220
+        withdrawal                   = 60
+        exchange_equity_after        = 160
+        available_profit             = 70  (220 - 100 - 50)
+    """
+
+    def test_deposit_then_profit_withdrawal(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.deposit(amount=50.0)
+        capital_engine.update_equity(new_exchange_equity=220.0)
+
+        result = capital_engine.withdraw(
+            amount=60.0,
+            new_exchange_equity=160.0,
+            positions_clear=True,
+        )
+        assert result.success is True
+        assert result.withdrawal_type == "profit"
+        assert result.available_profit_before == 70.0
+        assert result.profit_part == 60.0
+        assert result.principal_part == 0.0
+
+        s = capital_engine.state
+        assert s.withdrawn_profit == 60.0
+        assert s.principal_withdrawn_total == 0.0
+        assert s.external_deposits_total == 50.0
+        assert s.lifetime_account_value == 220.0
+        assert s.net_trading_pnl == 70.0
+        assert capital_engine.risk_budget == 160.0
+
+
+class TestIssue8WithdrawalExceedsAvailableProfit:
+    """Test 6: a withdrawal that exceeds available_profit must NOT be
+    fully booked as profit.
+
+    Setup:
+        initial_capital              = 100
+        deposit                      = 50
+        exchange_equity              = 160
+        withdrawal                   = 80
+        exchange_equity_after        = 80
+        available_profit             = 10  (160 - 100 - 50)
+    """
+
+    def test_over_profit_withdrawal_splits(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.deposit(amount=50.0)
+        capital_engine.update_equity(new_exchange_equity=160.0)
+
+        result = capital_engine.withdraw(
+            amount=80.0,
+            new_exchange_equity=80.0,
+            positions_clear=True,
+        )
+        assert result.success is True
+        assert result.withdrawal_type == "mixed"
+        assert result.available_profit_before == 10.0
+        assert result.profit_part == 10.0
+        assert result.principal_part == 70.0
+
+        s = capital_engine.state
+        # withdrawn_profit MUST NOT contain the 70 principal portion.
+        assert s.withdrawn_profit == 10.0
+        assert s.principal_withdrawn_total == 70.0
+        assert s.external_deposits_total == 50.0
+        assert s.net_trading_pnl == 10.0
+        assert capital_engine.risk_budget == 80.0
+
+
+class TestIssue8RebaseGating:
+    """Test 7: Rebase-in-progress blocks new opens; clearing it does NOT
+    authorise a new open while other No-Trade Gate conditions are alive.
+    """
+
+    def test_rebase_in_progress_blocks_open(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        risk_engine = RiskEngine(
+            event_repo=event_repo,
+            capital_flow_engine=capital_engine,
+        )
+        capital_engine._rebase_in_progress = True
+        decision = risk_engine.evaluate(
+            RiskRequest(
+                source_module="test",
+                action="scout",
+                symbol="PEPEUSDT",
+                is_new_open=True,
+            )
+        )
+        assert decision.rejected
+        assert RiskRejectReason.REBASE_IN_PROGRESS.value in decision.reasons
+
+    def test_rebase_completed_still_subject_to_stop_unconfirmed(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        """After the rebase clears, a stop_unconfirmed open MUST still be
+        rejected by the Risk Engine."""
+        risk_engine = RiskEngine(
+            event_repo=event_repo,
+            capital_flow_engine=capital_engine,
+        )
+        capital_engine.update_equity(new_exchange_equity=200.0)
+        capital_engine.withdraw(
+            amount=80.0, new_exchange_equity=120.0, positions_clear=True
+        )
+        assert capital_engine.is_rebase_in_progress is False
+
+        decision = risk_engine.evaluate(
+            RiskRequest(
+                source_module="test",
+                action="scout",
+                symbol="PEPEUSDT",
+                is_new_open=True,
+                stop_unconfirmed=True,
+            )
+        )
+        assert decision.rejected
+        assert RiskRejectReason.STOP_UNCONFIRMED.value in decision.reasons
+
+    def test_rebase_completed_still_subject_to_unknown_position(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        """unknown_position MUST still block opening after a rebase."""
+        risk_engine = RiskEngine(
+            event_repo=event_repo,
+            capital_flow_engine=capital_engine,
+        )
+        capital_engine.deposit(amount=50.0)
+        assert capital_engine.is_rebase_in_progress is False
+
+        decision = risk_engine.evaluate(
+            RiskRequest(
+                source_module="test",
+                action="scout",
+                symbol="PEPEUSDT",
+                is_new_open=True,
+                unknown_position=True,
+            )
+        )
+        assert decision.rejected
+        assert RiskRejectReason.UNKNOWN_POSITION.value in decision.reasons
+
+    def test_deposit_blocks_new_opens_during_rebase(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        """Issue #8 hard rule: a deposit-triggered rebase must also gate
+        new opens via REBASE_IN_PROGRESS while it is running."""
+        # We can't easily race the deposit, but we can pin the contract
+        # by manually flipping the flag the way the deposit() method
+        # does and re-checking the Risk Engine.
+        risk_engine = RiskEngine(
+            event_repo=event_repo,
+            capital_flow_engine=capital_engine,
+        )
+        capital_engine._rebase_in_progress = True
+        try:
+            decision = risk_engine.evaluate(
+                RiskRequest(
+                    source_module="test",
+                    action="scout",
+                    symbol="PEPEUSDT",
+                    is_new_open=True,
+                )
+            )
+            assert decision.rejected
+            assert (
+                RiskRejectReason.REBASE_IN_PROGRESS.value in decision.reasons
+            )
+        finally:
+            capital_engine._rebase_in_progress = False
+
+
+class TestIssue8EventReconstruction:
+    """Test 8: capital events alone must be enough to rebuild the
+    current CapitalSnapshot (Spec §12 + Issue #8 hard rule)."""
+
+    def test_replay_pure_profit_withdrawal(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.update_equity(new_exchange_equity=200.0)
+        capital_engine.withdraw(
+            amount=80.0, new_exchange_equity=120.0, positions_clear=True
+        )
+
+        rebuilt = capital_engine.reconstruct_current_snapshot()
+        live = capital_engine.state
+        assert rebuilt.exchange_equity == live.exchange_equity
+        assert rebuilt.withdrawn_profit == live.withdrawn_profit
+        assert rebuilt.principal_withdrawn_total == live.principal_withdrawn_total
+        assert rebuilt.external_deposits_total == live.external_deposits_total
+        assert rebuilt.lifetime_account_value == live.lifetime_account_value
+        assert rebuilt.net_trading_pnl == live.net_trading_pnl
+        assert rebuilt.initial_capital == live.initial_capital
+
+    def test_replay_mixed_withdrawal(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.update_equity(new_exchange_equity=120.0)
+        capital_engine.withdraw(
+            amount=50.0, new_exchange_equity=70.0, positions_clear=True
+        )
+
+        rebuilt = capital_engine.reconstruct_current_snapshot()
+        live = capital_engine.state
+        assert rebuilt.withdrawn_profit == live.withdrawn_profit == 20.0
+        assert (
+            rebuilt.principal_withdrawn_total
+            == live.principal_withdrawn_total
+            == 30.0
+        )
+        assert rebuilt.exchange_equity == live.exchange_equity == 70.0
+        assert (
+            rebuilt.lifetime_account_value
+            == live.lifetime_account_value
+            == 120.0
+        )
+        assert rebuilt.net_trading_pnl == live.net_trading_pnl == 20.0
+
+    def test_replay_deposit_then_withdrawal(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        capital_engine.deposit(amount=50.0)
+        capital_engine.update_equity(new_exchange_equity=220.0)
+        capital_engine.withdraw(
+            amount=60.0, new_exchange_equity=160.0, positions_clear=True
+        )
+
+        rebuilt = capital_engine.reconstruct_current_snapshot()
+        live = capital_engine.state
+        assert rebuilt.external_deposits_total == 50.0
+        assert rebuilt.withdrawn_profit == 60.0
+        assert rebuilt.principal_withdrawn_total == 0.0
+        assert rebuilt.exchange_equity == 160.0
+        assert rebuilt.lifetime_account_value == 220.0
+        assert rebuilt.net_trading_pnl == 70.0
+        # The rebuilt state must match the live state.
+        assert rebuilt.exchange_equity == live.exchange_equity
+        assert rebuilt.withdrawn_profit == live.withdrawn_profit
+        assert (
+            rebuilt.principal_withdrawn_total
+            == live.principal_withdrawn_total
+        )
+        assert rebuilt.external_deposits_total == live.external_deposits_total
+        assert rebuilt.net_trading_pnl == live.net_trading_pnl
+
+    def test_replay_over_profit_withdrawal(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        """The replay must produce exactly the same split the live engine
+        produced for a withdrawal that exceeded available_profit."""
+        capital_engine.deposit(amount=50.0)
+        capital_engine.update_equity(new_exchange_equity=160.0)
+        capital_engine.withdraw(
+            amount=80.0, new_exchange_equity=80.0, positions_clear=True
+        )
+
+        rebuilt = capital_engine.reconstruct_current_snapshot()
+        assert rebuilt.withdrawn_profit == 10.0
+        assert rebuilt.principal_withdrawn_total == 70.0
+        assert rebuilt.external_deposits_total == 50.0
+        assert rebuilt.exchange_equity == 80.0
+        assert rebuilt.net_trading_pnl == 10.0
+
+
+class TestIssue8InitialCapitalImmutable:
+    """Issue #8 hard rule: ``initial_capital`` is set once at construction
+    and MUST NOT change after a withdrawal or rebase."""
+
+    def test_initial_capital_setter_rejects_assignment(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        with pytest.raises(AttributeError, match="immutable"):
+            capital_engine.initial_capital = 999.0
+
+    def test_initial_capital_unchanged_after_deposit(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        original = capital_engine.initial_capital
+        capital_engine.deposit(amount=50.0)
+        assert capital_engine.initial_capital == original
+        assert capital_engine.state.initial_capital == original
+
+    def test_initial_capital_unchanged_after_withdraw(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        original = capital_engine.initial_capital
+        capital_engine.update_equity(new_exchange_equity=200.0)
+        capital_engine.withdraw(
+            amount=80.0, new_exchange_equity=120.0, positions_clear=True
+        )
+        assert capital_engine.initial_capital == original
+        assert capital_engine.state.initial_capital == original
+
+    def test_initial_capital_unchanged_after_mixed_withdraw(
+        self, capital_engine: CapitalFlowEngine
+    ):
+        original = capital_engine.initial_capital
+        capital_engine.update_equity(new_exchange_equity=120.0)
+        capital_engine.withdraw(
+            amount=50.0, new_exchange_equity=70.0, positions_clear=True
+        )
+        assert capital_engine.initial_capital == original
+        assert capital_engine.state.initial_capital == original
+
+
+class TestIssue8DepositEvents:
+    """Issue #8 hard rule: a deposit emits CAPITAL_DEPOSIT,
+    CAPITAL_REBASE, and RISK_BUDGET_RECALCULATED in that order."""
+
+    def test_deposit_emits_full_event_trio(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        capital_engine.deposit(amount=50.0)
+
+        deposit_events = event_repo.list_events(
+            event_type=EventType.CAPITAL_DEPOSIT
+        )
+        rebase_events = event_repo.list_events(
+            event_type=EventType.CAPITAL_REBASE
+        )
+        risk_events = event_repo.list_events(
+            event_type=EventType.RISK_BUDGET_RECALCULATED
+        )
+
+        assert len(deposit_events) == 1
+        assert len(rebase_events) == 1
+        assert len(risk_events) == 1
+        assert deposit_events[0].payload["external_deposits_total"] == 50.0
+        assert rebase_events[0].payload["trigger"] == "deposit"
+        assert (
+            risk_events[0].payload["new_risk_budget"]
+            == capital_engine.risk_budget
+        )
+
+    def test_deposit_does_not_emit_profit_harvest(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        """An external deposit is NOT a harvest. PROFIT_HARVEST events
+        must only fire when profit is actually being withdrawn."""
+        capital_engine.deposit(amount=50.0)
+        harvest_events = event_repo.list_events(
+            event_type=EventType.PROFIT_HARVEST
+        )
+        assert len(harvest_events) == 0
+
+
+class TestIssue8WithdrawalPayloadSemantics:
+    """The CAPITAL_WITHDRAWAL payload must always carry withdrawal_type
+    and the profit/principal split so a Replay engine cannot mis-attribute
+    principal as profit."""
+
+    def test_profit_payload(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        capital_engine.update_equity(new_exchange_equity=200.0)
+        capital_engine.withdraw(
+            amount=80.0, new_exchange_equity=120.0, positions_clear=True
+        )
+        events = event_repo.list_events(event_type=EventType.CAPITAL_WITHDRAWAL)
+        assert len(events) == 1
+        p = events[0].payload
+        assert p["withdrawal_type"] == "profit"
+        assert p["profit_part"] == 80.0
+        assert p["principal_part"] == 0.0
+
+    def test_mixed_payload(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        capital_engine.update_equity(new_exchange_equity=120.0)
+        capital_engine.withdraw(
+            amount=50.0, new_exchange_equity=70.0, positions_clear=True
+        )
+        events = event_repo.list_events(event_type=EventType.CAPITAL_WITHDRAWAL)
+        p = events[0].payload
+        assert p["withdrawal_type"] == "mixed"
+        assert p["profit_part"] == 20.0
+        assert p["principal_part"] == 30.0
+        assert p["available_profit_before"] == 20.0
+
+    def test_principal_payload(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        capital_engine.withdraw(
+            amount=30.0, new_exchange_equity=70.0, positions_clear=True
+        )
+        events = event_repo.list_events(event_type=EventType.CAPITAL_WITHDRAWAL)
+        p = events[0].payload
+        assert p["withdrawal_type"] == "principal"
+        assert p["profit_part"] == 0.0
+        assert p["principal_part"] == 30.0
+
+    def test_principal_only_does_not_emit_profit_harvest(
+        self, capital_engine: CapitalFlowEngine, event_repo: EventRepository
+    ):
+        """A pure-principal withdrawal must NOT emit PROFIT_HARVEST -
+        otherwise harvest analytics get polluted."""
+        capital_engine.withdraw(
+            amount=30.0, new_exchange_equity=70.0, positions_clear=True
+        )
+        harvest = event_repo.list_events(event_type=EventType.PROFIT_HARVEST)
+        assert len(harvest) == 0

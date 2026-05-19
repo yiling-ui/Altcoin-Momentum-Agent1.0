@@ -43,7 +43,6 @@ from app.capital.models import (
     WithdrawalRequest,
 )
 from app.core.clock import now_ms
-from app.core.enums import AccountLifeTier
 from app.core.events import Event, EventType
 from app.core.models import CapitalState
 from app.database.repositories import EventRepository
@@ -71,20 +70,68 @@ def execute_rebase(
     Returns:
         RebaseResult with full before/after audit trail.
 
+    Phase 8 Issue #8 fix - External Capital Flow:
+      Before any state mutation we compute::
+
+          available_profit = max(0, lifetime_account_value_before
+                                       - initial_capital
+                                       - external_deposits_total)
+
+      and split the withdrawal::
+
+          if withdrawal.amount <= available_profit:
+              profit_part    = withdrawal.amount
+              principal_part = 0
+              withdrawal_type = "profit"
+          else:
+              profit_part    = available_profit
+              principal_part = withdrawal.amount - available_profit
+              withdrawal_type = "mixed" if profit_part > 0 else "principal"
+
+      ``withdrawn_profit`` only ever accumulates ``profit_part``;
+      ``principal_withdrawn_total`` accumulates ``principal_part``.
+      ``initial_capital`` is NEVER modified by this function (Issue #8
+      hard rule). The CAPITAL_WITHDRAWAL payload always carries the
+      ``withdrawal_type`` and the split so a Replay engine can
+      reconstruct the breakdown.
+
     This function:
       - Does NOT execute real withdrawals.
       - Does NOT call any exchange API.
       - Does NOT enable live trading.
+      - Does NOT mutate ``initial_capital``.
     """
     ts = withdrawal.timestamp or now_ms()
 
-    # Capture "before" state
+    # Capture "before" state - including the Issue #8 fields.
     prev_equity = capital_state.exchange_equity
     prev_withdrawn = capital_state.withdrawn_profit
+    prev_principal_withdrawn = capital_state.principal_withdrawn_total
+    prev_external_deposits = capital_state.external_deposits_total
     prev_lifetime = capital_state.lifetime_equity
     prev_trading = capital_state.trading_capital
     prev_budget = capital_state.risk_budget_total
     prev_tier = capital_state.account_life_tier
+    prev_lifetime_account_value = capital_state.lifetime_account_value
+    prev_net_trading_pnl = capital_state.net_trading_pnl
+
+    # ------------------------------------------------------------------
+    # Phase 8 Issue #8 fix - split into profit_part / principal_part.
+    #
+    # available_profit MUST be derived from net_trading_pnl BEFORE the
+    # withdrawal is applied. Already-withdrawn profit and already-
+    # withdrawn principal both leave net_trading_pnl unchanged, so this
+    # rule is correct under repeated withdrawals.
+    # ------------------------------------------------------------------
+    available_profit = max(0.0, prev_net_trading_pnl)
+    if withdrawal.amount <= available_profit:
+        profit_part = withdrawal.amount
+        principal_part = 0.0
+        withdrawal_type = "profit"
+    else:
+        profit_part = available_profit
+        principal_part = withdrawal.amount - available_profit
+        withdrawal_type = "mixed" if profit_part > 0 else "principal"
 
     errors: list[str] = []
 
@@ -93,38 +140,80 @@ def execute_rebase(
     # to block new opens). We record it via the state update.
     # ------------------------------------------------------------------
     logger.info(
-        "Capital rebase started: withdrawal={}, new_equity={}",
+        "Capital rebase started: withdrawal={} (profit={}, principal={}, "
+        "type={}), new_equity={}",
         withdrawal.amount,
+        profit_part,
+        principal_part,
+        withdrawal_type,
         withdrawal.new_exchange_equity,
     )
 
     # ------------------------------------------------------------------
-    # Step 2: Record withdrawal event
+    # Step 2: Record withdrawal event with explicit profit/principal split.
+    #
+    # Issue #8 hard rule: the CAPITAL_WITHDRAWAL payload MUST encode
+    # ``withdrawal_type`` so a downstream Replay engine cannot mis-attribute
+    # principal as profit.
     # ------------------------------------------------------------------
-    event_repo.record_capital_withdrawal(
-        amount=withdrawal.amount,
-        source_module="capital_rebase",
-        note=withdrawal.note or f"Withdrawal of {withdrawal.amount} USDT",
-        timestamp=ts,
+    event_repo.append_event(
+        Event(
+            event_type=EventType.CAPITAL_WITHDRAWAL,
+            source_module="capital_rebase",
+            payload={
+                "amount": float(withdrawal.amount),
+                "currency": "USDT",
+                "withdrawal_type": withdrawal_type,
+                "profit_part": float(profit_part),
+                "principal_part": float(principal_part),
+                "available_profit_before": float(available_profit),
+                "lifetime_account_value_before": float(prev_lifetime_account_value),
+                "initial_capital": float(initial_capital),
+                "external_deposits_total": float(prev_external_deposits),
+                "note": withdrawal.note or f"Withdrawal of {withdrawal.amount} USDT",
+            },
+            timestamp=ts,
+        )
     )
 
-    # Also record as PROFIT_HARVEST (spec treats withdrawal of profits
-    # as a harvest event for accounting purposes)
-    event_repo.record_profit_harvest(
-        amount=withdrawal.amount,
-        source_module="capital_rebase",
-        note=withdrawal.note or f"Profit harvest of {withdrawal.amount} USDT",
-        timestamp=ts,
-    )
+    # PROFIT_HARVEST is only emitted when there is an actual profit
+    # portion to harvest. This avoids polluting harvest analytics with
+    # pure-principal withdrawals (Issue #8 hard rule).
+    if profit_part > 0:
+        event_repo.append_event(
+            Event(
+                event_type=EventType.PROFIT_HARVEST,
+                source_module="capital_rebase",
+                payload={
+                    "amount": float(profit_part),
+                    "currency": "USDT",
+                    "withdrawal_type": withdrawal_type,
+                    "profit_part": float(profit_part),
+                    "principal_part": float(principal_part),
+                    "note": (
+                        withdrawal.note
+                        or f"Profit harvest portion of {profit_part} USDT"
+                    ),
+                },
+                timestamp=ts,
+            )
+        )
 
     # ------------------------------------------------------------------
-    # Steps 3-6: Update capital state
+    # Steps 3-6: Update capital state.
+    #
+    # ``initial_capital`` is NOT touched. ``withdrawn_profit`` only takes
+    # the profit portion; the principal portion lands in
+    # ``principal_withdrawn_total``.
     # ------------------------------------------------------------------
     # Step 3: Update exchange equity
     capital_state.exchange_equity = withdrawal.new_exchange_equity
 
-    # Step 4: Update Withdrawn Profit (accumulate)
-    capital_state.withdrawn_profit = prev_withdrawn + withdrawal.amount
+    # Step 4: Update withdrawn buckets (profit / principal kept separate)
+    capital_state.withdrawn_profit = prev_withdrawn + profit_part
+    capital_state.principal_withdrawn_total = (
+        prev_principal_withdrawn + principal_part
+    )
 
     # Steps 5-6: Recompute derived fields (Spec §28.2 invariants)
     # lifetime_equity = exchange_equity + withdrawn_profit
@@ -179,6 +268,18 @@ def execute_rebase(
             withdrawal_amount=withdrawal.amount,
             note=withdrawal.note or "",
             errors=errors,
+            profit_part=profit_part,
+            principal_part=principal_part,
+            withdrawal_type=withdrawal_type,
+            available_profit_before=available_profit,
+            previous_principal_withdrawn_total=prev_principal_withdrawn,
+            new_principal_withdrawn_total=capital_state.principal_withdrawn_total,
+            previous_external_deposits_total=prev_external_deposits,
+            new_external_deposits_total=capital_state.external_deposits_total,
+            previous_lifetime_account_value=prev_lifetime_account_value,
+            new_lifetime_account_value=capital_state.lifetime_account_value,
+            previous_net_trading_pnl=prev_net_trading_pnl,
+            new_net_trading_pnl=capital_state.net_trading_pnl,
         )
 
     # ------------------------------------------------------------------
@@ -186,14 +287,43 @@ def execute_rebase(
     # ------------------------------------------------------------------
     capital_state.last_rebase_ts = ts
 
-    event_repo.record_capital_rebase(
-        exchange_equity=capital_state.exchange_equity,
-        withdrawn_profit=capital_state.withdrawn_profit,
-        lifetime_equity=capital_state.lifetime_equity,
-        trading_capital=capital_state.trading_capital,
-        source_module="capital_rebase",
-        note=f"Rebase after withdrawal of {withdrawal.amount} USDT",
-        timestamp=ts,
+    # Phase 8 Issue #8 fix - the CAPITAL_REBASE payload carries the full
+    # External Capital Flow context so a Replay engine can reconstruct
+    # the snapshot deterministically.
+    event_repo.append_event(
+        Event(
+            event_type=EventType.CAPITAL_REBASE,
+            source_module="capital_rebase",
+            payload={
+                "amount": float(capital_state.trading_capital),
+                "currency": "USDT",
+                "trigger": "withdrawal",
+                "exchange_equity": float(capital_state.exchange_equity),
+                "withdrawn_profit": float(capital_state.withdrawn_profit),
+                "principal_withdrawn_total": float(
+                    capital_state.principal_withdrawn_total
+                ),
+                "external_deposits_total": float(
+                    capital_state.external_deposits_total
+                ),
+                "lifetime_equity": float(capital_state.lifetime_equity),
+                "lifetime_account_value": float(
+                    capital_state.lifetime_account_value
+                ),
+                "trading_capital": float(capital_state.trading_capital),
+                "risk_budget_total": float(capital_state.risk_budget_total),
+                "initial_capital": float(initial_capital),
+                "net_contributed_capital": float(
+                    capital_state.net_contributed_capital
+                ),
+                "net_trading_pnl": float(capital_state.net_trading_pnl),
+                "withdrawal_type": withdrawal_type,
+                "profit_part": float(profit_part),
+                "principal_part": float(principal_part),
+                "note": f"Rebase after withdrawal of {withdrawal.amount} USDT",
+            },
+            timestamp=ts,
+        )
     )
 
     # Record RISK_BUDGET_RECALCULATED
@@ -242,6 +372,18 @@ def execute_rebase(
         new_account_tier=new_tier,
         withdrawal_amount=withdrawal.amount,
         note=withdrawal.note or "",
+        profit_part=profit_part,
+        principal_part=principal_part,
+        withdrawal_type=withdrawal_type,
+        available_profit_before=available_profit,
+        previous_principal_withdrawn_total=prev_principal_withdrawn,
+        new_principal_withdrawn_total=capital_state.principal_withdrawn_total,
+        previous_external_deposits_total=prev_external_deposits,
+        new_external_deposits_total=capital_state.external_deposits_total,
+        previous_lifetime_account_value=prev_lifetime_account_value,
+        new_lifetime_account_value=capital_state.lifetime_account_value,
+        previous_net_trading_pnl=prev_net_trading_pnl,
+        new_net_trading_pnl=capital_state.net_trading_pnl,
     )
 
 
@@ -269,6 +411,8 @@ def persist_capital_snapshot(
         trading_capital=capital_state.trading_capital,
         account_life_tier=capital_state.account_life_tier,
         risk_budget_total=capital_state.risk_budget_total,
+        external_deposits_total=capital_state.external_deposits_total,
+        principal_withdrawn_total=capital_state.principal_withdrawn_total,
         note=note,
     )
 
@@ -277,8 +421,9 @@ def persist_capital_snapshot(
         INSERT INTO capital_snapshots (
             snapshot_id, timestamp, initial_capital,
             exchange_equity, withdrawn_profit, lifetime_equity,
-            trading_capital, account_life_tier, risk_budget_total, note
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            trading_capital, account_life_tier, risk_budget_total,
+            external_deposits_total, principal_withdrawn_total, note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             snapshot.snapshot_id,
@@ -290,6 +435,8 @@ def persist_capital_snapshot(
             snapshot.trading_capital,
             snapshot.account_life_tier.value,
             snapshot.risk_budget_total,
+            snapshot.external_deposits_total,
+            snapshot.principal_withdrawn_total,
             snapshot.note,
         ),
     )

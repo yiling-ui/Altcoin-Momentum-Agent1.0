@@ -31,9 +31,116 @@ This is the implementation of the production specification in
 | Phase 5 - Regime / Universe / Liquidity | #5  | merged | `feature/phase-5-regime-universe-liquidity` (PR #16) |
 | Phase 6 - Scanner / Confirmation / Manipulation | #6  | merged | `feature/phase-6-scanner-confirmation-manipulation` (PR #17) |
 | Phase 7 - State Machine / Risk Engine | #7  | this branch | `feature/phase-7-state-machine-risk-engine` |
-| Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | open | - |
+| Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | this branch | `feature/phase-8-capital-flow-profit-harvest-rebase` |
 | Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+
+## Phase 8 deliverable - External Capital Flow
+
+Phase 8 ships the full **Capital Flow Engine** (Spec §28) plus the
+External Capital Flow vocabulary mandated by the Issue #8 review.
+None of it executes a real withdrawal. None of it calls a real
+exchange withdrawal API. None of it changes the Phase 1 safety
+lock.
+
+### Hard rules
+
+1. **External deposit is NOT trading profit.** A `CAPITAL_DEPOSIT`
+   bumps `external_deposits_total` and `exchange_equity`; it never
+   touches `withdrawn_profit` and never inflates `net_trading_pnl`.
+2. **Principal withdrawal is NOT a loss.** Withdrawals exceeding
+   `available_profit` route the excess into
+   `principal_withdrawn_total`, never into `withdrawn_profit`.
+3. **Profit withdrawal is NOT a drawdown.**
+   `lifetime_account_value` is invariant under withdrawals.
+4. **Risk Budget is based ONLY on `trading_capital`** (=
+   `exchange_equity`). Already-withdrawn profit and historical
+   peaks never re-enter the budget.
+5. **Performance / `net_trading_pnl` excludes
+   `external_deposits_total`.** Reporting must use
+   `net_trading_pnl`, not `lifetime_equity`, when external
+   deposits are present.
+6. **`initial_capital` is immutable after construction.** The
+   `CapitalFlowEngine.initial_capital` setter raises
+   `AttributeError`; no withdrawal / deposit / rebase path can
+   modify the seed capital.
+
+### Formulas
+
+```
+net_contributed_capital = initial_capital
+                            + external_deposits_total
+                            - principal_withdrawn_total
+
+lifetime_account_value  = exchange_equity
+                            + withdrawn_profit
+                            + principal_withdrawn_total
+
+net_trading_pnl         = lifetime_account_value
+                            - initial_capital
+                            - external_deposits_total
+
+trading_capital         = exchange_equity
+risk_budget             = trading_capital
+```
+
+### Withdrawal classification
+
+The engine computes `available_profit` *before* mutating state:
+
+```
+available_profit = max(0, lifetime_account_value_before
+                              - initial_capital
+                              - external_deposits_total)
+```
+
+and splits the withdrawal:
+
+* `withdrawal_amount <= available_profit` → 100% profit
+  (`withdrawal_type = "profit"`).
+* `withdrawal_amount > available_profit` → split into
+  `profit_part = available_profit` and
+  `principal_part = withdrawal_amount - available_profit`
+  (`withdrawal_type = "mixed"`, or `"principal"` when
+  `available_profit == 0`).
+
+`withdrawn_profit` only ever accumulates `profit_part`;
+`principal_withdrawn_total` accumulates `principal_part`. The
+`CAPITAL_WITHDRAWAL` payload always carries `withdrawal_type`,
+`profit_part`, and `principal_part` so a Replay engine cannot
+mis-attribute principal as profit.
+
+### Rebase gating
+
+* `is_rebase_in_progress=True` blocks new opens through
+  `RiskRejectReason.REBASE_IN_PROGRESS` in the Risk Engine.
+* The flag is cleared automatically when a rebase succeeds, but
+  this is **not** an authorisation. After the flag is cleared the
+  Risk Engine still adjudicates each open request against the
+  Phase 7 No-Trade Gate (`stop_unconfirmed`,
+  `unknown_position`, regime, liquidity, account tier, circuit
+  breakers, manipulation). The Capital Flow Engine never opens a
+  position itself.
+
+### Event-sourced reconstruction
+
+`CapitalFlowEngine.reconstruct_current_snapshot()` rebuilds the
+current `CapitalState` purely from the persisted CAPITAL_*
+events. The replay sorts by `(timestamp ASC, rowid ASC)` so events
+emitted within the same millisecond replay in their insertion
+order, which keeps the reconstruction deterministic across runs.
+The full Replay engine remains a Phase 10 concern; Phase 8 only
+guarantees correctness for capital events.
+
+### Phase 8 safety
+
+* `trading_mode = "paper"` (Phase 1 lock unchanged).
+* `live_trading_enabled = False` (Phase 1 lock unchanged).
+* `right_tail_enabled = False` (Phase 1 lock unchanged).
+* No exchange withdrawal API call.
+* No live trading.
+* No LLM.
+* No Issue #9 / #10 work shipped here.
 
 ## Phase 7 deliverable
 

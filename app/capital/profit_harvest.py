@@ -22,6 +22,8 @@ def suggest_harvest(
     current_equity: float,
     initial_capital: float,
     withdrawn_profit: float = 0.0,
+    external_deposits_total: float = 0.0,
+    principal_withdrawn_total: float = 0.0,
 ) -> HarvestSuggestion | None:
     """Compute a profit-harvest suggestion based on account multiplier.
 
@@ -32,16 +34,41 @@ def suggest_harvest(
       - 5x: suggest 50%-70% of profit
       - 10x: suggest most principal + some profit
 
-    The ``profit`` used for calculation is:
-        lifetime_equity - initial_capital
-    where lifetime_equity = current_equity + withdrawn_profit.
+    Phase 8 Issue #8 fix:
+      - "Profit" here means ``net_trading_pnl`` so external deposits NEVER
+        inflate the apparent harvest amount.
+      - The multiplier is computed against ``net_contributed_capital``
+        when external deposits are present, so the 2x / 5x / 10x ladder
+        triggers only on real trading performance.
+      - When ``external_deposits_total == principal_withdrawn_total == 0``
+        the call collapses to the legacy formula and existing callers
+        retain identical behaviour.
     """
     if initial_capital <= 0:
         return None
 
+    # Phase 8 Issue #8 fix - the figure used by the multiplier ladder is
+    # ``net_trading_pnl`` measured against ``net_contributed_capital``.
+    # External deposits are NOT trading profit; principal withdrawals
+    # are NOT loss.
+    lifetime_account_value = (
+        current_equity + withdrawn_profit + principal_withdrawn_total
+    )
+    net_contributed_capital = (
+        initial_capital + external_deposits_total - principal_withdrawn_total
+    )
+    profit = (
+        lifetime_account_value - initial_capital - external_deposits_total
+    )
+
+    if net_contributed_capital <= 0:
+        return None
+    multiplier = lifetime_account_value / net_contributed_capital
+    # Backwards-compat surface: when there are no external deposits and
+    # no principal withdrawals, ``lifetime_equity`` (Phase 1-7 metric)
+    # equals ``lifetime_account_value`` and the multiplier matches the
+    # legacy formula exactly.
     lifetime_equity = current_equity + withdrawn_profit
-    multiplier = lifetime_equity / initial_capital
-    profit = lifetime_equity - initial_capital
 
     if multiplier < 2.0 or profit <= 0:
         return None
