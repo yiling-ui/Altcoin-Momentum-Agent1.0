@@ -451,7 +451,7 @@ def run() -> int:
         state_machine.transition_to(
             TradeState.OBSERVE,
             trigger=TradeStateTrigger.SIGNAL,
-            reasons=("phase7_boot",),
+            reasons=("phase8_5_boot",),
         )
         decision = risk.evaluate(
             RiskRequest(
@@ -495,7 +495,7 @@ def run() -> int:
                 payload={
                     "from": fsm.state.value,
                     "to": ExecutionState.IDLE.value,
-                    "reason": "phase7_boot",
+                    "reason": "phase8_5_boot",
                 },
             )
         )
@@ -585,7 +585,7 @@ def run() -> int:
         # Stop the exchange cleanly so DATA_UNRELIABLE is emitted on
         # shutdown - that lets replay-based tests confirm the lifecycle
         # closed properly.
-        exchange.stop(reason="phase7_shutdown")
+        exchange.stop(reason="phase8_5_shutdown")
     finally:
         dbs.close()
     return 0
