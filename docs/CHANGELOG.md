@@ -7,6 +7,255 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 10B - Reflection Engine (Issue #10 Part 2)
+
+Phase 10B delivers the read-only Reflection Engine on top of the
+Phase 10A Replay Engine. The engine consumes one
+`PaperTradeReplay` plus the surrounding Phase 10A risk / state /
+incident replays plus the Phase 8.5 `learning_ready` payload, and
+produces one structured `ReflectionResult` per paper-trade
+lifecycle. The result carries a typed `mistake_tags` list (drawn
+from a frozen 12-issue + 3-diagnostic vocabulary - **no
+free-form natural-language reflection** is produced),
+deterministic MFE / MAE / `tail_contribution` metrics
+(`None` when data is insufficient, NEVER fabricated), and four
+`QualityScore` axes. This is **Part 2 of 4** of Issue #10; Parts
+10C (LLM Guarded Interpreter) and 10D (Telegram outbound +
+Export commands) ship in separate PRs. Issue #10 will be closed
+by Part 10D.
+
+#### Added
+
+##### `app/reflection/` - Reflection Engine
+
+- `ReflectionEngine(replay=, event_repo=, config=)` - read-only
+  constructor. Construct from a wired `ReplayEngine` (preferred)
+  or from an `EventRepository` (the engine will build its own
+  ReplayEngine). Phase 10B does NOT re-implement Replay; it
+  consumes the existing Phase 10A surface.
+- `ReflectionEngine.reflect_paper_trade(client_order_id=,
+  opportunity_id=)` - reflect on one paper-trade lifecycle,
+  identified by either key. The engine asks Replay for the
+  surrounding context (risk decisions for the symbol, state
+  transitions for the symbol, P0 incidents in the window).
+- `ReflectionEngine.reflect(input)` - lower-level entry point
+  taking a `ReflectionInput` directly; tests use this to inject
+  hand-crafted context.
+- `ReflectionConfig` - tunable thresholds for tag-rule firing
+  (`late_entry_pct`, `slippage_overrun_pct`,
+  `execution_delay_ms`, `weak_volume_anomaly_threshold`,
+  `trap_score_threshold`).
+
+##### Value objects
+
+- `ReflectionResult` - frozen dataclass with the Issue-mandated
+  field set: `opportunity_id`, `client_order_id`, `symbol`,
+  `setup`, `result`, `mistake_tags`, `mfe`, `mae`,
+  `tail_contribution`, `entry_quality`, `exit_quality`,
+  `risk_process_quality`, `execution_quality`,
+  `data_quality_notes`, `source_event_ids`, `learning_ready`,
+  `generated_at`. JSON-safe via `to_payload()`.
+- `ReflectionInput` - frozen dataclass bundling
+  `paper_trade: PaperTradeReplay` plus optional
+  `risk_decisions`, `state_transitions`, `incidents`,
+  `learning_ready` so callers can drive the engine without
+  Replay re-reading events.db.
+- `QualityScore` - HIGH / MEDIUM / LOW / UNKNOWN.
+- `TradeOutcome` - WIN / LOSS / BREAKEVEN / PROTECTED / OPEN /
+  UNKNOWN.
+- `UnknownReason` - typed "data insufficient" reason vocabulary
+  (11 reasons; the engine NEVER invents a free-form reason).
+
+##### Mistake-tag vocabulary
+
+- `MistakeTag` - frozen 15-value enum:
+
+  Issue-required (12):
+  `late_entry`, `early_exit`, `weak_volume`, `fake_breakout`,
+  `high_trap_score`, `ignored_no_trade_gate`, `slippage_error`,
+  `execution_delay`, `stop_not_confirmed`, `tail_saved_trade`,
+  `tail_failed`, `right_tail_success`.
+
+  Diagnostic (Phase 10B):
+  `insufficient_data`, `no_lifecycle_observed`,
+  `incident_during_lifecycle`.
+
+- `ISSUE_REQUIRED_MISTAKE_TAGS` / `DIAGNOSTIC_MISTAKE_TAGS`
+  frozensets so consumers can iterate / filter without
+  re-listing the strings.
+
+##### Metric helpers (deterministic)
+
+- `compute_mfe(events, *, direction_long=, entry_price=)` -
+  Maximum Favourable Excursion as an absolute price delta.
+  Returns `MetricResult(value=None,
+  unknown_reasons=(...))` when fewer than two price observations
+  are available (Phase 9 paper-mode landmarks-only case) or
+  when no fill price is recorded.
+- `compute_mae(events, ...)` - Maximum Adverse Excursion;
+  same insufficient-data semantics.
+- `compute_tail_contribution(events=, state_transitions=,
+  realized_pnl=, virtual_trade_plan=)` - tail PnL attribution.
+  Returns 0.0 when no `RIGHT_TAIL_AMPLIFY` lifecycle was
+  observed AND a virtual_trade_plan was supplied (we can confidently
+  say zero); returns `None` when no RTA was observed AND no plan
+  is available.
+- `realized_pnl_for(events)` - read realised PnL off the closing
+  event payload.
+- `MetricResult` - `value: float | None` plus
+  `unknown_reasons: tuple[UnknownReason, ...]`.
+
+##### Tag-rule emission rules
+
+- `stop_not_confirmed`: `summary.stop_confirmed == False` OR a
+  `STOP_FAILED` event landed in the lifecycle.
+- `ignored_no_trade_gate`: a `RISK_REJECTED` for the same
+  `opportunity_id` precedes an `ORDER_SENT` for the same
+  `opportunity_id`. (This MUST NOT happen in Phase 9; the tag
+  fires loudly if it does.)
+- `slippage_error`: `|fill_price - limit_price| / limit_price`
+  exceeds the request's `max_slippage_pct` AND the engine-level
+  threshold (defence in depth).
+- `execution_delay`: `ack_ts - sent_ts` exceeds
+  `ReflectionConfig.execution_delay_ms` (default 1500ms).
+- `late_entry`: `|fill_price - virtual_entry| / virtual_entry`
+  exceeds `ReflectionConfig.late_entry_pct` (default 0.5%).
+  Requires `virtual_trade_plan`; otherwise unknown.
+- `weak_volume`: `signal_snapshot.anomaly_score` below
+  `ReflectionConfig.weak_volume_anomaly_threshold` (default
+  50.0). Requires `signal_snapshot`; otherwise unknown.
+- `high_trap_score`: `signal_snapshot.trap_score` >=
+  `ReflectionConfig.trap_score_threshold` (default 0.6) OR
+  `signal_snapshot.no_trade_reason` contains a `trap` substring.
+- `fake_breakout`: state chain shows a transition INTO
+  `confirm` / `attack` followed immediately by a transition INTO
+  `observe` / `scout` / `no_trade`.
+- `tail_saved_trade`: lifecycle entered `right_tail_amplify`
+  AND closed with `realized_pnl > 0`.
+- `tail_failed`: lifecycle entered `right_tail_amplify` AND
+  closed with `realized_pnl < 0`.
+- `right_tail_success`: lifecycle entered `right_tail_amplify`
+  AND a recorded mark / last / exit price reached or exceeded
+  `virtual_trade_plan.virtual_tp2`.
+- `early_exit`: position closed below `virtual_tp1` (LONG plan)
+  or above it (SHORT plan). Requires plan + close price.
+- `incident_during_lifecycle`: any incident's open / resolve
+  timestamp falls inside the lifecycle window, or the incident
+  window straddles the lifecycle.
+- `insufficient_data`: any data-quality note landed AND no
+  Issue-required tag fired.
+
+##### Boot drill (`python -m app.main`)
+
+The entrypoint runs the Phase 10B self-check **after** the
+Phase 10A self-check. The self-check reflects on the boot
+paper-trade lifecycle and asserts:
+
+  - the result is `breakeven` (boot drill closes at PnL=0);
+  - the `client_order_id` matches the boot order;
+  - `source_event_ids` is non-empty;
+  - no Issue-required `mistake_tag` fires (the diagnostic
+    `insufficient_data` tag MAY fire because the boot drill
+    does not attach a `virtual_trade_plan` / `signal_snapshot`,
+    which is an honest "we cannot tell" signal).
+
+If any of these contracts diverges, the entrypoint refuses to
+print the banner and exits non-zero.
+
+The boot banner gains four Phase 10B fields:
+
+```
+reflection_setup=unknown reflection_result=breakeven
+reflection_mistake_tags=1 reflection_data_quality_notes=4
+```
+
+A new `reflection_engine` health probe registers `OK` when no
+Issue-required `mistake_tag` fired, `DEGRADED` otherwise.
+
+##### Documentation + version bump
+
+- `app/__init__.py` -> `1.4.0a10b` /
+  `Phase 10B - Reflection Engine`.
+- `pyproject.toml` -> `1.4.0a10b`.
+- `README.md` -> Phase 10B deliverable + boundary section +
+  status table updated (Phase 10A marked merged with PR #23,
+  Phase 10B = "this branch", Parts 10C / 10D listed as open).
+- `docs/CHANGELOG.md` -> Phase 10B entry prepended; Phase 10A
+  entry preserved verbatim below.
+
+#### Phase 10B boundary
+
+1. **Read-only.** Reflection imports no state-mutating
+   component (no `CapitalFlowEngine`, no `ExecutionFSMDriver`,
+   no `Reconciler`, no `RiskEngine`, no `IncidentRepository`,
+   no `MockExchangeClient`, no `BinanceClient`, no
+   `MarketDataBuffer`, no `TelegramCommandCenter`, no
+   `RegimeEngine`). AST scan enforces this on every file under
+   `app/reflection/`.
+2. **No write surface.** No file under `app/reflection/`
+   defines `create_order` / `cancel_order` / `set_leverage` /
+   `set_margin_mode`. AST scan enforces this.
+3. **No `EventRepository.append_event` / `append_many`** call
+   anywhere in `app/reflection/`. AST scan enforces this; the
+   boot self-check confirms `events.count` is unchanged after
+   the Reflection self-check runs.
+4. **No socket / no exchange SDK / no LLM client / no Telegram
+   bot library.** AST scan enforces this against every `.py`
+   file under `app/reflection/`.
+5. **No `os.environ` / `getenv` reads** anywhere in
+   `app/reflection/`. AST scan enforces this.
+6. **No `api_key` / `api_secret` / `bot_token` parameter or
+   concrete literal** anywhere in `app/reflection/`. AST scan
+   enforces this.
+7. **Read-only against `events.db` only.** No file under
+   `app/reflection/` opens any other database directly.
+8. **No Issue #10 Part 10C / 10D work.** No LLM client, no
+   Telegram outbound, no Export commands.
+9. **No free-form natural-language reflection.** Every
+   observation lands as one of the values in `MistakeTag`.
+
+#### Defence in depth (cumulative, all unit-tested)
+
+1. `app/config/settings.py::_apply_phase1_safety_lock()`
+   overwrites the five flags after YAML + env loading.
+2. `app/main.py::_assert_phase1_safety()` raises
+   `SafetyViolation` at boot if any flag has drifted.
+3. `app/main.py::_assert_phase3_read_only()` probes every
+   banned write surface and raises `SafeModeViolation` if any
+   of them stops refusing.
+4. `app/main.py::_assert_phase9_no_live_writes()` confirms the
+   FSM driver constructed under paper-mode flags.
+5. `app/risk/engine.py` rejects `live_trading_required=True`,
+   `right_tail_amplify=True`, every Phase 6 / 7 / 8 hard-rule
+   branch.
+6. `app/exchanges/base.py::ExchangeClientBase.{create_order,
+   cancel_order, set_leverage, set_margin_mode}` always raise
+   `SafeModeViolation`.
+7. `app/execution/fsm.py::ExecutionFSMDriver.__init__` raises
+   `SafeModeViolation` if any of the three trading flags has
+   drifted.
+8. `MarginMode` enum cannot construct a cross-margin
+   `OrderRequest` even via typo.
+9. `StopEvent` cannot construct a non-reduce-only stop even
+   via typo.
+10. **Phase 10A:** AST scans on every `.py` under
+    `app/replay/` enforce no network / no SDK / no API key /
+    no write surface / no `os.environ` / no
+    `EventRepository.append_event` / no state-mutating
+    component import.
+11. **Phase 10B adds:** AST scans on every `.py` under
+    `app/reflection/` enforce the same set of clauses, plus
+    no LLM client import (deferred to Part 10C), no
+    `MistakeTag` / `ReflectionResult` mutation surface (the
+    value objects are frozen).
+
+#### Live trading risk
+
+**None.** Phase 10B adds no new `create_order` / `cancel_order`
+/ `set_leverage` / `set_margin_mode` call site. The four
+`SafeModeViolation` refusals on `ExchangeClientBase` continue
+to apply.
+
 ### Phase 10A - Replay Engine (Issue #10 Part 1)
 
 Phase 10A delivers the read-only Replay Engine on top of every

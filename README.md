@@ -1,18 +1,24 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 10A - Replay Engine (Issue #10 Part 1).
-> **Paper / mock execution only.** Phase 10A adds the read-only
-> :mod:`app.replay` package on top of every Phase 1-9 contract.
-> The Replay Engine reconstructs paper trade lifecycles, capital
-> rebases, risk decisions, P0 incidents, trade state transitions,
-> telegram commands, and Phase 8.5 learning-ready payloads from
-> ``events.db``, plus a P0 latched-pause invariant verifier
-> (Phase 9 fix-up, PR #22). Replay opens **no socket**, imports
+> **Phase status:** Phase 10B - Reflection Engine (Issue #10 Part 2).
+> **Paper / mock execution only.** Phase 10B adds the read-only
+> :mod:`app.reflection` package on top of the Phase 10A
+> :mod:`app.replay` substrate. The Reflection Engine consumes one
+> :class:`PaperTradeReplay` plus the surrounding Phase 10A risk /
+> state / incident replays plus the Phase 8.5 ``learning_ready``
+> payload, and produces one structured :class:`ReflectionResult`
+> with a typed ``mistake_tags`` list, deterministic MFE / MAE /
+> ``tail_contribution`` metrics (``None`` when data is insufficient,
+> never fabricated), and four :class:`QualityScore` axes
+> (``entry_quality``, ``exit_quality``, ``risk_process_quality``,
+> ``execution_quality``). Reflection opens **no socket**, imports
 > **no exchange SDK**, **no LLM client**, **no Telegram bot
-> library**, defines **no write surface**, and never instantiates
-> any state-mutating component. Issue #10 Parts 10B (Reflection),
-> 10C (LLM Guarded Interpreter) and 10D (Telegram outbound +
-> Export commands) ship in separate PRs.
+> library**, defines **no write surface**, calls **no**
+> ``EventRepository.append_event``, and never instantiates any
+> state-mutating component. **No free-form natural-language
+> reflection** is produced. Issue #10 Parts 10C (LLM Guarded
+> Interpreter) and 10D (Telegram outbound + Export commands) ship
+> in separate PRs; Issue #10 will be closed by Part 10D.
 >
 > The Phase 1 safety lock (`mode=paper`,
 > `live_trading_enabled=False`, `right_tail_enabled=False`,
@@ -20,7 +26,7 @@
 > every later boundary remain in force. The four
 > ``ExchangeClientBase`` write surfaces (``create_order``,
 > ``cancel_order``, ``set_leverage``, ``set_margin_mode``)
-> **continue to raise** ``SafeModeViolation`` and Phase 10A NEVER
+> **continue to raise** ``SafeModeViolation`` and Phase 10B NEVER
 > overrides them.
 
 ---
@@ -42,10 +48,189 @@ This is the implementation of the production specification in
 | Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | merged | `feature/phase-8-capital-flow-profit-harvest-rebase` (PR #19) |
 | Phase 8.5 - Learning-Ready Data Contract + Test Data Export | #8.5 | merged | `feature/phase-8-5-learning-ready-data-contract` (PR #20) |
 | Phase 9 - Execution FSM / Reconciliation | #9  | merged | `feature/phase-9-execution-fsm-reconciliation` (PR #21, hardening PR #22) |
-| Phase 10A - Replay Engine (Part 1 of Issue #10) | #10 (Part A) | this branch | `feature/phase-10a-replay-engine` |
-| Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | open | - |
+| Phase 10A - Replay Engine (Part 1 of Issue #10) | #10 (Part A) | merged | `feature/phase-10a-replay-engine` (PR #23) |
+| Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | this branch | `feature/phase-10b-reflection-engine` |
 | Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | open | - |
 | Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | open | - |
+
+## Phase 10B deliverable - Reflection Engine (Issue #10 Part 2)
+
+Phase 10B adds one new package on top of Phase 10A:
+
+  - **`app/reflection/`** - the read-only Reflection Engine.
+    Consumes the Phase 10A :class:`PaperTradeReplay`,
+    :class:`RiskDecisionReplay`, :class:`StateTransitionReplay`,
+    and :class:`IncidentReplay` value objects plus the Phase 8.5
+    ``learning_ready`` payload, and produces one structured
+    :class:`ReflectionResult` per paper-trade lifecycle. The
+    result carries:
+
+    - ``opportunity_id`` / ``client_order_id`` / ``symbol``
+    - ``setup`` (from ``virtual_trade_plan.setup_type`` or
+      ``signal_snapshot.opportunity_grade``)
+    - ``result`` (``win`` / ``loss`` / ``breakeven`` /
+      ``protected`` / ``open`` / ``unknown``)
+    - ``mistake_tags`` - typed enum from a frozen vocabulary;
+      see :class:`MistakeTag` for the 12 issue-required tags + 3
+      diagnostic tags
+    - ``mfe`` / ``mae`` (deterministic; ``None`` when data is
+      insufficient)
+    - ``tail_contribution`` (deterministic; ``None`` when no
+      ``RIGHT_TAIL_AMPLIFY`` lifecycle observed and no plan-level
+      tail PnL is recorded)
+    - four :class:`QualityScore` axes: ``entry_quality``,
+      ``exit_quality``, ``risk_process_quality``,
+      ``execution_quality`` (``high`` / ``medium`` / ``low`` /
+      ``unknown``)
+    - ``data_quality_notes`` - typed :class:`UnknownReason` list
+      explaining every ``None`` / ``UNKNOWN`` value
+    - ``source_event_ids`` - the events that drove the result
+    - ``learning_ready`` - the Phase 8.5 block that informed it
+
+The package is **read-only**: no socket, no exchange SDK, no LLM
+client, no Telegram bot library, no write surface, no
+`os.environ` access, and no `EventRepository.append_event` /
+`append_many` call anywhere in `app/reflection/`. AST scans in
+`tests/unit/test_phase10b_no_network.py` enforce every clause at
+the source-tree level on every file under `app/reflection/`.
+
+### Reflection public surface
+
+```python
+from app.reflection import (
+    ReflectionEngine,
+    ReflectionConfig,
+    ReflectionInput,
+    ReflectionResult,
+    QualityScore,
+    TradeOutcome,
+    UnknownReason,
+    MistakeTag,
+    ISSUE_REQUIRED_MISTAKE_TAGS,
+    DIAGNOSTIC_MISTAKE_TAGS,
+    compute_mfe,
+    compute_mae,
+    compute_tail_contribution,
+)
+from app.replay import ReplayEngine
+from app.database.repositories import EventRepository
+
+# Read-only constructor: takes a wired ReplayEngine OR an
+# EventRepository. Reflection consumes Replay output; it does NOT
+# re-implement Replay.
+reflection = ReflectionEngine(replay=ReplayEngine(event_repo=event_repo))
+
+# Reflect on one paper-trade lifecycle by client_order_id OR
+# opportunity_id. Reflection asks Replay for the surrounding risk /
+# state / incident context.
+result: ReflectionResult = reflection.reflect_paper_trade(
+    client_order_id="phase9_boot_xxx"
+)
+print(result.result.value)            # "breakeven" / "win" / "loss"
+print(result.mistake_tag_values)      # ("stop_not_confirmed", ...)
+print(result.mfe, result.mae)         # float | None
+print(result.tail_contribution)       # float | None
+print(result.entry_quality.value)     # "high" | "medium" | "low" | "unknown"
+print(result.data_quality_notes)      # (UnknownReason, ...)
+print(result.to_payload())            # JSON-safe dict
+```
+
+### Phase 10B mistake_tag vocabulary
+
+The 12 Issue-required tags (frozen):
+
+  - ``late_entry``
+  - ``early_exit``
+  - ``weak_volume``
+  - ``fake_breakout``
+  - ``high_trap_score``
+  - ``ignored_no_trade_gate``
+  - ``slippage_error``
+  - ``execution_delay``
+  - ``stop_not_confirmed``
+  - ``tail_saved_trade``
+  - ``tail_failed``
+  - ``right_tail_success``
+
+Plus 3 Phase 10B diagnostic tags:
+
+  - ``insufficient_data`` - data quality blocked tag derivation
+  - ``no_lifecycle_observed`` - the trade has no Phase 9 lifecycle
+  - ``incident_during_lifecycle`` - a P0 / P1 incident overlapped
+
+Tags are **additive**; a single :class:`ReflectionResult` may
+carry several. Tags are NEVER free-form strings.
+
+### Determinism rule (MFE / MAE / tail_contribution)
+
+When the underlying data is insufficient (e.g. the events.db
+window does not contain enough price observations) the metric
+returns ``None`` and the reason lands in ``data_quality_notes``
+as a typed :class:`UnknownReason`. The Reflection Engine NEVER:
+
+  - extrapolates a fallback number,
+  - calls a price feed,
+  - invents a free-form reason.
+
+Phase 9 paper-mode keeps only entry / fill / stop / exit
+landmarks so the Phase 10B metrics return ``None`` for the boot
+drill (the boot trade is a happy-path lifecycle); future phases
+that subscribe to a real continuous quote feed will enrich the
+event payloads, and the same metric helpers will pick those up
+automatically because they index by payload key.
+
+### Phase 10B hard boundary
+
+  1. **Read-only.** Reflection imports no state-mutating component
+     (no CapitalFlowEngine, no ExecutionFSMDriver, no Reconciler,
+     no RiskEngine, no IncidentRepository, no MockExchangeClient,
+     no BinanceClient, no MarketDataBuffer, no
+     TelegramCommandCenter, no RegimeEngine). AST scan enforces
+     this on every file under `app/reflection/`.
+  2. **No write surface.** No file under `app/reflection/` defines
+     `create_order` / `cancel_order` / `set_leverage` /
+     `set_margin_mode`. AST scan enforces this.
+  3. **No `EventRepository.append_event` / `append_many` call**
+     anywhere in `app/reflection/`. AST scan enforces this; the
+     boot self-check confirms `events.count` is unchanged after
+     the full Reflection self-check runs.
+  4. **No socket / no exchange SDK / no LLM client / no Telegram
+     bot library.** AST scan enforces this.
+  5. **No `os.environ` / `getenv` reads** anywhere in
+     `app/reflection/`. AST scan enforces this.
+  6. **No `api_key` / `api_secret` / `bot_token` parameter or
+     concrete literal** anywhere in `app/reflection/`. AST scan
+     enforces this.
+  7. **Read-only against `events.db` only.** No file under
+     `app/reflection/` opens any other database directly.
+  8. **No Issue #10 Part 10C / 10D work.** No LLM client, no
+     Telegram outbound, no Export commands. Those land in
+     separate PRs.
+  9. **No free-form natural-language reflection.** Every
+     observation lands as one of the values in :class:`MistakeTag`.
+
+### Boot drill output (`python -m app.main`)
+
+```
+[AMA-RT] Phase 10B - Reflection Engine v1.4.0a10b mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  ... (Phase 1-10A fields unchanged) ... \
+  reflection_setup=unknown reflection_result=breakeven \
+  reflection_mistake_tags=1 reflection_data_quality_notes=4 \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+The Phase 10B self-check reflects on the boot paper-trade
+lifecycle and asserts:
+
+  - the result is ``breakeven`` (boot drill closes at PnL=0);
+  - no Issue-required ``mistake_tag`` fires (the diagnostic
+    ``insufficient_data`` tag MAY fire because the boot drill
+    does not attach a ``virtual_trade_plan`` / ``signal_snapshot``,
+    which is an honest "we cannot tell" signal).
+
+If any of these contracts diverges, the entrypoint refuses to
+print the banner and exits non-zero.
 
 ## Phase 10A deliverable - Replay Engine (Issue #10 Part 1)
 
