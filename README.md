@@ -1,15 +1,19 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 7 - State Machine + Risk Engine.
-> **Paper mode only.** Phase 7 ships the full Trade State Machine
-> (Spec §26), the full Risk Engine with No-Trade Gate, Account Life
-> Tier policy, Daily-Loss + Consecutive-Loss Circuit Breakers, and
-> typed `RiskRejectReason` audit events. The engine is **additive**
-> on top of Phase 1 / Phase 6: every existing caller keeps working
-> unchanged. This repository still does **not** trade real money,
-> does **not** open any outbound network socket, does **not** import
-> any exchange SDK (`ccxt`, `binance-connector`, `python-binance`
-> are intentionally absent from `requirements.txt`), does **not**
+> **Phase status:** Phase 8.5 - Learning-Ready Data Contract +
+> Test Data Export Contract.
+> **Paper mode only.** Phase 8.5 ships the **passive data contract**
+> every future phase will read (Replay, MFE/MAE, Tail labelling,
+> Dataset Builder, AI Learning) plus the cloud-test-friendly
+> **Test Data Export Service** (zip + manifest + summary +
+> redaction) and a CLI. Full AI Learning, Feature Store, model
+> training, strategy ordering, live trading, real network, LLM and
+> Telegram outbound are **NOT** implemented in this phase. The
+> `app/telegram` package remains a Phase 1 in-process skeleton.
+> This repository still does **not** trade real money, does **not**
+> open any outbound network socket, does **not** import any
+> exchange SDK (`ccxt`, `binance-connector`, `python-binance` are
+> intentionally absent from `requirements.txt`), does **not**
 > call any LLM, and does **not** read real API keys. The four write
 > surfaces on `ExchangeClientBase` (`create_order`, `cancel_order`,
 > `set_leverage`, `set_margin_mode`) continue to raise
@@ -30,10 +34,210 @@ This is the implementation of the production specification in
 | Phase 4 - Market Data Buffer | #4  | merged | `feature/phase-4-market-data-buffer` (PR #15) |
 | Phase 5 - Regime / Universe / Liquidity | #5  | merged | `feature/phase-5-regime-universe-liquidity` (PR #16) |
 | Phase 6 - Scanner / Confirmation / Manipulation | #6  | merged | `feature/phase-6-scanner-confirmation-manipulation` (PR #17) |
-| Phase 7 - State Machine / Risk Engine | #7  | this branch | `feature/phase-7-state-machine-risk-engine` |
-| Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | this branch | `feature/phase-8-capital-flow-profit-harvest-rebase` |
+| Phase 7 - State Machine / Risk Engine | #7  | merged | `feature/phase-7-state-machine-risk-engine` (PR #18) |
+| Phase 8 - Capital Flow / Profit Harvest / Rebase | #8  | merged | `feature/phase-8-capital-flow-profit-harvest-rebase` (PR #19) |
+| Phase 8.5 - Learning-Ready Data Contract + Test Data Export | #8.5 | this branch | `feature/phase-8-5-learning-ready-data-contract` |
 | Phase 9 - Execution FSM / Reconciliation | #9  | open | - |
 | Phase 10 - LLM / Telegram / Replay / Reflection | #10 | open | - |
+
+## Phase 8.5 deliverable - Learning-Ready Data Contract + Test Data Export Contract
+
+Phase 8.5 ships **passive data plumbing only**. Nothing in this
+phase trades, opens a socket, calls an LLM, sends a Telegram
+message, places an order, or executes a real withdrawal.
+
+### Part 1 - Learning-Ready Data Contract (`app/learning/`)
+
+A reusable data contract that every future phase will populate:
+
+| Class | Issue contract |
+| --- | --- |
+| `OpportunityIdentity` | `opportunity_id`, `scan_batch_id`, `symbol`, `first_seen_ts`, `source_phase`. Plus `make_opportunity_id` / `make_scan_batch_id` factories. |
+| `signal_snapshot_to_payload` / `payload_to_signal_snapshot` | Spec §11.2 SignalSnapshot serialisation contract (deterministic JSON-safe round-trip). |
+| `VirtualTradePlan` | `virtual_entry`, `virtual_stop`, `virtual_tp1`, `virtual_tp2`, `invalid_price`, `suggested_leverage`, `risk_budget_pct`, `direction`, `setup_type`. **Paper-only descriptive plan**: constructing one triggers no order. |
+| `ConfigVersions` | `strategy_version`, `risk_config_version`, `scoring_version`, `capital_state_version`, `state_machine_version`, `llm_prompt_version`. Defaults derived from `app.__version__` at import time (e.g. currently `v1.4.0a8.5`) so a future version bump tracks automatically; `llm_prompt_version` defaults to `n/a` (Phase 8.5 forbids LLM trade involvement). |
+| `RiskRejectedLearningPayload` | typed enrichment for `RISK_APPROVED` / `RISK_REJECTED` events: `opportunity_id`, `reject_reasons`, `account_life_tier`, `regime`, `universe_eligible`, `liquidity_state`, `trade_confirmation_level`, `manipulation_level`, `capital_state_version`, `risk_config_version`, plus Phase 7 breaker / `is_new_open` / `attack_intent`. |
+| `LearningReadyContext` + `attach_learning_ready` | aggregator + mutation-free payload merge helper. Existing event-payload keys are preserved bit-for-bit; the enrichment lands under a new `learning_ready` sub-key. |
+| `LEARNING_READY_KEY = "learning_ready"` | the single canonical key constant emitters / consumers index into. |
+| `LEARNING_READY_EVENT_TYPES` | the **11** Issue-listed event types: `PRE_ANOMALY_DETECTED`, `ANOMALY_DETECTED`, `TRADE_CONFIRMED`, `MANIPULATION_DETECTED`, `UNIVERSE_FILTERED`, `LIQUIDITY_CHECKED`, `RISK_APPROVED`, `RISK_REJECTED`, `STATE_TRANSITION`, `CAPITAL_REBASE`, `RISK_BUDGET_RECALCULATED`. |
+
+The Risk Engine consumes `learning_context` / `opportunity_id` /
+`virtual_trade_plan` / `config_versions` automatically: `RiskRequest`
+gained five new optional fields (all default `None`) and
+`RISK_APPROVED` / `RISK_REJECTED` events now carry a
+`learning_ready` block when any Phase 8.5 enrichment is supplied.
+Legacy callers still produce byte-for-byte compatible audit
+payloads.
+
+### Part 2 - Test Data Export Service (`app/exports/`)
+
+`TestDataExportService.export(...)` produces a redacted `.zip` at:
+
+```
+data/reports/exports/ama_rt_test_data_<timestamp>_<id>.zip
+```
+
+The bundle contains:
+
+```
+manifest.json
+summary_report.md
+events.jsonl
+opportunities.jsonl
+signal_snapshots.jsonl
+risk_decisions.jsonl
+state_transitions.jsonl
+capital_events.jsonl
+virtual_trade_plans.jsonl
+```
+
+**Time ranges supported (Issue contract):** `today`, `24h`, `7d`, `range`.
+**Type filters supported (Issue contract):** `all`, `events`,
+`opportunities`, `rejections`, `capital`, `state`, `learning`.
+
+`manifest.json` carries every Issue-mandated field
+(`export_id`, `generated_at`, `time_range_start`, `time_range_end`,
+`trading_mode`, `app_version`, `event_count`, `opportunity_count`,
+`risk_rejected_count`, `state_transition_count`,
+`capital_event_count`, `redaction_applied = true`) plus a
+non-secret `safety_summary` snapshot of the Phase 1 lock.
+
+`summary_report.md` includes time range, totals, top reject
+reasons, top symbols by event count, paper PnL (from
+`CAPITAL_REBASE.net_trading_pnl`), and incident / degraded /
+protection-mode flags.
+
+**Redaction (`app/exports/redaction.py`):** every output stream is
+walked through `redact(...)` before it lands in the zip. Sensitive
+field names (`api_key`, `api_secret`, `secret`, `token`, `password`,
+`auth`, `credential`, `private_key`, `bot_token`, `webhook`,
+`withdrawal_address`, `address`, `passphrase`, `session`, `cookie`,
+`ssh`, `smtp`, ...) are replaced with `[REDACTED]`. Filesystem
+paths (`/home`, `/root`, `/Users`, `C:\Users`, `/etc`, `/var/lib`,
+`/usr/local`, `/.env`) are stripped. Value patterns matching
+Telegram bot tokens, Binance-style 64-char keys, AWS `AKIA...`
+keys, and OpenAI/Anthropic/DeepSeek `sk-...` tokens are stripped
+regardless of the key they live under.
+`assert_no_forbidden_substrings(...)` is the defence-in-depth gate
+the service runs on every file before writing the zip.
+
+#### CLI
+
+`scripts/export_test_data.py` (a thin shim over `app.exports.cli`):
+
+```bash
+python -m scripts.export_test_data --range 24h
+python -m scripts.export_test_data --range 7d
+python -m scripts.export_test_data --type rejections
+python -m scripts.export_test_data --start 2026-05-01 --end 2026-05-07
+```
+
+The CLI refuses to operate when `trading_mode != paper` and prints
+`OK file=... bytes=... events=... opportunities=...
+rejected=... capital=... state_transitions=... redaction_applied=True`
+on success.
+
+### Phase 8.5 export scope: paper-mode only
+
+**Phase 8.5 only supports paper-mode test-data export.** The CLI
+refuses to operate when `trading_mode != paper` (exit code 2) and
+every export bundle's `manifest.json.trading_mode` records the
+running mode at export time. The Phase 1 safety lock keeps that
+value pinned to `"paper"` until the Spec §41 Go/No-Go checklist
+clears.
+
+A future read-only export strategy for `live_limited` / `live`
+modes is **deliberately deferred**. It must NOT be implemented
+before:
+
+1. The Spec §41 Go/No-Go checklist is executed end-to-end.
+2. Operator-allow-list policy for live-mode exports is reviewed
+   (paper exports are operator-only too, but a live export carries
+   meaningfully more sensitive data: real position state,
+   reconciled fills, real PnL).
+3. The `manifest.json.safety_summary` block is extended to record
+   "the export contains live-mode data" so a downstream consumer
+   cannot mistake it for paper.
+4. Telegram-side fragmentation (Issue #10) lands so a multi-MiB
+   live-mode bundle does not fail the 50 MiB cap silently.
+
+Until those gates are met the CLI's `trading_mode != paper`
+refusal is the contract.
+
+### Telegram outbound (deferred to Issue #10)
+
+The future `/export_test_data 24h`, `/export_test_data 7d`,
+`/export_test_data today`, `/export_rejections 24h`,
+`/export_report today`, `/export_learning_dataset 7d` commands are
+NOT implemented in Phase 8.5. The behavioural contract Issue #10
+must honour - short text summary first, `sendDocument` (NOT raw
+chat dump), paper-mode banner pinned, operator allow-list,
+refusal on size cap - is documented in
+`docs/PHASE_8_5_TELEGRAM_EXPORT_CONTRACT.md`.
+
+### Phase 8.5 boundary
+
+1. **No full AI Learning. No Feature Store. No model training.**
+2. **No Telegram outbound.** `app/telegram` remains a Phase 1
+   in-process command-bus skeleton.
+3. **No real network.** No exchange SDK / HTTP / WebSocket / LLM
+   client imported anywhere under `app/learning/` or `app/exports/`.
+4. **No API key in process memory.** No `api_key` / `api_secret`
+   parameter; no `os.environ` / `os.getenv` / `getenv()` call under
+   the new packages (AST scan).
+5. **No write surface.** No new `create_order`, `cancel_order`,
+   `set_leverage`, `set_margin_mode` method.
+6. **No LLM in trade decisions.** `llm_prompt_version` defaults to
+   `"n/a"` (formatted from `app.__version__` for the other five
+   labels so a future bump does not silently freeze the audit
+   trail). Spec rule 7 still bans LLM participation in trading
+   actions.
+7. **No Issue #9 work** (Execution FSM driver / Reconciliation).
+8. **No Issue #10 work** (LLM, Telegram outbound, Replay diff
+   reports, Reflection).
+9. **No live-mode / live_limited export.** The CLI refuses to run
+   when `trading_mode != paper`. A future read-only live-mode
+   export is gated behind the Go/No-Go checklist (Spec §41) - see
+   "Phase 8.5 export scope: paper-mode only" above.
+10. **No server-path leakage.** The redaction layer strips any
+    string starting with `/home/`, `/root/`, `/Users/`, `/var/`,
+    `/etc/`, `/usr/`, `/opt/`, `/srv/`, `/mnt/`, `/projects/`,
+    `/data/`, `/tmp/`, `/workspace/`, `/app/`, `/private/var/`,
+    `/private/etc/`, a Windows drive letter (`C:\\`, `D:/`, ...),
+    a UNC share (`\\\\server\\share`), or a `~/` user-home tilde.
+    `manifest.files[].name` carries only basenames; the zip
+    filename is `ama_rt_test_data_<ts>_<id>.zip` (no path
+    separators); pinned by
+    `tests/unit/test_export_no_path_leak.py`.
+
+### Tests
+
+```
+$ python3.12 -m pytest tests/unit
+933 passed in 7.40s
+```
+
+**+150 new Phase 8.5 tests** on top of 783 retained from Phase 1-8.
+
+### Sample boot output
+
+```
+[AMA-RT] Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract \
+  v1.4.0a8.5 mode=paper \
+  live_trading=False right_tail=False llm=False exchange_live_orders=False \
+  databases=5 events_count=32 capital_events=1 \
+  exchange=mock/connected exchange_symbols=3 exchange_connected_events=1 \
+  market_data=3/0 market_snapshots=3 data_unreliable=1 \
+  regime=ALT_RISK_OFF/ALLOW_SCOUT regime_events=1 \
+  universe=0/3 universe_events=3 liquidity_events=6 \
+  pre_anomaly_events=3 anomaly_events=3 trade_confirmed_events=3 \
+  manipulation_events=3 \
+  state_transitions=2 trade_state=observe \
+  daily_loss_breaker=closed consecutive_loss_breaker=closed \
+  risk_decision=True/paper_only_skeleton_approval health=ok
+```
+
+---
 
 ## Phase 8 deliverable - External Capital Flow
 

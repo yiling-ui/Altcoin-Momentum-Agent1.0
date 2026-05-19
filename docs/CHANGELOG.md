@@ -7,6 +7,234 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract
+
+Phase 8.5 lays the **passive data contract** every future phase
+will read: Replay (Issue #10), MFE/MAE labelling, Tail labelling,
+Dataset Builder, AI Learning. It also ships the cloud-test-friendly
+**Test Data Export Service** (zip + manifest + summary + redaction)
+plus a CLI. The full AI Learning, Feature Store, model training,
+strategy ordering, live trading, real network, LLM and Telegram
+outbound are **NOT** implemented in this phase.
+
+#### Added
+
+##### `app/learning/` - Learning-Ready Data Contract
+
+- `OpportunityIdentity` (frozen Pydantic v2): `opportunity_id`,
+  `scan_batch_id`, `symbol`, `first_seen_ts`, `source_phase`. Plus
+  `make_opportunity_id` / `make_scan_batch_id` factories so a
+  scanner / confirmation / risk engine call can generate a stable
+  identifier deterministically.
+- `signal_snapshot_to_payload` / `payload_to_signal_snapshot`:
+  Spec §11.2 SignalSnapshot serialiser/deserialiser. The Phase 1
+  `app.core.models.SignalSnapshot` is the single source of truth;
+  Phase 8.5 only adds a deterministic JSON-safe serialisation
+  contract.
+- `VirtualTradePlan` (frozen Pydantic v2): `virtual_entry`,
+  `virtual_stop`, `virtual_tp1`, `virtual_tp2`, `invalid_price`,
+  `suggested_leverage`, `risk_budget_pct`, `direction`, `setup_type`.
+  Validates `suggested_leverage >= 1.0` and `0 <= risk_budget_pct <= 1.0`.
+  This is a **paper-only descriptive plan**; constructing one
+  triggers no order, ever.
+- `ConfigVersions` (frozen Pydantic v2) with the six Issue-mandated
+  identifiers: `strategy_version`, `risk_config_version`,
+  `scoring_version`, `capital_state_version`, `state_machine_version`,
+  `llm_prompt_version`. Defaults are pegged to `v1.4.0a8.5`;
+  `llm_prompt_version` defaults to `n/a` because Phase 8.5 forbids
+  any LLM trade involvement (Spec rule 7).
+- `RiskRejectedLearningPayload`: typed enrichment carrying
+  `opportunity_id`, `reject_reasons`, `account_life_tier`, `regime`,
+  `universe_eligible`, `liquidity_state`, `trade_confirmation_level`,
+  `manipulation_level`, `capital_state_version`, `risk_config_version`,
+  plus Phase 7 breaker / `is_new_open` / `attack_intent` context.
+- `LearningReadyContext` aggregator + `attach_learning_ready` merge
+  helper. Mutation-free: existing event-payload keys are preserved
+  bit-for-bit, the enrichment lands under a new `learning_ready`
+  sub-key. The Phase 1 `EventRepository.append_event` API is
+  unchanged; Phase 8.5 simply makes it possible for emitters to
+  carry the contract.
+- `LEARNING_READY_KEY = "learning_ready"` and
+  `LEARNING_READY_EVENT_TYPES` (the 11 event types Issue #8.5
+  requires: `PRE_ANOMALY_DETECTED`, `ANOMALY_DETECTED`,
+  `TRADE_CONFIRMED`, `MANIPULATION_DETECTED`, `UNIVERSE_FILTERED`,
+  `LIQUIDITY_CHECKED`, `RISK_APPROVED`, `RISK_REJECTED`,
+  `STATE_TRANSITION`, `CAPITAL_REBASE`,
+  `RISK_BUDGET_RECALCULATED`).
+
+##### Risk Engine integration
+
+- `RiskRequest` gained five **optional** Phase 8.5 fields:
+  `opportunity`, `opportunity_id`, `virtual_trade_plan`,
+  `config_versions`, `learning_context`. All default to `None`;
+  legacy callers retain byte-for-byte compatible audit payloads.
+- `RiskEngine._record(...)` now synthesises a
+  `RiskRejectedLearningPayload` from the request + decision +
+  breaker state and merges a `learning_ready` block into the
+  `RISK_APPROVED` / `RISK_REJECTED` payload. A caller-supplied
+  `learning_context` always wins over the synthesised one. The
+  legacy reasons / account_tier / regime / no_trade_gate audit
+  fields stay untouched so Phase 1 / Phase 6 / Phase 7 tests pass
+  unchanged.
+
+##### `app/exports/` - Test Data Export Service
+
+- `TestDataExportService.export(...)` produces a redacted `.zip`
+  bundle under `data/reports/exports/ama_rt_test_data_<ts>_<id>.zip`.
+  Default zip contents (with `type=all`):
+    `manifest.json`, `summary_report.md`, `events.jsonl`,
+    `opportunities.jsonl`, `signal_snapshots.jsonl`,
+    `risk_decisions.jsonl`, `state_transitions.jsonl`,
+    `capital_events.jsonl`, `virtual_trade_plans.jsonl`.
+- Time ranges supported: `today`, `24h`, `7d`, `range` (with
+  explicit `start_ms` / `end_ms`).
+- Type filters supported: `all`, `events`, `opportunities`,
+  `rejections`, `capital`, `state`, `learning`.
+- `manifest.json` carries every Issue-mandated field
+  (`export_id`, `generated_at`, `time_range_start`, `time_range_end`,
+  `trading_mode`, `app_version`, `event_count`, `opportunity_count`,
+  `risk_rejected_count`, `state_transition_count`,
+  `capital_event_count`, `redaction_applied=true`) plus a
+  per-export `safety_summary` snapshot of the Phase 1 lock so a
+  reviewer can spot a leaked flag at a glance.
+- `summary_report.md` includes time range, totals, top reject
+  reasons, top symbols by event count, paper PnL (from
+  `CAPITAL_REBASE.net_trading_pnl`), and incident / degraded /
+  protection-mode flags.
+- `redact(...)` walks any JSON-safe value and replaces sensitive
+  fields with `[REDACTED]`. The redactor covers (a) sensitive key
+  substrings (`api_key`, `api_secret`, `secret`, `token`,
+  `password`, `auth`, `credential`, `private_key`, `bot_token`,
+  `webhook`, `withdrawal_address`, `address`, `passphrase`,
+  `session`, `cookie`, `ssh`, `smtp`, ...), (b) absolute filesystem
+  paths (`/home`, `/root`, `/Users`, `C:\Users`, `/etc`, `/var/lib`,
+  `/usr/local`, `/.env`), and (c) value patterns (Telegram bot
+  tokens `\d{8,12}:[A-Za-z0-9_-]{30,}`, Binance-style 64-char
+  keys, AWS `AKIA...` keys, OpenAI/Anthropic/DeepSeek `sk-...`
+  tokens, `AMA_*_KEY/SECRET/TOKEN/PASSWORD` env-var literals).
+- `assert_no_forbidden_substrings(...)` is a defence-in-depth gate
+  on the export path; the service refuses to write the zip if any
+  forbidden literal slips through.
+- `TestDataExportService.max_zip_bytes` defaults to 50 MiB. Issue
+  #10 will add Telegram-side fragmentation; Phase 8.5 just refuses
+  to grow beyond the cap and asks the caller to narrow the window.
+- CLI: `app/exports/cli.py` + `scripts/export_test_data.py` shim.
+  Examples:
+    ```
+    python -m scripts.export_test_data --range 24h
+    python -m scripts.export_test_data --range 7d
+    python -m scripts.export_test_data --type rejections
+    python -m scripts.export_test_data --start 2026-05-01 --end 2026-05-07
+    ```
+
+##### Documentation
+
+- `docs/PHASE_8_5_TELEGRAM_EXPORT_CONTRACT.md`: the future Telegram
+  Command Center MUST add `/export_test_data {24h,7d,today}`,
+  `/export_rejections 24h`, `/export_report today`,
+  `/export_learning_dataset 7d`. The contract spells out: short
+  text summary first, then `sendDocument` (NOT raw chat dump),
+  paper-mode banner pinned, operator allow-list, refusal on size
+  cap. Issue #10 will implement the bot client; Phase 8.5 ships
+  ONLY the contract.
+- `app/__init__.py` bumped to `1.4.0a8.5` /
+  `Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract`.
+- `pyproject.toml` version bumped to `1.4.0a8.5`.
+
+#### Boundary (Phase 8.5 prohibitions, all enforced by tests)
+
+1. **No full AI Learning.** No model training. No Feature Store.
+   No complex Data Collection Module.
+2. **No Telegram outbound.** The `app/telegram` package remains
+   a Phase 1 in-process command-bus skeleton.
+3. **No real network.** No exchange SDK, no HTTP / WebSocket
+   client, no LLM client imported anywhere under `app/learning/`
+   or `app/exports/`.
+4. **No API key in process memory.** No `api_key` / `api_secret`
+   parameter on any Phase 8.5 surface; no `os.environ` /
+   `os.getenv` / bare `getenv` call under `app/learning/` or
+   `app/exports/` (AST scan).
+5. **No write surface.** No new `create_order`, `cancel_order`,
+   `set_leverage`, `set_margin_mode` method. The four
+   `SafeModeViolation` refusals on `ExchangeClientBase` are
+   unchanged.
+6. **No LLM in trade decisions.** `llm_prompt_version` is `"n/a"`
+   by default; the LLM prompt label only *records* a version for
+   Reflection (Issue #10). Spec rule 7 still bans LLM
+   participation in trading actions.
+7. **No Issue #9 work.** Execution FSM driver / Reconciliation
+   are deferred.
+8. **No Issue #10 work.** LLM, Telegram outbound, Replay diff
+   reports, Reflection are deferred.
+
+#### Tests
+
+```
+$ python3.12 -m pytest tests/unit
+933 passed in 7.40s
+```
+
+**+150 new Phase 8.5 tests** on top of the 783 retained from
+Phase 1-8 = **933 total**:
+
+| File | Tests | What it covers |
+| --- | --- | --- |
+| `test_opportunity_identity.py` | 8 | factory ids, prefix contract, frozen contract, payload round-trip, extra-field rejection, url-safe characters |
+| `test_signal_snapshot_payload.py` | 5 | Spec §11.2 field set, enum-as-string contract, JSON-safe, round-trip preserves fields, defaults round-trip |
+| `test_virtual_trade_plan.py` | 8 | required fields present, optional `None`s round-trip, JSON-safe, leverage/risk-budget validators, frozen contract |
+| `test_config_versions.py` | 7 | six Issue-mandated fields, `llm_prompt_version='n/a'` default, JSON-safe, round-trip, frozen, legacy-payload back-fill |
+| `test_learning_ready_context.py` | 9 | the 11 event types pin, `LEARNING_READY_KEY` constant, mutation-free merge, full-context payload, empty-context emits empty dict |
+| `test_risk_rejected_payload.py` | 6 | enum-as-string serialisation, RISK_REJECTED carries learning_ready when supplied, legacy request leaves payload byte-compatible, RISK_APPROVED with explicit `opportunity_id`, explicit-context override beats synthesised |
+| `test_event_repository_learning_ready.py` | 3 | round-trip of `learning_ready` block via `EventRepository.append_event` + `list_events`, all 11 event types preserved on disk, JSON-serialisable on disk |
+| `test_export_redaction.py` | 12 | top-level keys, nested keys, mutation-free input, value-pattern matching (Telegram, OpenAI), filesystem path stripping, short strings pass through, forbidden-substring gate, sensitive-key contract |
+| `test_export_service.py` | 22 | time range helpers (today/24h/7d/range/parse_iso_date), zip materialised, manifest + summary + 7 jsonl shards, redaction end-to-end, type filters (rejections/capital/state/learning), unknown filter rejected, empty window still produces zip, size cap refused, safety_summary on manifest, output filename layout |
+| `test_export_cli.py` | 8 | `--range 24h` / `7d` / `today`, `--type rejections`, `--range range --start --end`, missing start/end error, oversized cap error, missing events.db error |
+| `test_phase8_5_boundary.py` | 9 | Phase 1 lock unchanged, write surfaces still refuse `SafeModeViolation`, BinanceClient still refuses credentials, learning/exports packages do NOT subclass `ExchangeClientBase`, no write-surface methods on learning/exports, redaction substring contract, default zip cap finite, Telegram contract doc present |
+| `test_phase8_5_no_network.py` | ~52 | per-file AST scan of every `.py` under `app/learning/` + `app/exports/`: no forbidden import (ccxt, binance, aiohttp, websockets, requests, httpx, openai, anthropic, deepseek, telegram libraries), no write-surface method definition, no `api_key` / `api_secret` parameter, no concrete `BINANCE_API_KEY=` / `TELEGRAM_BOT_TOKEN=` literal in source, no `os.environ.get` / `os.getenv` / bare `getenv()` call, no `send_message` / `send_document` / `send_photo` reference |
+
+`tests/unit/test_main_entrypoint.py` was extended (one assertion
+flip) to expect the Phase 8.5 banner string.
+
+#### Live trading risk
+
+**None.**
+
+- `requirements.txt` and `pyproject.toml` contain no exchange SDK,
+  no HTTP client, no LLM client, no Telegram bot library.
+- No source file under `app/learning/` or `app/exports/` imports
+  `ccxt`, `binance`, `aiohttp`, `websockets`, `requests`, `httpx`,
+  `openai`, `anthropic`, `deepseek`, or any Telegram library
+  (asserted by `tests/unit/test_phase8_5_no_network.py`).
+- No source file under `app/learning/` or `app/exports/` defines
+  `create_order` / `cancel_order` / `set_leverage` /
+  `set_margin_mode` (asserted by the same test module).
+- No source file under `app/learning/` or `app/exports/` reads
+  `os.environ` / `os.getenv` / a bare `getenv()` (AST scan).
+- The Phase 1 safety lock, Phase 3 read-only invariant, Phase 4
+  Market Data Buffer boundary, Phase 5 Regime / Universe /
+  Liquidity contract, Phase 6 Scanner / Confirmation /
+  Manipulation contract, Phase 7 State Machine + Risk Engine
+  contract, and Phase 8 Capital Flow Engine + External Capital
+  Flow vocabulary are all unchanged. The boot banner still shows
+  `mode=paper live_trading=False right_tail=False llm=False
+  exchange_live_orders=False`.
+- The export service is **read-only against `events.db`**. It
+  never opens a socket, never calls a write surface, never mutates
+  any other database, never writes outside the configured output
+  directory.
+- The CLI refuses to operate when `trading_mode != paper`.
+
+#### Real exchange order risk
+
+**None.** Phase 8.5 adds no new `create_order` / `cancel_order` /
+`set_leverage` / `set_margin_mode` call site. The four
+`SafeModeViolation` refusals on `ExchangeClientBase` continue to
+apply.
+
+---
+
+## [Unreleased - Phase 8 review fix - already in main via PR #19]
+
 ### Phase 8 - Issue #8 review fix: External Capital Flow semantics
 
 Issue #8 review pointed out that the Phase-8 PR conflated several

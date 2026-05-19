@@ -1,68 +1,16 @@
-"""AMA-RT entrypoint (Phase 7 - State Machine + Risk Engine).
+"""AMA-RT entrypoint (Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract).
 
 Run with:
 
     python -m app.main
 
-This entrypoint DOES NOT trade. It only:
-    1. Loads settings (with the Phase 1 safety lock applied + re-asserted).
-    2. Opens & migrates the five Phase 2 SQLite databases:
-       events.db, trades.db, positions.db, capital.db, incidents.db.
-    3. Wires the Phase 1 skeletons (RiskEngine, ExecutionFSM,
-       TelegramCommandCenter, MetricsRegistry, HealthChecker).
-    4. Instantiates the Phase 3 read-only Exchange Gateway as a
-       `MockExchangeClient` (no network, no SDK), calls its
-       `assert_read_only()` boot check, exercises one of each read-only
-       method and confirms the four write surfaces refuse with
-       `SafeModeViolation`. Emits an `EXCHANGE_CONNECTED` event.
-    5. Constructs a Phase 4 :class:`MarketDataBuffer`, drives it from
-       the Mock client (deterministic, no network), produces one
-       :class:`MarketSnapshot` per tracked symbol, and registers a
-       `market_data_buffer` health probe. The buffer is then taken
-       through one degraded transition (WebSocket disconnect) and one
-       recovery transition so the audit trail in `events.db` shows the
-       full lifecycle.
-    6. Phase 5: drives the Regime Engine, the Universe Filter and the
-       Liquidity Filter against the same deterministic mock + buffer.
-       One ``REGIME_UPDATED`` event is written. One
-       ``UNIVERSE_FILTERED`` event is written per symbol. Two
-       ``LIQUIDITY_CHECKED`` events are written per symbol.
-    7. Phase 6 (this PR): drives the Pre-Anomaly Scanner, the Anomaly
-       Scanner, the Real Trade Confirmation classifier, and the
-       Manipulation Detector against the same buffer. One
-       ``PRE_ANOMALY_DETECTED``, one ``ANOMALY_DETECTED``, one
-       ``TRADE_CONFIRMED`` and one ``MANIPULATION_DETECTED`` event
-       are written per symbol. The Risk Engine is then asked to
-       adjudicate one paper-mode self-check that *also* feeds it the
-       observed manipulation level and trade-confirmation level so
-       the Phase 6 hard rules (M3 -> reject all, M2 -> reject attack,
-       T0 / T1 -> reject attack) are exercised in-process. The
-       paper-mode boot drill uses ``attack_intent=False`` so a
-       conservative scanner reading does NOT block the bootstrap
-       approval.
-    8. Writes one self-check audit trail:
-         RISK_APPROVED         (paper-only skeleton check)
-         STATE_TRANSITION      (IDLE -> IDLE)
-         TELEGRAM_COMMAND_RECEIVED (/status)
-         CAPITAL_DEPOSIT       (paper-mode boot deposit, mirrored into
-                                capital.db's capital_events_index)
-         EXCHANGE_CONNECTED    (Phase 3 boot self-check)
-         MARKET_SNAPSHOT       (Phase 4 boot self-check, one per symbol)
-         DATA_UNRELIABLE       (Phase 4 boot self-check, one disconnect)
-         REGIME_UPDATED        (Phase 5 boot self-check)
-         UNIVERSE_FILTERED     (Phase 5 boot self-check, one per symbol)
-         LIQUIDITY_CHECKED     (Phase 5 boot self-check, two per symbol)
-         PRE_ANOMALY_DETECTED  (Phase 6 boot self-check, one per symbol)
-         ANOMALY_DETECTED      (Phase 6 boot self-check, one per symbol)
-         TRADE_CONFIRMED       (Phase 6 boot self-check, one per symbol)
-         MANIPULATION_DETECTED (Phase 6 boot self-check, one per symbol)
-         EXCHANGE_DISCONNECTED (Phase 3 graceful shutdown)
-       and prints a one-line status banner before exiting 0.
-
-It will refuse to run if the safety flags ever evaluate to a
-non-Phase-1 configuration, or if the Phase 3 read-only invariant has
-drifted. Phase 6 does NOT loosen any Phase 1 / Phase 3 / Phase 4 /
-Phase 5 safety guarantee.
+This entrypoint DOES NOT trade. Phase 8.5 ships passive data
+plumbing only - the Phase 1-8 boot drill is preserved unchanged.
+The banner now advertises Phase 8.5 / v1.4.0a8.5 so operators see
+which contract is in force; no behavioural change to the boot
+path itself. See ``docs/PHASE_8_5_TELEGRAM_EXPORT_CONTRACT.md`` and
+``app/learning/`` / ``app/exports/`` for the new surfaces. The
+five Phase 1 safety flags remain locked.
 """
 
 from __future__ import annotations
@@ -503,7 +451,7 @@ def run() -> int:
         state_machine.transition_to(
             TradeState.OBSERVE,
             trigger=TradeStateTrigger.SIGNAL,
-            reasons=("phase7_boot",),
+            reasons=("phase8_5_boot",),
         )
         decision = risk.evaluate(
             RiskRequest(
@@ -547,7 +495,7 @@ def run() -> int:
                 payload={
                     "from": fsm.state.value,
                     "to": ExecutionState.IDLE.value,
-                    "reason": "phase7_boot",
+                    "reason": "phase8_5_boot",
                 },
             )
         )
@@ -564,7 +512,7 @@ def run() -> int:
         repo.record_capital_deposit(
             amount=0.0,
             source_module="bootstrap",
-            note="phase7_boot_paper_marker",
+            note="phase8_5_boot_paper_marker",
         )
 
         overall, _ = health.evaluate()
@@ -637,7 +585,7 @@ def run() -> int:
         # Stop the exchange cleanly so DATA_UNRELIABLE is emitted on
         # shutdown - that lets replay-based tests confirm the lifecycle
         # closed properly.
-        exchange.stop(reason="phase7_shutdown")
+        exchange.stop(reason="phase8_5_shutdown")
     finally:
         dbs.close()
     return 0

@@ -74,6 +74,17 @@ from app.core.enums import (
 )
 from app.core.events import Event, EventType
 from app.database.repositories import EventRepository
+from app.learning.context import (
+    LearningReadyContext,
+    attach_learning_ready,
+)
+from app.learning.identity import OpportunityIdentity
+from app.learning.risk_payload import (
+    RiskRejectedLearningPayload,
+    reject_reasons_as_strings,
+)
+from app.learning.versions import ConfigVersions
+from app.learning.virtual_trade import VirtualTradePlan
 from app.liquidity.models import ExitPlan, LiquidityDecision
 from app.regime.models import RegimeSnapshot
 from app.risk.account_tier import (
@@ -175,6 +186,16 @@ class RiskRequest:
     # from the supplied ``LiquidityDecision`` / ``ExitPlan``.
     throughput_safety_factor: float | None = None
     max_exit_seconds: float | None = None
+    # Phase 8.5 hooks (Issue #8.5).
+    # Optional learning-ready enrichment - all attach to the
+    # ``RISK_APPROVED`` / ``RISK_REJECTED`` audit payload under a
+    # new ``learning_ready`` sub-block. The legacy audit fields are
+    # preserved unchanged.
+    opportunity: OpportunityIdentity | None = None
+    opportunity_id: str | None = None
+    virtual_trade_plan: VirtualTradePlan | None = None
+    config_versions: ConfigVersions | None = None
+    learning_context: LearningReadyContext | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -471,12 +492,7 @@ class RiskEngine:
             EventType.RISK_APPROVED if decision.approved else EventType.RISK_REJECTED
         )
         gate = decision.no_trade_gate_decision
-        self._event_repo.append(
-            Event(
-                event_type=ev_type,
-                source_module="risk_engine",
-                symbol=decision.request.symbol,
-                payload={
+        base_payload: dict[str, Any] = {
                     "action": decision.request.action,
                     "source_module": decision.request.source_module,
                     "reasons": list(decision.reasons),
@@ -532,8 +548,126 @@ class RiskEngine:
                         else self._throughput_safety_factor
                     ),
                     "max_exit_seconds": decision.request.max_exit_seconds,
-                },
+        }
+
+        # Phase 8.5 - attach the learning-ready block when the caller
+        # supplied one. The merge is mutation-free: the existing keys
+        # above are preserved verbatim, and a new ``learning_ready``
+        # sub-key is appended. Issue contract: every RISK_REJECTED
+        # event must be ABLE to carry opportunity_id, reject_reasons,
+        # account_life_tier, regime, universe_eligible, liquidity_state,
+        # trade_confirmation_level, manipulation_level,
+        # capital_state_version, risk_config_version. We populate as
+        # many fields as we can derive from the request, then merge
+        # the caller-supplied ``learning_context`` on top so explicit
+        # values always win.
+        learning_ctx = self._build_learning_context(decision)
+        full_payload = attach_learning_ready(base_payload, learning_ctx)
+
+        self._event_repo.append(
+            Event(
+                event_type=ev_type,
+                source_module="risk_engine",
+                symbol=decision.request.symbol,
+                payload=full_payload,
             )
+        )
+
+    # ------------------------------------------------------------------
+    def _build_learning_context(
+        self, decision: RiskDecision
+    ) -> LearningReadyContext | None:
+        """Compose the Phase 8.5 LearningReadyContext for an audit event.
+
+        - If the request supplies an explicit ``learning_context``,
+          we honour it (caller has already populated risk_decision /
+          opportunity / virtual_trade_plan / config_versions).
+        - Otherwise we synthesise a minimal context from the
+          request: opportunity (if opportunity / opportunity_id is
+          set), risk_decision, virtual_trade_plan, config_versions.
+          A request that supplies none of these returns ``None`` so
+          the legacy payload shape is preserved bit-for-bit.
+        """
+        request = decision.request
+        ctx = request.learning_context
+
+        # Build the typed RiskRejectedLearningPayload from the request +
+        # the resolved decision.
+        opp_id = request.opportunity_id
+        if opp_id is None and request.opportunity is not None:
+            opp_id = request.opportunity.opportunity_id
+
+        risk_decision_payload = RiskRejectedLearningPayload(
+            opportunity_id=opp_id,
+            reject_reasons=reject_reasons_as_strings(decision.reasons),
+            account_life_tier=decision.account_tier,
+            regime=(
+                request.regime_snapshot.market_regime
+                if request.regime_snapshot is not None
+                else None
+            ),
+            universe_eligible=(
+                request.universe_decision.eligible
+                if request.universe_decision is not None
+                else None
+            ),
+            liquidity_state=_summarise_liquidity_state(request.liquidity_decision),
+            trade_confirmation_level=request.trade_confirmation_level,
+            manipulation_level=request.manipulation_level,
+            capital_state_version=(
+                request.config_versions.capital_state_version
+                if request.config_versions is not None
+                else (ctx.config_versions.capital_state_version
+                      if ctx is not None and ctx.config_versions is not None
+                      else None)
+            ),
+            risk_config_version=(
+                request.config_versions.risk_config_version
+                if request.config_versions is not None
+                else (ctx.config_versions.risk_config_version
+                      if ctx is not None and ctx.config_versions is not None
+                      else None)
+            ),
+            daily_loss_breaker_state=self._daily_loss_breaker.state.value,
+            consecutive_loss_breaker_state=self._consecutive_loss_breaker.state.value,
+            is_new_open=request.is_new_open,
+            attack_intent=request.effective_attack_intent,
+        )
+
+        if ctx is None:
+            # No explicit context: emit one only when at least one of
+            # the Phase 8.5 fields was set, so legacy callers keep
+            # producing payloads without ``learning_ready``.
+            has_phase_8_5_signal = (
+                request.opportunity is not None
+                or request.opportunity_id is not None
+                or request.virtual_trade_plan is not None
+                or request.config_versions is not None
+            )
+            if not has_phase_8_5_signal:
+                return None
+            return LearningReadyContext(
+                opportunity=request.opportunity,
+                virtual_trade_plan=request.virtual_trade_plan,
+                config_versions=request.config_versions,
+                risk_decision=risk_decision_payload,
+                source_phase="risk_engine",
+            )
+
+        # Caller supplied an explicit context. Merge our derived
+        # risk_decision in if the caller did not set one. We never
+        # overwrite a caller-supplied risk_decision so the audit trail
+        # honours the operator's intent.
+        return LearningReadyContext(
+            opportunity=ctx.opportunity or request.opportunity,
+            signal_snapshot=ctx.signal_snapshot,
+            virtual_trade_plan=(
+                ctx.virtual_trade_plan or request.virtual_trade_plan
+            ),
+            config_versions=ctx.config_versions or request.config_versions,
+            risk_decision=ctx.risk_decision or risk_decision_payload,
+            source_phase=ctx.source_phase or "risk_engine",
+            extra=dict(ctx.extra),
         )
 
 
@@ -548,3 +682,25 @@ __all__ = [
     "DailyLossCircuitBreaker",
     "CircuitBreakerState",
 ]
+
+
+def _summarise_liquidity_state(decision: LiquidityDecision | None) -> str | None:
+    """Render a short string label for the Phase 8.5 ``liquidity_state``
+    field. Returns ``None`` when no LiquidityDecision was supplied so
+    the audit payload distinguishes "passed" from "unknown".
+
+    Phase 8.5 stays deliberately conservative: we do NOT expose the
+    Phase 5 reject-reason enum values verbatim because Issue #10
+    Reflection wants a single short label per decision; the full
+    reason list already lives on the LIQUIDITY_CHECKED event payload.
+    """
+    if decision is None:
+        return None
+    if decision.passed:
+        return "passed"
+    if decision.reject_reasons:
+        # Use the FIRST reject reason as the canonical label so the
+        # field stays short and stable for grouping queries.
+        first = decision.reject_reasons[0]
+        return getattr(first, "value", str(first))
+    return "rejected"
