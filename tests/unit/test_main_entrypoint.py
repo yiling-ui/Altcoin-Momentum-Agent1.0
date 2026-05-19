@@ -52,8 +52,8 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 7 entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 7 - State Machine Risk Engine" in captured
+    # Phase 8.5 entrypoint string. The Phase 1 safety lock is still asserted.
+    assert "Phase 8.5 - Learning-Ready Data Contract + Test Data Export Contract" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured
