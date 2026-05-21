@@ -70,12 +70,12 @@ Phase 11C does NOT produce a trading edge. Phase 11C produces
 
 | Invariant                                | How it is enforced                                                                  |
 | ---------------------------------------- | ----------------------------------------------------------------------------------- |
-| `mode = paper`                           | `app/config/settings._apply_phase1_safety_lock` + `assert_paper_cloud_safety`       |
+| `mode=paper`                             | `app/config/settings._apply_phase1_safety_lock` + `assert_paper_cloud_safety`       |
 | `live_trading = False`                   | Phase 1 safety lock + Phase 11B safety assertion                                    |
 | `right_tail = False`                     | Phase 1 safety lock                                                                 |
 | `llm = False`                            | Phase 1 safety lock                                                                 |
 | `exchange_live_orders = False`           | Phase 1 safety lock                                                                 |
-| `telegram_outbound_enabled = False`      | `app/config/defaults.yaml`; `Settings.telegram_outbound_enabled`                    |
+| `telegram_outbound_enabled = False`      | `TelegramConfig.outbound_enabled` schema validator refuses `True`; `Settings.telegram_outbound_enabled` reads that field, NOT `telegram.enabled`, so flipping the in-process command-bus on never enables real HTTP outbound. |
 | `binance_private_api_enabled = False`    | `BinancePublicClient` rejects api_key / api_secret with `SafeModeViolation`         |
 | No signed endpoint                       | `assert_public_endpoint_allowed` + `FORBIDDEN_PRIVATE_ENDPOINTS` + AST audit        |
 | No order endpoint                        | `assert_public_endpoint_allowed`                                                    |
@@ -316,7 +316,7 @@ correctly from real-data events.
 
 | # | Criterion                                                                          | Test                                                       |
 | - | ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-|  1 | pytest全部通过                                                                     | `pytest` (2066 tests pass)                                |
+|  1 | pytest全部通过                                                                     | `pytest` (2071 tests pass)                                |
 |  2 | runner启动无需API key                                                              | `test_public_market_runner_does_not_require_credentials`  |
 |  3 | 1h public market read-only paper无异常                                             | `pytest tests/unit/test_phase11c_runner.py`               |
 |  4 | 真实MARKET_SNAPSHOT写入EventRepository                                             | `test_public_market_event_repository_roundtrip`           |

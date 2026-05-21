@@ -42,8 +42,46 @@ class TelegramConfirmConfig(BaseModel):
 
 
 class TelegramConfig(BaseModel):
+    """Phase 1 in-process command-bus + Phase 10D outbound transport.
+
+    Phase 11C separates two concepts that previously rode on a single
+    ``enabled`` flag:
+
+      - ``enabled`` controls whether the in-process Telegram command
+        bus / FakeTelegramClient is wired into the boot drill. It can
+        flip True without ever opening a real socket.
+      - ``outbound_enabled`` is the **real Telegram HTTP outbound**
+        gate. Phase 11C requires it to remain False *independently* of
+        ``enabled`` so that even if a future operator flips
+        ``telegram.enabled=True`` to use the in-process command bus,
+        no real outbound HTTP can ever land. The schema validator
+        below refuses any deployment that loads
+        ``outbound_enabled=True``.
+    """
+
     enabled: bool = False
-    command_confirm_required: TelegramConfirmConfig = Field(default_factory=TelegramConfirmConfig)
+    outbound_enabled: bool = False
+    command_confirm_required: TelegramConfirmConfig = Field(
+        default_factory=TelegramConfirmConfig
+    )
+
+    @field_validator("outbound_enabled")
+    @classmethod
+    def _outbound_must_remain_false(cls, value: bool) -> bool:
+        # Phase 11C hard rule: real Telegram outbound is forbidden
+        # regardless of ``enabled``. Flipping this requires a Spec
+        # §41 Go/No-Go landing in a separate PR that also lifts the
+        # Phase 1 safety lock; until then the field is locked False
+        # at the schema layer.
+        if value:
+            raise ValueError(
+                "telegram.outbound_enabled must remain False; real "
+                "Telegram outbound is forbidden by Phase 11C and "
+                "every prior phase. The Phase 1 safety lock + Spec "
+                "§41 Go/No-Go must land in a separate PR before this "
+                "field can flip True."
+            )
+        return value
 
 
 class LLMConfig(BaseModel):

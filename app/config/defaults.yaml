@@ -30,7 +30,12 @@ exchange:
 
 telegram:
   # Phase 1 ships an in-process command center skeleton only.
+  # ``enabled`` controls whether the in-process command-bus is
+  # wired into the boot drill (it never opens a real socket).
+  # ``outbound_enabled`` is the SEPARATE real-HTTP gate; Phase 11C
+  # locks it False at the schema layer regardless of ``enabled``.
   enabled: false
+  outbound_enabled: false
   command_confirm_required:
     resume: true
     change_config: true
