@@ -241,7 +241,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Phase 11C.1A: re-enable the original 'fetch every detail "
             "endpoint for every symbol every loop' behaviour. OFF by "
             "default because it triggered HTTP 429/418 in the first "
-            "24h test. Use only with --dry-run."
+            "24h test. Hard-gated to --dry-run only; the runner will "
+            "refuse with rc=2 if combined with a real-network run."
         ),
     )
     return p
@@ -392,6 +393,25 @@ def _resolve_symbols(
 def main(argv: list[str] | None = None) -> int:
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
+
+    # Phase 11C.1A safety gate.
+    #
+    # ``--legacy-detail-per-loop`` re-enables the original "fetch every
+    # detail endpoint for every symbol every loop" behaviour. That
+    # pattern triggered Binance HTTP 429 / 418 in the first 24h test
+    # against ``fapi.binance.com``. The flag is therefore reserved for
+    # deterministic / dry-run smoke tests only, and the runner refuses
+    # to start when it is combined with a real-network run.
+    #
+    # The help text alone is not load-bearing; this hard gate is.
+    if args.legacy_detail_per_loop and not args.dry_run:
+        print(
+            "[AMA-RT][phase11c] "
+            "--legacy-detail-per-loop is allowed only with --dry-run "
+            "in Phase 11C.1A",
+            file=sys.stderr,
+        )
+        return 2
 
     settings = get_settings()
     market_data_cfg = settings.market_data
