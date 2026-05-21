@@ -55,5 +55,5 @@ Phase 11C does NOT implement:
   - Phase 12. Passing Phase 11C does NOT authorise Phase 12.
 """
 
-__version__ = "1.4.0a11c"
-__phase__ = "Phase 11C - Real Binance Public Market Data Read-Only Paper"
+__version__ = "1.4.0a11c.1b"
+__phase__ = "Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar"

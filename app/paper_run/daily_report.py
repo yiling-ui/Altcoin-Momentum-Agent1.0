@@ -109,6 +109,22 @@ class DailyReportSnapshot:
     rate_limit_backoff_ended_count: int = 0
     ingestion_errors: int = 0
     rate_limit_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1B - WebSocket-first all-market radar metrics.
+    ws_messages_received: int = 0
+    ws_messages_received_by_stream: dict[str, int] = field(default_factory=dict)
+    ws_reconnect_count: int = 0
+    ws_staleness_ms_max: int = 0
+    ws_stale_count: int = 0
+    ws_connect_count: int = 0
+    ws_disconnect_count: int = 0
+    ws_is_stale: bool = False
+    radar_candidates_seen: int = 0
+    candidate_pool_size_max: int = 0
+    pre_anomaly_candidates: int = 0
+    liquidation_events_seen: int = 0
+    radar_score_top_symbols: list[dict[str, Any]] = field(default_factory=list)
+    ws_metrics: dict[str, Any] = field(default_factory=dict)
+    candidate_pool_metrics: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -196,6 +212,24 @@ class DailyReportSnapshot:
             ),
             "ingestion_errors": int(self.ingestion_errors),
             "rate_limit_metrics": dict(self.rate_limit_metrics),
+            # Phase 11C.1B WS-first radar.
+            "ws_messages_received": int(self.ws_messages_received),
+            "ws_messages_received_by_stream": dict(
+                self.ws_messages_received_by_stream
+            ),
+            "ws_reconnect_count": int(self.ws_reconnect_count),
+            "ws_staleness_ms_max": int(self.ws_staleness_ms_max),
+            "ws_stale_count": int(self.ws_stale_count),
+            "ws_connect_count": int(self.ws_connect_count),
+            "ws_disconnect_count": int(self.ws_disconnect_count),
+            "ws_is_stale": bool(self.ws_is_stale),
+            "radar_candidates_seen": int(self.radar_candidates_seen),
+            "candidate_pool_size_max": int(self.candidate_pool_size_max),
+            "pre_anomaly_candidates": int(self.pre_anomaly_candidates),
+            "liquidation_events_seen": int(self.liquidation_events_seen),
+            "radar_score_top_symbols": list(self.radar_score_top_symbols),
+            "ws_metrics": dict(self.ws_metrics),
+            "candidate_pool_metrics": dict(self.candidate_pool_metrics),
         }
 
 
@@ -238,6 +272,8 @@ class DailyReportBuilder:
         degraded_notes: Iterable[str] = (),
         rate_limit_metrics: Mapping[str, Any] | None = None,
         ingestion_errors: int | None = None,
+        ws_metrics: Mapping[str, Any] | None = None,
+        candidate_pool_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -281,6 +317,8 @@ class DailyReportBuilder:
             degraded_notes=tuple(degraded_notes),
             rate_limit_metrics=dict(rate_limit_metrics or {}),
             ingestion_errors=ingestion_errors,
+            ws_metrics=dict(ws_metrics or {}),
+            candidate_pool_metrics=dict(candidate_pool_metrics or {}),
         )
 
         if write_to_disk:
@@ -304,6 +342,8 @@ class DailyReportBuilder:
         degraded_notes: tuple[str, ...],
         rate_limit_metrics: Mapping[str, Any] | None = None,
         ingestion_errors: int | None = None,
+        ws_metrics: Mapping[str, Any] | None = None,
+        candidate_pool_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -540,6 +580,75 @@ class DailyReportBuilder:
             ),
             ingestion_errors=int(ingestion_errors_value),
             rate_limit_metrics=dict(gov_metrics),
+            # Phase 11C.1B WS-first radar metrics.
+            ws_messages_received=int(
+                (ws_metrics or {}).get("ws_messages_received", 0) or 0
+            ),
+            ws_messages_received_by_stream=dict(
+                (ws_metrics or {}).get(
+                    "ws_messages_received_by_stream", {}
+                )
+                or {}
+            ),
+            ws_reconnect_count=int(
+                max(
+                    int((ws_metrics or {}).get("ws_reconnect_count", 0) or 0),
+                    int(type_counts.get(EventType.PUBLIC_WS_DISCONNECTED.value, 0)),
+                )
+            ),
+            ws_staleness_ms_max=int(
+                (ws_metrics or {}).get("ws_staleness_ms_max", 0) or 0
+            ),
+            ws_stale_count=int(
+                max(
+                    int((ws_metrics or {}).get("ws_stale_count", 0) or 0),
+                    int(type_counts.get(EventType.PUBLIC_WS_STALE.value, 0)),
+                )
+            ),
+            ws_connect_count=int(
+                max(
+                    int((ws_metrics or {}).get("ws_connect_count", 0) or 0),
+                    int(type_counts.get(EventType.PUBLIC_WS_CONNECTED.value, 0)),
+                )
+            ),
+            ws_disconnect_count=int(
+                (ws_metrics or {}).get("ws_disconnect_count", 0) or 0
+            ),
+            ws_is_stale=bool(
+                (ws_metrics or {}).get("ws_is_stale", False)
+            ),
+            radar_candidates_seen=int(
+                (candidate_pool_metrics or {}).get(
+                    "radar_candidates_seen", 0
+                )
+                or 0
+            ),
+            candidate_pool_size_max=int(
+                (candidate_pool_metrics or {}).get(
+                    "candidate_pool_size_max", 0
+                )
+                or 0
+            ),
+            pre_anomaly_candidates=int(
+                (candidate_pool_metrics or {}).get(
+                    "candidate_pool_promoted", 0
+                )
+                or 0
+            ),
+            liquidation_events_seen=int(
+                (candidate_pool_metrics or {}).get(
+                    "liquidation_events_seen", 0
+                )
+                or 0
+            ),
+            radar_score_top_symbols=list(
+                (candidate_pool_metrics or {}).get(
+                    "candidate_pool_top_symbols", []
+                )
+                or []
+            ),
+            ws_metrics=dict(ws_metrics or {}),
+            candidate_pool_metrics=dict(candidate_pool_metrics or {}),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -610,6 +719,44 @@ class DailyReportBuilder:
             f"**{snapshot.ingestion_errors}**\n"
         )
 
+        ws_top_lines = "\n".join(
+            f"- `{row.get('symbol', '?')}` score="
+            f"{float(row.get('radar_score', 0.0)):.2f} "
+            f"state={row.get('state', '?')}"
+            for row in (snapshot.radar_score_top_symbols or [])[:10]
+        ) or "- (no radar candidates in this window)"
+
+        ws_messages_by_stream_lines = "\n".join(
+            f"- `{stream}` x {count}"
+            for stream, count in sorted(
+                snapshot.ws_messages_received_by_stream.items()
+            )
+        ) or "- (no WS messages observed)"
+
+        ws_block = (
+            f"- WS messages received: "
+            f"**{snapshot.ws_messages_received}**\n"
+            f"- WS reconnect count: "
+            f"**{snapshot.ws_reconnect_count}**\n"
+            f"- WS staleness (ms) max: "
+            f"**{snapshot.ws_staleness_ms_max}**\n"
+            f"- WS stale event count: "
+            f"**{snapshot.ws_stale_count}**\n"
+            f"- WS connect count: "
+            f"**{snapshot.ws_connect_count}**\n"
+            f"- WS disconnect count: "
+            f"**{snapshot.ws_disconnect_count}**\n"
+            f"- WS currently stale: **{snapshot.ws_is_stale}**\n"
+            f"- Radar candidates seen: "
+            f"**{snapshot.radar_candidates_seen}**\n"
+            f"- Candidate pool size max: "
+            f"**{snapshot.candidate_pool_size_max}**\n"
+            f"- Pre-anomaly candidates promoted: "
+            f"**{snapshot.pre_anomaly_candidates}**\n"
+            f"- Liquidation events seen: "
+            f"**{snapshot.liquidation_events_seen}**\n"
+        )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -659,6 +806,9 @@ class DailyReportBuilder:
             f"degraded={snapshot.llm_degraded_count} "
             f"schema_rejected={snapshot.llm_schema_rejected_count}\n\n"
             f"## Phase 11C.1A rate-limit governor\n{rate_limit_block}\n"
+            f"## Phase 11C.1B WebSocket all-market radar\n{ws_block}\n"
+            f"### WS messages by stream\n{ws_messages_by_stream_lines}\n\n"
+            f"### Radar score top symbols\n{ws_top_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

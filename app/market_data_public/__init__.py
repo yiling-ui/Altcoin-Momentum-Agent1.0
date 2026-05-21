@@ -38,6 +38,16 @@ Boundary
   - The Phase 1 safety lock remains in force.
 """
 
+from app.market_data_public.candidate_pool import (
+    CANDIDATE_SOURCE_PHASE,
+    CANDIDATE_STATE_ACTIVE,
+    CANDIDATE_STATE_EXPIRED,
+    CANDIDATE_STATE_WATCHING,
+    Candidate,
+    CandidatePool,
+    CandidatePoolConfig,
+    offer_snapshots,
+)
 from app.market_data_public.event_chain import (
     PaperEventChainDriver,
     PaperEventChainResult,
@@ -46,10 +56,36 @@ from app.market_data_public.ingest import (
     PublicMarketIngestor,
     PublicSymbolSnapshot,
 )
+from app.market_data_public.radar import (
+    AllMarketRadarBuffer,
+    AllMarketRadarSnapshot,
+    RadarScoreConfig,
+    RadarScoreResult,
+    pre_anomaly_score_light,
+)
+from app.market_data_public.ws_radar_chain import (
+    WSRadarChainDriver,
+    WSRadarChainResult,
+)
 
 __all__ = [
+    "AllMarketRadarBuffer",
+    "AllMarketRadarSnapshot",
+    "CANDIDATE_SOURCE_PHASE",
+    "CANDIDATE_STATE_ACTIVE",
+    "CANDIDATE_STATE_EXPIRED",
+    "CANDIDATE_STATE_WATCHING",
+    "Candidate",
+    "CandidatePool",
+    "CandidatePoolConfig",
     "PaperEventChainDriver",
     "PaperEventChainResult",
     "PublicMarketIngestor",
     "PublicSymbolSnapshot",
+    "RadarScoreConfig",
+    "RadarScoreResult",
+    "WSRadarChainDriver",
+    "WSRadarChainResult",
+    "offer_snapshots",
+    "pre_anomaly_score_light",
 ]

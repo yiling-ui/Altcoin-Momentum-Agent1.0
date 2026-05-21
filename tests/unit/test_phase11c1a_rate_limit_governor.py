@@ -590,6 +590,13 @@ def test_rest_not_called_for_all_symbols_every_loop(
     that across the loops it ran no per-symbol detail call landed
     (depth / aggTrades / openInterest / premiumIndex / bookTicker)
     while ``rest_layering_enabled=True`` (the default).
+
+    Phase 11C.1B note: PR-B introduces ``--ws-first`` (default ON)
+    which - under ``--dry-run`` - admits synthetic candidates into
+    the candidate pool and emits PRE_ANOMALY_DETECTED /
+    ANOMALY_DETECTED / STATE_TRANSITION events. We pass
+    ``--ws-disabled`` here so this PR-A test exercises the
+    bootstrap-only REST path verbatim.
     """
     monkeypatch.setenv("AMA_DATA_DIR", str(tmp_path))
     for name in (
@@ -621,6 +628,7 @@ def test_rest_not_called_for_all_symbols_every_loop(
             "--symbol-limit",
             "3",
             "--dry-run",
+            "--ws-disabled",
             "--poll-interval-seconds",
             "0.05",
             "--no-banner",
@@ -655,6 +663,9 @@ def test_rest_not_called_for_all_symbols_every_loop(
     # No 429 / 418 in dry-run.
     assert counts.get("RATE_LIMIT_429", 0) == 0
     assert counts.get("RATE_LIMIT_418", 0) == 0
+    # Phase 11C.1B - WS surface must NOT fire when --ws-disabled.
+    assert counts.get("PUBLIC_WS_CONNECTED", 0) == 0
+    assert counts.get("PUBLIC_WS_STALE", 0) == 0
 
 
 def test_legacy_detail_per_loop_flag_re_enables_old_behaviour(

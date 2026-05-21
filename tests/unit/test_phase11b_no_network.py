@@ -382,6 +382,15 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "RATE_LIMIT_BACKOFF_STARTED",
         "RATE_LIMIT_BACKOFF_ENDED",
         "RATE_LIMIT_PROTECTION_ENTERED",
+        # Phase 11C.1B - public WebSocket lifecycle read-only
+        # references in the daily report aggregator. The aggregator
+        # cross-checks event-log counts against the WS client's
+        # metrics_payload; emission lives in
+        # app/exchanges/binance_public_ws.py which is NOT a
+        # paper_run file.
+        "PUBLIC_WS_CONNECTED",
+        "PUBLIC_WS_DISCONNECTED",
+        "PUBLIC_WS_STALE",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (
