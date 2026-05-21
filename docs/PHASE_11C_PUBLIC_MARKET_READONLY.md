@@ -1,12 +1,243 @@
 # AMA-RT Phase 11C - Real Binance Public Market Data Read-Only Paper
 
 **Status:** in development - the original Phase 11C real-data
-acceptance is paused; **Phase 11C.1A** (PR-A) is the active
-follow-up.
-**Phase tag:** `phase_11c_public_market_paper`
-**Branch (PR-A):** `feature/phase-11c1-rest-rate-limit-governor`
-**Version:** `1.4.0a11c.1a`
-**Predecessor:** Phase 11B - Cloud Paper Acceptance (closed - 30/30 dry-runs PASS, 648/648 HF observations PASS)
+acceptance is paused; **Phase 11C.1A** (PR-A, merged) capped the
+public REST gateway with a sliding-window rate-limit governor;
+**Phase 11C.1B** (PR-B, this branch) adds the WebSocket-first
+all-market radar so the runner can discover demon coins (妖币)
+without per-symbol REST detail polling.
+**Phase tag (PR-B):** `phase_11c_1b_ws_first_radar`
+**Branch (PR-B):** `feature/phase-11c1-ws-first-all-market-radar`
+**Version (PR-B):** `1.4.0a11c.1b`
+**Predecessor:** Phase 11C.1A - Binance Public REST Rate Limit Governor & 418 Protection (PR-A, merged)
+
+---
+
+## §11C.1B - WebSocket-First All-Market Demon Coin Radar (PR-B)
+
+### Why this PR exists
+
+Phase 11C.1A (PR-A) capped the public REST gateway with a
+sliding-window rate-limit governor and shut every per-loop detail
+REST surface so the bootstrap path could not trigger HTTP 429 / 418
+again. The PR-A trade-off was that the runner could see *only* the
+symbols the bootstrap already knew about; it could not detect a
+brand-new "demon coin" that suddenly woke up between two bootstrap
+cadences.
+
+Phase 11C.1B (PR-B) restores the discovery surface by driving an
+**all-market radar** off Binance's public WebSocket streams. The
+goal is **NOT** to lower discovery capability - it is to *raise*
+discovery throughput while keeping REST pressure near zero.
+
+The five public streams below are the only network surfaces this
+PR is allowed to subscribe to:
+
+  - `!ticker@arr`        - 24h rolling stats per symbol
+  - `!miniTicker@arr`    - light-weight last/volume push
+  - `!bookTicker`        - per-symbol best bid/ask updates
+  - `!markPrice@arr`     - mark price + funding rate per symbol
+  - `!forceOrder@arr`    - liquidation events
+
+### Phase 11C.1B boundary (must hold for the entire PR-B scope)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Binance API key / secret                    | refused at construction      |
+| Signed endpoint                             | refused at allowlist check   |
+| `listenKey` / user data stream              | refused at WS allowlist + URL parser |
+| Private WebSocket / trading WS API          | refused at WS allowlist      |
+| DeepSeek / Square / real Telegram outbound  | not connected                |
+| Phase 12                                    | NOT entered                  |
+
+### What PR-B ships
+
+| Surface                                              | Behaviour                                                                          |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `app/exchanges/binance_public_ws.py`                 | New module: `BinancePublicWSClient`, `WSConfig`, `WSMessage`, `WSMessagePump`, `InProcessWSPump`, `_RefusalTransport`, `assert_public_ws_stream_allowed`, `assert_public_ws_url_allowed`, `PublicWSCredentialForbidden`, `PublicWSStreamForbidden`. |
+| `app/market_data_public/radar.py`                    | New module: `AllMarketRadarSnapshot` (frozen pydantic v2 model), `AllMarketRadarBuffer` (per-symbol rolling state for price / volume history + per-batch volume rank), `pre_anomaly_score_light` (pure additive scoring with deterministic reason tags). |
+| `app/market_data_public/candidate_pool.py`           | New module: `CandidatePool`, `CandidatePoolConfig`, `Candidate`. Default `candidate_pool_size=20`, `active_detail_limit=3`, `candidate_ttl_seconds=900`, `radar_score_threshold=30.0`. Each candidate carries a Phase 8.5 `OpportunityIdentity` with `source_phase="phase_11c_1b_ws_first_radar"`. |
+| `app/market_data_public/ws_radar_chain.py`           | New module: `WSRadarChainDriver` emits PRE_ANOMALY_DETECTED -> ANOMALY_DETECTED -> STATE_TRANSITION (+ Phase 8.5 LearningReadyContext on each, + RISK_REJECTED via the live RiskEngine) per ACTIVE candidate. |
+| `app/core/events.py`                                 | Three new EventType entries: `PUBLIC_WS_CONNECTED`, `PUBLIC_WS_DISCONNECTED`, `PUBLIC_WS_STALE`. |
+| `app/paper_run/daily_report.py`                      | `DailyReportSnapshot` + `DailyReportBuilder` extended with WS + radar metrics; new "Phase 11C.1B WebSocket all-market radar" Markdown section. |
+| `scripts/run_public_market_paper.py`                 | New CLI flags `--ws-first` / `--ws-disabled` (mutex), `--candidate-pool-size`, `--active-detail-limit`, `--ws-staleness-threshold-ms`, `--candidate-ttl-seconds`. Default `ws_first=True`. Per-loop body: pump WS messages -> radar.ingest_messages -> score every snapshot -> pool.offer -> pool.expire -> drive WSRadarChainDriver on the active head. The active head also receives REST detail through the existing PR-A governor. |
+| `tests/unit/test_phase11c_1b_ws_radar.py`            | 28 new tests pinning every behaviour the brief calls out. |
+| `tests/unit/test_phase11c_no_network.py`             | Source-tree audit extended: PHASE_11C_FILES grew the four new files; `test_no_private_websocket_artefacts` blocks listenKey / userDataStream / ws-api / trading-api / @accountUpdate / @orderTradeUpdate / @marginCall / @balanceUpdate / @positionUpdate as non-docstring string literals across the source set. |
+
+### How the WS-first pipeline works
+
+```
+                                        Phase 8.5
+                                   LearningReadyContext
+                                            ^
+                                            |
+   Binance public WS  -->  BinancePublicWSClient
+   (5 ALLOWLIST streams)         |
+        |                        |
+        v                        v
+   AllMarketRadarBuffer  -->  RadarScoreResult  -->  CandidatePool
+        |                        ^                       |
+        |                        |                       v
+        +-- per-symbol           |                  active head
+            rolling state        |                  (default 3)
+                                 |                       |
+                            pre_anomaly_                  |
+                            score_light                   |
+                                                          v
+                                                  WSRadarChainDriver
+                                                          |
+                                                          v
+                                              PRE_ANOMALY_DETECTED
+                                              ANOMALY_DETECTED
+                                              STATE_TRANSITION
+                                              + RiskEngine.evaluate
+                                                (stop_unconfirmed=True)
+                                              -> RISK_REJECTED
+```
+
+REST in PR-B is bootstrap-only (one `exchangeInfo` + one
+`ticker/24hr` to resolve the symbol list) plus per-loop detail
+calls **only for the candidate pool's active head** (default
+3 symbols). The full per-symbol detail loop that triggered the
+24h test's HTTP 418 is gone for good.
+
+### Connection management
+
+| Lifecycle event           | Behaviour                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `connect`                 | Pump connects + emits `PUBLIC_WS_CONNECTED` + re-subscribes to the configured stream set.  |
+| `disconnect`              | Pump disconnects + emits `PUBLIC_WS_DISCONNECTED`.                                         |
+| `reconnect` (auto)        | Disconnect + sleep configured backoff (default 1 s, max 30 s) + reconnect; reconnect_count++. |
+| `pump_messages` no data   | Updates the staleness detector; if the last-message gap >= `staleness_threshold_ms` (default 3000 ms) the manager emits `PUBLIC_WS_STALE` and flips `is_stale=True`. |
+| Pump drops underneath     | Detected on the next `pump_messages` call; auto-disconnect + emit. |
+| Default transport         | `_RefusalTransport` raises `NotImplementedError` on `connect`. PR-B does NOT ship a real-network WS adapter; the runner detects the refusal and degrades cleanly to the PR-A bootstrap-only path with a stderr notice. The in-process pump is wired under `--dry-run`. |
+
+### Candidate pool behaviour
+
+The pool admits a symbol when at least one of:
+
+  - `radar_score >= radar_score_threshold` (default 30.0)
+  - `volume_rank_jump >= volume_rank_jump_threshold` (default 3)
+  - `|price_acceleration_60s| >= price_acceleration_threshold` (default 0.005)
+  - `liquidation_event=True` (when `liquidation_promotes=True`)
+
+State transitions:
+
+  - `WATCHING` -> `ACTIVE`: radar_score crosses the threshold on a
+    later offer (upgrade_count++).
+  - `ACTIVE` -> `WATCHING`: radar_score falls below the threshold
+    (downgrade_count++).
+  - any state -> evicted: pool is over capacity; lowest-score (and
+    oldest) candidate is dropped.
+  - any state -> `EXPIRED`: pool.expire() runs and the candidate's
+    last_seen_ms is older than `candidate_ttl_seconds`.
+
+Every candidate carries a Phase 8.5 `OpportunityIdentity` with
+`source_phase="phase_11c_1b_ws_first_radar"`, so Reflection / Replay
+can split WS-radar candidates from REST-bootstrap candidates.
+
+### Daily report - new section
+
+The Phase 11B daily report grew a `## Phase 11C.1B WebSocket
+all-market radar` section with every brief-mandated metric:
+
+  - `ws_messages_received`
+  - `ws_reconnect_count`
+  - `ws_staleness_ms_max`
+  - `ws_stale_count`
+  - `ws_connect_count` / `ws_disconnect_count`
+  - `radar_candidates_seen`
+  - `candidate_pool_size_max`
+  - `pre_anomaly_candidates`
+  - `liquidation_events_seen`
+  - per-stream WS message counts
+  - top-N candidate symbols + radar scores
+
+The aggregator cross-checks the event-log counts of
+`PUBLIC_WS_CONNECTED` / `PUBLIC_WS_DISCONNECTED` / `PUBLIC_WS_STALE`
+against the WS client's `metrics_payload` so a stale governor
+counter cannot hide a real connection event.
+
+### Phase 11C.1B acceptance criteria
+
+1. `pytest` 全部通过 (currently `2144 passed`).
+2. The new test file
+   `tests/unit/test_phase11c_1b_ws_radar.py` pins every behaviour
+   the brief calls out:
+   - `test_public_ws_stream_allowlist`
+   - `test_private_ws_forbidden`
+   - `test_listen_key_forbidden`
+   - `test_user_data_stream_forbidden`
+   - `test_all_market_ticker_updates_radar_snapshot`
+   - `test_book_ticker_updates_spread`
+   - `test_mark_price_updates_funding`
+   - `test_force_order_sets_liquidation_event`
+   - `test_radar_score_detects_price_volume_acceleration`
+   - `test_candidate_pool_adds_top_radar_symbols`
+   - `test_candidate_pool_expires_old_candidates`
+   - `test_ws_stale_enters_data_degraded`
+   - `test_ws_first_runner_does_not_call_rest_detail_for_all_symbols`
+   - `test_learning_ready_payload_from_ws_candidate`
+   - `test_safety_flags_unchanged_with_ws_enabled`
+   plus 13 supporting tests covering reconnect, refusal of private
+   subscriptions, default config conservatism, and the in-process
+   pump's stream allowlist enforcement.
+3. The four `ExchangeClientBase` write surfaces still raise
+   `SafeModeViolation` when invoked on the public REST client.
+4. The Phase 8.5 export pipeline accepts the three new
+   `PUBLIC_WS_*` event types (no schema change required - the
+   export layer streams every EventType through unchanged).
+5. The Phase 10A replay engine and Phase 10B reflection engine
+   accept the new event types (asserted by the existing
+   `test_phase11c_export_and_replay.py` continuing to pass).
+6. The daily Markdown report contains the new "Phase 11C.1B
+   WebSocket all-market radar" section with every required field.
+7. No file in the Phase 11C source set imports a third-party HTTP /
+   WebSocket / SDK / LLM / Telegram bot package; only stdlib +
+   loguru + pydantic + the existing `app.*` modules. The PR-B
+   default transport refuses to open a real socket
+   (`NotImplementedError`); a stdlib WS adapter is a follow-up PR.
+
+### Phase 11C.1B explicitly does NOT
+
+- ship a real-network WebSocket transport (the default
+  `_RefusalTransport` raises `NotImplementedError`; the in-process
+  pump covers `--dry-run`; the stdlib WS adapter ships in a
+  follow-up PR).
+- accept any Binance API key / API secret.
+- accept any `listenKey`.
+- subscribe to any user data stream.
+- subscribe to the trading WebSocket API.
+- subscribe to any account / margin / position / leverage / balance
+  / order private WebSocket variant.
+- call any signed REST endpoint.
+- connect to DeepSeek.
+- connect to a real Telegram bot.
+- connect to Binance Square.
+- enter Phase 12.
+
+### Resuming the Phase 11C real-data 24h acceptance run
+
+After PR-B merges (and once the follow-up stdlib WS adapter PR
+lands), the Phase 11C real-data 24h acceptance run resumes with:
+
+  - bootstrap REST: one `exchangeInfo` + one `ticker/24hr`.
+  - public WS: 5 ALLOWLIST streams covering every USDT-M perpetual.
+  - candidate pool: top N (default 20) demon coins, active head 3.
+  - per-loop REST detail: ONLY for the active head, gated on the
+    PR-A rate-limit governor.
+  - daily report: WS lifecycle + radar candidates + rate-limit
+    governor metrics in one Markdown body.
+
+PR-C (cluster exposure control) remains a separate branch.
 
 ---
 

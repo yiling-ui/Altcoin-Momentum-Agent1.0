@@ -139,6 +139,24 @@ class EventType(str, Enum):
     RATE_LIMIT_418 = "RATE_LIMIT_418"
     RATE_LIMIT_PROTECTION_ENTERED = "RATE_LIMIT_PROTECTION_ENTERED"
 
+    # ---- Phase 11C.1B - Binance Public WebSocket all-market radar --------
+    # The Phase 11C.1B WebSocket client emits these events to describe the
+    # public WS lifecycle (no listenKey, no user data stream, no private
+    # WS, no trading WebSocket API). They pair with the existing
+    # ``DATA_UNRELIABLE`` and ``EXCHANGE_*`` events so the Phase 4
+    # MarketDataBuffer + No-Trade Gate keep working unchanged.
+    #
+    #   PUBLIC_WS_CONNECTED           - the WS link is up; messages may flow.
+    #   PUBLIC_WS_DISCONNECTED        - the WS link dropped; the client
+    #                                   will attempt a backoff reconnect.
+    #   PUBLIC_WS_STALE               - no message has arrived for
+    #                                   ``ws_staleness_threshold_ms``; the
+    #                                   runner downgrades data quality
+    #                                   and may fall back to bootstrap REST.
+    PUBLIC_WS_CONNECTED = "PUBLIC_WS_CONNECTED"
+    PUBLIC_WS_DISCONNECTED = "PUBLIC_WS_DISCONNECTED"
+    PUBLIC_WS_STALE = "PUBLIC_WS_STALE"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

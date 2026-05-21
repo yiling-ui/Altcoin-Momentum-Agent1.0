@@ -66,7 +66,10 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     # the Phase 10D scaffolding (paper trade + reconciliation +
     # reflection + LLM + Telegram outbound self-checks). Phase 11C
     # ships a dedicated runner under ``scripts/run_public_market_paper``.
-    assert "Phase 11C - Real Binance Public Market Data Read-Only Paper" in captured
+    # Phase 11C.1B bumped the banner to "WebSocket-First All-Market
+    # Demon Coin Radar".
+    assert "Phase 11C" in captured
+    assert "WebSocket-First All-Market Demon Coin Radar" in captured
     assert "v1.4.0a11c" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured

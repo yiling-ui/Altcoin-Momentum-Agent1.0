@@ -49,27 +49,119 @@ real Telegram:      not connected
 real DeepSeek:      not connected
 ```
 
-## Open phase: Phase 11C.1A
+## Open phase: Phase 11C.1B
+
+**Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar (PR-B).**
+Phase 11C.1A (PR-A) shipped the rate-limit governor and capped per-loop
+REST detail; the trade-off was that the runner could see only the
+symbols the bootstrap already knew about. PR-B adds the WebSocket-first
+all-market radar so the runner can discover demon coins (妖币) without
+per-symbol REST detail polling. The goal is not to lower discovery
+capability - it is to *raise* discovery throughput while keeping REST
+pressure near zero.
+
+PR-B subscribes to FIVE public Binance WebSocket streams only:
+
+  - `!ticker@arr`
+  - `!miniTicker@arr`
+  - `!bookTicker`
+  - `!markPrice@arr`
+  - `!forceOrder@arr`
+
+PR-B does NOT subscribe to `listenKey`, the user data stream, the
+trading WebSocket API, or any private WebSocket. The default WS
+transport refuses to open a real socket (`NotImplementedError`); the
+in-process pump is wired under `--dry-run` and the stdlib WS adapter
+is a follow-up PR.
+
+### Phase 11C.1B boundary (must hold for the entire PR-B scope)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Binance API key / secret                    | refused at construction      |
+| Signed endpoint                             | refused at allowlist check   |
+| `listenKey` / user data stream              | refused at WS allowlist + URL parser |
+| Private WebSocket / trading WS API          | refused at WS allowlist      |
+| `market_data.provider`                      | `binance_public`             |
+| `market_data.read_only`                     | `True`                       |
+| `candidate_pool_size` (default)             | `20`                         |
+| `active_detail_limit` (default)             | `3`                          |
+| `candidate_ttl_seconds` (default)           | `900`                        |
+| `ws_staleness_threshold_ms` (default)       | `3000`                       |
+| `radar_score_threshold` (default)           | `30.0`                       |
+
+### Phase 11C.1B acceptance criteria
+
+1. `pytest` 全部通过. Currently `2144 passed`.
+2. The new test file
+   `tests/unit/test_phase11c_1b_ws_radar.py` pins every behaviour
+   the brief calls out (15 explicit + 13 supporting). Full list in
+   `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B.
+3. The four `ExchangeClientBase` write surfaces still raise
+   `SafeModeViolation`.
+4. No file in the Phase 11C source set imports a third-party HTTP /
+   WebSocket / SDK / LLM / Telegram bot package.
+5. The Phase 11B daily-report Markdown body contains the new
+   `Phase 11C.1B WebSocket all-market radar` section with every
+   brief-mandated metric.
+6. The Phase 8.5 export, Phase 10A replay, and Phase 10B reflection
+   pipelines accept the three new `PUBLIC_WS_*` event types.
+
+### Phase 11C.1B explicitly forbids
+
+  - Connecting to the Binance trading API.
+  - Reading or storing any Binance API key / API secret /
+    `listenKey`.
+  - Calling any signed endpoint.
+  - Subscribing to any user data stream / private WebSocket /
+    trading WebSocket API / account / margin / position / leverage
+    / balance / order private WS variant.
+  - Connecting to DeepSeek.
+  - Connecting to the real Telegram outbound HTTP transport.
+  - Connecting to Binance Square.
+  - Auto-retrying after a 418.
+  - Switching endpoints to evade a 418.
+  - Rotating source IP to evade a 418.
+  - Entering Phase 12.
+
+### How Phase 11C.1B unblocks the Phase 11C real-data acceptance run
+
+After PR-B merges (and once the stdlib WS adapter follow-up PR
+lands), the Phase 11C real-data 24h acceptance run resumes with:
+
+  - bootstrap REST: one `exchangeInfo` + one `ticker/24hr`.
+  - public WS: 5 ALLOWLIST streams covering every USDT-M perpetual.
+  - candidate pool: top N (default 20) demon coins, active head 3.
+  - per-loop REST detail: ONLY for the active head, gated on the
+    PR-A rate-limit governor.
+
+PR-C (cluster exposure control) remains a separate branch.
+
+## Closed phase: Phase 11C.1A
 
 **Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
-Protection.** Phase 11C real-data acceptance is paused until this
-PR-A lands. The first 24h test against real `fapi.binance.com`
-returned HTTP 429 then HTTP 418 (IP ban) at the original Phase 11C
-defaults; the safety lock held throughout (no API key, no signed
-endpoint, no real order, `mode=paper`), but the gateway was
-unusable for real-data acceptance until the rate-limit problem is
-fixed.
+Protection (PR-A).** Merged. Phase 11C real-data acceptance is paused
+until PR-B + the stdlib WS adapter follow-up land.
 
-Phase 11C.1A is the **first** of three follow-up PRs:
-
-  - **PR-A** (this branch, `feature/phase-11c1-rest-rate-limit-governor`)
+  - **PR-A** (closed, `feature/phase-11c1-rest-rate-limit-governor`)
     ships `BinancePublicRestGovernor` (sliding-window weight budget,
     429 backoff, 418 shutdown, `Retry-After`, used-weight tracking),
     lower defaults, and the layered REST runner. NO new candidate
     ranking, NO WebSocket transport.
-  - **PR-B** (separate branch, NOT in this PR) ships the
-    WebSocket-first all-market radar + multi-candidate priority
-    ranking + `candidate_detail_limit` consumption.
+  - **PR-B** (this branch, `feature/phase-11c1-ws-first-all-market-radar`)
+    ships the WebSocket-first all-market radar +
+    multi-candidate priority ranking + `candidate_detail_limit`
+    consumption. The default WS transport refuses to open a real
+    socket; the in-process pump covers `--dry-run`; the stdlib WS
+    adapter is a follow-up PR.
   - **PR-C** (separate branch, NOT in this PR) ships cluster
     exposure control.
 

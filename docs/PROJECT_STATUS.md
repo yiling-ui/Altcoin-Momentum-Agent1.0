@@ -7,8 +7,9 @@ intentionally short. The full phase-gate ledger lives in
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2026-05-21 | Phase 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | in-development | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A     |
-| 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | paused (rate-limit fix in progress) | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
+| 2026-05-21 | Phase 11C.1B | WebSocket-First All-Market Demon Coin Radar | in-development | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B     |
+| 2026-05-21 | Phase 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | merged        | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A     |
+| 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | paused (24h acceptance held until PR-B + stdlib WS adapter merge) | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
 | 2026-05-19 | Phase 11B-HF | Cloud Paper - High-Frequency observation     | accepted (GO) | 30/30 dry-run PASS, 648/648 24h@2min observations PASS |
 | 2026-05-19 | Phase 11B | Cloud Paper Acceptance                       | accepted (GO) | `docs/PHASE_11B_PAPER_ACCEPTANCE_REPORT.md`            |
 | ...        | Phase 10D | Telegram Outbound + Export Commands          | merged        | `docs/CHANGELOG.md`                                    |
@@ -101,10 +102,54 @@ emits the full Phase 11C event chain into `events.db`.
 
 ## Open phase
 
-**Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
-Protection.** Acceptance criteria + test matrix in
-`docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A. Acceptance
-gate: every test in `tests/unit/test_phase11c1a_rate_limit_governor.py`
+**Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar (PR-B).**
+Acceptance criteria + test matrix in
+`docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B. Acceptance
+gate: every test in `tests/unit/test_phase11c_1b_ws_radar.py`
 passes; the four ExchangeClientBase write surfaces still refuse;
-the Phase 1 safety lock is unchanged; the Phase 11C real-data
-acceptance run is held until PR-A merges.
+the Phase 1 safety lock is unchanged; no listenKey / user data
+stream / private WebSocket / trading WS API; the Phase 11C
+real-data acceptance run remains paused until PR-B + the stdlib
+WS adapter follow-up PR merge.
+
+## Phase 11C.1B - what it ships
+
+PR-B adds three new modules + extends two existing ones:
+
+  - `app/exchanges/binance_public_ws.py` -
+    `BinancePublicWSClient` + `WSConfig` + `WSMessage` +
+    `WSMessagePump` + `InProcessWSPump` +
+    `assert_public_ws_stream_allowed` +
+    `assert_public_ws_url_allowed`. Stream allowlist:
+    `!ticker@arr`, `!miniTicker@arr`, `!bookTicker`,
+    `!markPrice@arr`, `!forceOrder@arr`. Default transport refuses
+    to open a real socket (`NotImplementedError`).
+  - `app/market_data_public/radar.py` -
+    `AllMarketRadarSnapshot` (frozen pydantic model) +
+    `AllMarketRadarBuffer` (per-symbol rolling state) +
+    `pre_anomaly_score_light` (pure additive scoring with
+    deterministic reason tags).
+  - `app/market_data_public/candidate_pool.py` - `CandidatePool`
+    with default `candidate_pool_size=20`, `active_detail_limit=3`,
+    `candidate_ttl_seconds=900`. Each candidate carries a
+    Phase 8.5 `OpportunityIdentity` with
+    `source_phase="phase_11c_1b_ws_first_radar"`.
+  - `app/market_data_public/ws_radar_chain.py` -
+    `WSRadarChainDriver` emits PRE_ANOMALY_DETECTED ->
+    ANOMALY_DETECTED -> STATE_TRANSITION (+ Phase 8.5
+    LearningReadyContext on each, + RISK_REJECTED via the live
+    RiskEngine) per ACTIVE candidate.
+  - `app/core/events.py` - three new EventType entries:
+    `PUBLIC_WS_CONNECTED`, `PUBLIC_WS_DISCONNECTED`,
+    `PUBLIC_WS_STALE`.
+  - `app/paper_run/daily_report.py` - `DailyReportSnapshot` +
+    `DailyReportBuilder` extended with WS + radar metrics; new
+    `Phase 11C.1B WebSocket all-market radar` Markdown section.
+  - `scripts/run_public_market_paper.py` - new CLI flags
+    `--ws-first` (default ON) / `--ws-disabled` (mutex),
+    `--candidate-pool-size`, `--active-detail-limit`,
+    `--ws-staleness-threshold-ms`, `--candidate-ttl-seconds`. The
+    runner pumps WS -> ingest into radar -> score every snapshot
+    -> offer to pool -> expire stale candidates -> drive
+    WSRadarChainDriver on the active head; the active head also
+    receives REST detail through the existing PR-A governor.
