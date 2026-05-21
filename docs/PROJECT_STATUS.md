@@ -7,7 +7,8 @@ intentionally short. The full phase-gate ledger lives in
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | in-development | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
+| 2026-05-21 | Phase 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | in-development | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A     |
+| 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | paused (rate-limit fix in progress) | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
 | 2026-05-19 | Phase 11B-HF | Cloud Paper - High-Frequency observation     | accepted (GO) | 30/30 dry-run PASS, 648/648 24h@2min observations PASS |
 | 2026-05-19 | Phase 11B | Cloud Paper Acceptance                       | accepted (GO) | `docs/PHASE_11B_PAPER_ACCEPTANCE_REPORT.md`            |
 | ...        | Phase 10D | Telegram Outbound + Export Commands          | merged        | `docs/CHANGELOG.md`                                    |
@@ -42,6 +43,40 @@ hard-coerces the first five flags. The Phase 11C
 `MarketDataConfig` and `SafetyConfig` schemas refuse to load any
 deployment that flips a `forbid_*` flag.
 
+## Why the Phase 11C real-data acceptance is paused
+
+The first 24h test against the real Binance public REST endpoints
+(`fapi.binance.com`) exposed two failure modes the original Phase 11C
+runner did not protect against:
+
+  1. HTTP 429 (Too Many Requests). Binance returned this once the
+     per-IP weight budget was exceeded. The runner kept polling and
+     escalated to:
+  2. HTTP 418 (I'm a teapot). Binance uses 418 to signal a real IP
+     ban.
+
+Phase 11C's safety lock held throughout (`mode=paper`,
+`live_trading=False`, no API key, no signed endpoint, no real order),
+but the gateway was unusable for real-data acceptance until the
+rate-limit problem is fixed.
+
+**Phase 11C.1A** (PR-A in this branch) ships the fix in three layers:
+
+  - a new `BinancePublicRestGovernor`
+    (`app/exchanges/binance_rate_limit.py`) that wraps every public
+    REST call, tracks the rolling weight budget, sleeps the
+    `Retry-After` window on 429, latches into protection mode on
+    418, and opens a P1 incident;
+  - lower defaults (`symbol_limit=5`, `rest_poll_interval_seconds=60`,
+    `weight_budget_per_minute=300`, soft 0.50 / hard 0.75);
+  - a layered REST runner that does `exchangeInfo` / `ticker/24hr`
+    only at bootstrap and refuses per-symbol detail REST calls
+    unless a candidate ranking selects them (PR-B work).
+
+PR-B (WebSocket-first all-market radar) and PR-C (cluster exposure
+control + multi-candidate priority ranking) are tracked separately
+and have NOT landed in this branch.
+
 ## What Phase 11C is
 
 Phase 11C is real **Binance public market data** read-only paper.
@@ -66,9 +101,10 @@ emits the full Phase 11C event chain into `events.db`.
 
 ## Open phase
 
-**Phase 11C - Real Binance Public Market Data Read-Only Paper.**
-Acceptance criteria + test matrix in
-`docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`. Acceptance run target:
-24h public-market read-only paper observation with the Phase 11C
-event chain populating `events.db` and producing the daily Markdown
-report.
+**Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
+Protection.** Acceptance criteria + test matrix in
+`docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A. Acceptance
+gate: every test in `tests/unit/test_phase11c1a_rate_limit_governor.py`
+passes; the four ExchangeClientBase write surfaces still refuse;
+the Phase 1 safety lock is unchanged; the Phase 11C real-data
+acceptance run is held until PR-A merges.

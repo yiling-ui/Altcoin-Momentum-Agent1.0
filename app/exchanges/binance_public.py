@@ -57,6 +57,13 @@ from app.core.clock import now_ms
 from app.core.enums import DataReliability
 from app.core.errors import ExchangeError, SafeModeViolation
 from app.exchanges.base import ExchangeClientBase, WebSocketManager
+from app.exchanges.binance_rate_limit import (
+    BinancePublicRestGovernor,
+    PublicRestResponse,
+    RateLimitBackoffActive,
+    RateLimitBudgetExceeded,
+    RateLimitProtectionError,
+)
 from app.exchanges.models import (
     AccountSnapshot,
     ExchangeSymbol,
@@ -229,7 +236,12 @@ def assert_public_endpoint_allowed(url_or_path: str) -> str:
 # ---------------------------------------------------------------------------
 
 #: Type alias for a transport callable. Takes a fully-qualified URL and
-#: returns a parsed JSON value. Tests inject a deterministic version.
+#: returns either a parsed JSON value (legacy contract used by tests
+#: that pre-date the Phase 11C.1A rate-limit governor) or a
+#: :class:`PublicRestResponse` envelope (preferred, exposes status code
+#: + rate-limit headers to the governor). The client normalises both
+#: forms into a :class:`PublicRestResponse` before handing it to the
+#: governor.
 PublicTransport = Callable[[str], Any]
 
 
@@ -241,6 +253,16 @@ def _default_transport(timeout_seconds: float = 5.0) -> PublicTransport:
     follow redirects beyond what :mod:`urllib` does by default, does
     NOT add an ``Authorization`` header, and does NOT consume any
     credential.
+
+    Phase 11C.1A: the transport returns a :class:`PublicRestResponse`
+    on every successful response so the rate-limit governor can read
+    the ``X-MBX-USED-WEIGHT-1M`` and ``Retry-After`` headers. HTTP 429
+    and HTTP 418 are NOT raised: the transport captures the status +
+    headers and returns them in the envelope so the governor can
+    decide whether to back off (429) or latch protection mode (418).
+    Every other non-200 status is converted into :class:`ExchangeError`
+    as before so the existing event chain keeps treating transient
+    transport failures as recoverable noise.
     """
 
     def _fetch(url: str) -> Any:
@@ -255,14 +277,37 @@ def _default_transport(timeout_seconds: float = 5.0) -> PublicTransport:
         try:
             with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
                 raw = resp.read()
+                headers = _normalise_headers(resp.headers)
                 if resp.status != 200:
+                    if resp.status in (429, 418):
+                        return PublicRestResponse(
+                            body=None,
+                            status=int(resp.status),
+                            headers=headers,
+                        )
                     raise ExchangeError(
                         f"binance_public: HTTP {resp.status} from {url}"
                     )
-                return json.loads(raw.decode("utf-8"))
+                return PublicRestResponse(
+                    body=json.loads(raw.decode("utf-8")),
+                    status=200,
+                    headers=headers,
+                )
         except urllib.error.HTTPError as exc:
+            headers = _normalise_headers(getattr(exc, "headers", None))
+            code = int(getattr(exc, "code", 0) or 0)
+            if code in (429, 418):
+                # Phase 11C.1A: the rate-limit governor handles 429 /
+                # 418 explicitly. Hand it the envelope rather than
+                # raising so it can read ``Retry-After`` and the used
+                # weight header.
+                return PublicRestResponse(
+                    body=None,
+                    status=code,
+                    headers=headers,
+                )
             raise ExchangeError(
-                f"binance_public: HTTP error {exc.code} from {url}: {exc.reason}"
+                f"binance_public: HTTP error {code} from {url}: {exc.reason}"
             ) from exc
         except urllib.error.URLError as exc:
             raise ExchangeError(
@@ -274,6 +319,33 @@ def _default_transport(timeout_seconds: float = 5.0) -> PublicTransport:
             ) from exc
 
     return _fetch
+
+
+def _normalise_headers(raw_headers: Any) -> dict[str, str]:
+    """Convert a urllib / dict headers object into a plain ``str``-keyed dict.
+
+    The :class:`http.client.HTTPMessage` object returned by
+    ``urlopen`` exposes a mapping interface, but iteration order and
+    case behave subtly differently on different Python versions. We
+    normalise to a plain ``{header_name: header_value}`` dict so the
+    governor can index by name without worrying about the underlying
+    type.
+    """
+    if raw_headers is None:
+        return {}
+    out: dict[str, str] = {}
+    try:
+        items = raw_headers.items()
+    except AttributeError:
+        try:
+            items = list(raw_headers)
+        except TypeError:
+            return {}
+    for name, value in items:
+        if name is None:
+            continue
+        out[str(name)] = "" if value is None else str(value)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +405,7 @@ class BinancePublicClient(ExchangeClientBase):
         request_timeout_seconds: float = 5.0,
         event_repo=None,
         ws_manager: WebSocketManager | None = None,
+        governor: BinancePublicRestGovernor | None = None,
         autostart: bool = True,
         # The following kw-only parameters exist solely to make the
         # SafeModeViolation explicit when a caller mistakenly hands a
@@ -390,6 +463,7 @@ class BinancePublicClient(ExchangeClientBase):
         )
         self._request_timeout_seconds = float(request_timeout_seconds)
         self._endpoint_call_counts: dict[str, int] = {}
+        self._governor: BinancePublicRestGovernor | None = governor
         super().__init__(event_repo=event_repo, ws_manager=ws_manager)
         if autostart:
             self.start()
@@ -411,6 +485,14 @@ class BinancePublicClient(ExchangeClientBase):
     @property
     def total_calls(self) -> int:
         return sum(self._endpoint_call_counts.values())
+
+    @property
+    def governor(self) -> BinancePublicRestGovernor | None:
+        """Phase 11C.1A: the optional rate-limit governor wrapping every
+        public REST call. ``None`` means rate-limit protection is OFF
+        (e.g. unit-tests that exercise the allowlist without the
+        governor)."""
+        return self._governor
 
     # ------------------------------------------------------------------
     # Internal request plumbing
@@ -445,6 +527,21 @@ class BinancePublicClient(ExchangeClientBase):
         Validates the path against the allowlist BEFORE building the
         URL so a forbidden path is refused before any string formatting
         could leak it into a log line.
+
+        Phase 11C.1A: every request is routed through the
+        :class:`BinancePublicRestGovernor` (when one is wired). The
+        governor:
+
+          - refuses the call if it has latched into protection mode
+            after a previous HTTP 418 (raises
+            :class:`RateLimitProtectionError`);
+          - refuses the call while a Retry-After backoff window is
+            still active (raises :class:`RateLimitBackoffActive`);
+          - refuses the call when the configured hard weight budget
+            is exhausted (raises :class:`RateLimitBudgetExceeded`);
+          - records the response status + headers afterwards so 429 /
+            418 can be handled centrally regardless of which surface
+            issued the call.
         """
         canonical = assert_public_endpoint_allowed(path)
         query_pairs: list[tuple[str, str]] = []
@@ -464,7 +561,60 @@ class BinancePublicClient(ExchangeClientBase):
             url = f"{url}?{query}"
         # Re-validate the fully-formed URL: scheme, host, path, query.
         assert_public_endpoint_allowed(url)
-        body = self._transport(url)
+
+        # Phase 11C.1A: route through the governor. ``before_request``
+        # may raise; we let the exception propagate so the caller sees
+        # the protection event without an additional except clause.
+        weight: int | None = None
+        if self._governor is not None:
+            weight = self._governor.before_request(canonical)
+
+        try:
+            raw = self._transport(url)
+        except Exception as exc:
+            # Transport-level failure: release the reserved weight so
+            # the rolling-window budget does not double-bill the
+            # transient failure.
+            if self._governor is not None:
+                self._governor.record_transport_error(
+                    canonical, weight=weight, error=exc
+                )
+            raise
+
+        response = (
+            raw
+            if isinstance(raw, PublicRestResponse)
+            else PublicRestResponse(body=raw, status=200, headers={})
+        )
+
+        # ``record_response`` raises :class:`RateLimitProtectionError`
+        # on HTTP 418 (after emitting the protection events + opening a
+        # P1 incident). On HTTP 429 it sleeps the configured
+        # Retry-After window and returns; the caller treats the call as
+        # "no body" by raising ExchangeError below.
+        if self._governor is not None:
+            self._governor.record_response(canonical, response, weight=weight)
+
+        if response.status == 429:
+            raise ExchangeError(
+                f"binance_public: HTTP 429 from {url}; rate-limit governor "
+                "completed its Retry-After backoff. The caller should treat "
+                "this batch as failed and try again next loop tick."
+            )
+        if response.status == 418:
+            # Defence-in-depth: the governor MUST have raised by now.
+            # If a future caller wires the client without a governor we
+            # still refuse loudly.
+            raise SafeModeViolation(
+                f"binance_public: HTTP 418 from {url}; Binance has IP "
+                "banned the gateway. Refusing to continue."
+            )
+        if response.status != 200:
+            raise ExchangeError(
+                f"binance_public: HTTP {response.status} from {url}"
+            )
+
+        body = response.body
         self._endpoint_call_counts[canonical] = (
             self._endpoint_call_counts.get(canonical, 0) + 1
         )
@@ -803,6 +953,7 @@ __all__ = [
     "FORBIDDEN_PRIVATE_ENDPOINTS",
     "FORBIDDEN_QUERY_PARAMETERS",
     "PublicMarkPrice",
+    "PublicRestResponse",
     "PublicTransport",
     "PUBLIC_MARKET_ENDPOINT_ALLOWLIST",
     "assert_public_endpoint_allowed",

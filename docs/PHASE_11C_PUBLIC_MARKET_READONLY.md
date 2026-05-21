@@ -1,12 +1,209 @@
 # AMA-RT Phase 11C - Real Binance Public Market Data Read-Only Paper
 
-**Status:** in development
+**Status:** in development - the original Phase 11C real-data
+acceptance is paused; **Phase 11C.1A** (PR-A) is the active
+follow-up.
 **Phase tag:** `phase_11c_public_market_paper`
-**Branch:** `feature/phase-11c-real-binance-public-market-readonly-paper`
-**Version:** `1.4.0a11c`
+**Branch (PR-A):** `feature/phase-11c1-rest-rate-limit-governor`
+**Version:** `1.4.0a11c.1a`
 **Predecessor:** Phase 11B - Cloud Paper Acceptance (closed - 30/30 dry-runs PASS, 648/648 HF observations PASS)
 
 ---
+
+## §11C.1A - Binance Public REST Rate Limit Governor & 418 Protection (PR-A)
+
+### Why this PR exists
+
+The first 24h test of the Phase 11C runner against the real
+Binance public REST endpoints (`fapi.binance.com`) returned:
+
+  1. HTTP 429 (Too Many Requests). Binance returned this once the
+     per-IP weight budget was exceeded.
+  2. HTTP 418 (I'm a teapot). The runner kept polling and Binance
+     escalated to a real IP-level ban.
+
+Phase 11C's safety lock held throughout the failure (`mode=paper`,
+`live_trading=False`, no API key, no signed endpoint, no real
+order, no DeepSeek, no real Telegram outbound), but the gateway
+was unusable for real-data acceptance until the rate-limit problem
+was fixed.
+
+The brief explicitly forbids fixing this by simply lowering
+`symbol_limit` and lengthening `poll_interval_seconds`. The full
+fix is the **WebSocket-first all-market radar**:
+
+  - REST bootstrap only.
+  - REST candidate enrichment only (gated on a multi-candidate
+    priority ranking).
+  - Global REST rate governor.
+  - 429 backoff.
+  - 418 shutdown.
+  - Cluster exposure control.
+
+That work is split into three PRs:
+
+  - **PR-A** (this branch) - Rate-Limit Governor + 418 Protection
+    + conservative defaults + layered REST runner.
+  - **PR-B** - WebSocket-first all-market radar +
+    multi-candidate priority ranking + per-loop candidate
+    enrichment that consumes `candidate_detail_limit`.
+  - **PR-C** - Cluster exposure control.
+
+PR-A holds in isolation: the runner refuses to overwhelm Binance,
+records every 429 / 418 with full audit context, latches a P1
+incident on 418, and stops the runner with `rc=2` without
+auto-retrying, switching endpoints, or rotating source IP.
+
+### What PR-A ships
+
+| Surface                                 | Behaviour                                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `app/exchanges/binance_rate_limit.py`   | New module: `BinancePublicRestGovernor`, `RestGovernorConfig`, `PublicRestResponse`, `RateLimitProtectionError`, `RateLimitBackoffActive`, `RateLimitBudgetExceeded`. |
+| `app/exchanges/binance_public.py`       | `BinancePublicClient` accepts an optional `governor=`; the `_default_transport` captures status + headers and returns `PublicRestResponse`; `_request` routes through the governor's `before_request` / `record_response`; HTTP 418 raises :class:`RateLimitProtectionError`. |
+| `app/config/schema.py`                  | New `RestGovernorSection` (validators on every knob); `MarketDataConfig.symbol_limit` lowered to 5; `MarketDataConfig.rest_poll_interval_seconds` lowered to 60.0. |
+| `app/config/defaults.yaml`              | New `market_data.rest_governor` block; lowered defaults.                                        |
+| `app/core/events.py`                    | Five new EventType entries: `RATE_LIMIT_429`, `RATE_LIMIT_BACKOFF_STARTED`, `RATE_LIMIT_BACKOFF_ENDED`, `RATE_LIMIT_418`, `RATE_LIMIT_PROTECTION_ENTERED`. |
+| `app/paper_run/daily_report.py`         | `DailyReportSnapshot` + `DailyReportBuilder` extended with rate-limit metrics. |
+| `scripts/run_public_market_paper.py`    | Layered REST runner: bootstrap-only REST in steady state; per-loop detail REST gated on a candidate ranking (empty in PR-A); new `--candidate-detail-limit` and `--legacy-detail-per-loop` CLI flags; default `--symbol-limit` lowered to 5; rc=2 on rate-limit protection. |
+| `tests/unit/test_phase11c1a_rate_limit_governor.py` | 16 new tests pinning every behaviour the brief calls out. |
+
+### Conservative new defaults
+
+```yaml
+market_data:
+  symbol_limit: 5                          # was 20
+  rest_poll_interval_seconds: 60.0         # was 5.0
+  rest_governor:
+    enabled: true
+    weight_budget_per_minute: 300          # half of Binance's 1200/min
+    soft_weight_ratio: 0.50                # warn at >=150 weight
+    hard_weight_ratio: 0.75                # refuse at >=225 weight
+    retry_after_default_seconds: 300       # used when Retry-After missing
+    on_429: backoff                        # PR-A: only supported value
+    on_418: shutdown                       # PR-A: only supported value
+    candidate_detail_limit: 3              # max per-loop candidates
+    rest_layering_enabled: true            # bootstrap-only REST
+```
+
+Each value is enforced by a Pydantic field validator on
+`RestGovernorSection` so a misconfigured operator sees the failure
+at boot, not at the first 429.
+
+### How the governor works
+
+```
+  caller          governor                  transport
+   |                  |                          |
+   |---before_request----------->|              |
+   |   (refuse if protection latched / backoff   |
+   |    active / hard budget exhausted)          |
+   |   reserves weight                           |
+   |                  |                          |
+   |---transport-call------------------------>   |
+   |                                             |--- HTTP request --->
+   |<------ PublicRestResponse(status, headers, body)
+   |                  |                          |
+   |---record_response---------->|               |
+   |   reads X-MBX-USED-WEIGHT-1M / Retry-After  |
+   |   on 429: emit RATE_LIMIT_429 +             |
+   |           RATE_LIMIT_BACKOFF_STARTED,       |
+   |           sleep retry_after,                |
+   |           emit RATE_LIMIT_BACKOFF_ENDED     |
+   |   on 418: emit RATE_LIMIT_418 +             |
+   |           RATE_LIMIT_PROTECTION_ENTERED,    |
+   |           open P1 incident,                 |
+   |           raise RateLimitProtectionError    |
+   |   commits reserved weight to rolling window |
+```
+
+### Phase 11C.1A boundary (must hold for the entire PR-A scope)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `telegram.outbound_enabled` (schema-locked) | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| `market_data.provider`                      | `binance_public`             |
+| `market_data.read_only`                     | `True`                       |
+| `market_data.symbol_limit`                  | `5` default                  |
+| `market_data.rest_poll_interval_seconds`    | `60.0` default               |
+| `rest_governor.weight_budget_per_minute`    | `300` default                |
+| `rest_governor.on_429`                      | `"backoff"` (only allowed)   |
+| `rest_governor.on_418`                      | `"shutdown"` (only allowed)  |
+| Four ExchangeClientBase write surfaces      | refuse with SafeModeViolation, including AFTER 418 latch |
+
+### Phase 11C.1A acceptance criteria
+
+1. `pytest` 全部通过. Currently `2089 passed in 7.17s`.
+2. The new test file
+   `tests/unit/test_phase11c1a_rate_limit_governor.py` pins every
+   behaviour the brief calls out. The full list:
+   - `test_default_phase11c_polling_is_conservative`
+   - `test_rest_governor_config_refuses_pathological_values`
+   - `test_429_triggers_backoff_and_stops_batch`
+   - `test_retry_after_header_is_respected`
+   - `test_used_weight_header_is_recorded`
+   - `test_418_triggers_shutdown_without_retry`
+   - `test_rest_governor_blocks_when_budget_exceeded`
+   - `test_governor_refuses_during_active_backoff`
+   - `test_rest_not_called_for_all_symbols_every_loop`
+   - `test_legacy_detail_per_loop_flag_re_enables_old_behaviour`
+   - `test_no_live_trading_flags_after_429`
+   - `test_no_live_trading_flags_after_418`
+   - `test_phase_11c_write_surfaces_still_refuse_after_418`
+   - `test_daily_report_contains_rate_limit_metrics`
+   - `test_daily_report_after_418_marks_rate_limit_ban`
+   - `test_export_service_handles_rate_limit_events`
+3. The four ExchangeClientBase write surfaces still raise
+   :class:`SafeModeViolation` after the governor latches into
+   protection mode.
+4. The Phase 8.5 export pipeline accepts the new RATE_LIMIT_*
+   event types.
+5. The Phase 10A replay engine and Phase 10B reflection engine
+   accept the new event types (no schema regression - asserted by
+   the existing replay / reflection test surface).
+6. The daily Markdown report contains a new "Phase 11C.1A
+   rate-limit governor" section with every required field
+   (rate_limit_429_count, rate_limit_418_count,
+   retry_after_seconds_last/total, used_weight_1m_last/max,
+   rest_requests_total, rest_requests_skipped_by_budget,
+   rate_limit_protection_triggered, rate_limit_ban,
+   ingestion_errors).
+7. No `binance_rate_limit.py` import touches a third-party HTTP /
+   WebSocket / SDK / LLM / Telegram bot package; only stdlib +
+   loguru + the existing `app.*` modules.
+
+### Phase 11C.1A explicitly does NOT
+
+- ship the WebSocket-first all-market radar (PR-B).
+- ship multi-candidate priority ranking (PR-B).
+- ship cluster exposure control (PR-C).
+- accept any Binance API key / API secret.
+- call any signed endpoint.
+- call any /order, /account, /position, /leverage, /margin endpoint.
+- connect to DeepSeek.
+- connect to a real Telegram bot.
+- auto-retry after a 418.
+- switch endpoints to evade a 418.
+- rotate source IP to evade a 418.
+- enter Phase 12.
+
+### Pause on the Phase 11C real-data 24h acceptance
+
+The Phase 11C real-data 24h acceptance run defined in the parent
+phase below is **paused** until PR-A merges. PR-A on its own does
+NOT issue per-loop detail REST (the candidate ranking lands in
+PR-B) so the parent acceptance run will only resume once PR-B has
+also landed.
+
+---
+
 
 ## 1. What Phase 11C is
 

@@ -94,6 +94,21 @@ class DailyReportSnapshot:
     degraded_notes: tuple[str, ...] = field(default_factory=tuple)
     safety_summary: dict[str, bool] = field(default_factory=dict)
     paper_cloud_summary: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1A - Binance public REST rate-limit governor metrics.
+    rate_limit_429_count: int = 0
+    rate_limit_418_count: int = 0
+    retry_after_seconds_last: int = 0
+    retry_after_seconds_total: int = 0
+    used_weight_1m_last: int = 0
+    used_weight_1m_max: int = 0
+    rest_requests_total: int = 0
+    rest_requests_skipped_by_budget: int = 0
+    rate_limit_protection_triggered: bool = False
+    rate_limit_ban: bool = False
+    rate_limit_backoff_started_count: int = 0
+    rate_limit_backoff_ended_count: int = 0
+    ingestion_errors: int = 0
+    rate_limit_metrics: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -158,6 +173,29 @@ class DailyReportSnapshot:
             "degraded_notes": list(self.degraded_notes),
             "safety_summary": dict(self.safety_summary),
             "paper_cloud_summary": dict(self.paper_cloud_summary),
+            # Phase 11C.1A rate-limit metrics.
+            "rate_limit_429_count": int(self.rate_limit_429_count),
+            "rate_limit_418_count": int(self.rate_limit_418_count),
+            "retry_after_seconds_last": int(self.retry_after_seconds_last),
+            "retry_after_seconds_total": int(self.retry_after_seconds_total),
+            "used_weight_1m_last": int(self.used_weight_1m_last),
+            "used_weight_1m_max": int(self.used_weight_1m_max),
+            "rest_requests_total": int(self.rest_requests_total),
+            "rest_requests_skipped_by_budget": int(
+                self.rest_requests_skipped_by_budget
+            ),
+            "rate_limit_protection_triggered": bool(
+                self.rate_limit_protection_triggered
+            ),
+            "rate_limit_ban": bool(self.rate_limit_ban),
+            "rate_limit_backoff_started_count": int(
+                self.rate_limit_backoff_started_count
+            ),
+            "rate_limit_backoff_ended_count": int(
+                self.rate_limit_backoff_ended_count
+            ),
+            "ingestion_errors": int(self.ingestion_errors),
+            "rate_limit_metrics": dict(self.rate_limit_metrics),
         }
 
 
@@ -198,6 +236,8 @@ class DailyReportBuilder:
         write_to_disk: bool = True,
         error_notes: Iterable[str] = (),
         degraded_notes: Iterable[str] = (),
+        rate_limit_metrics: Mapping[str, Any] | None = None,
+        ingestion_errors: int | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -205,6 +245,22 @@ class DailyReportBuilder:
         builder pulls every event in ``[started_at_ms, finished_at_ms]``
         from events.db so the cadence-driven cloud loop reports the
         previous 24-hour window without leakage.
+
+        Phase 11C.1A additions:
+
+        ``rate_limit_metrics`` carries the
+        :meth:`BinancePublicRestGovernor.metrics_payload` dict so the
+        builder can report exact governor counters that may not be
+        fully reconstructable from events.db alone (the governor still
+        emits ``RATE_LIMIT_429`` / ``RATE_LIMIT_BACKOFF_STARTED`` /
+        ``RATE_LIMIT_BACKOFF_ENDED`` / ``RATE_LIMIT_418`` /
+        ``RATE_LIMIT_PROTECTION_ENTERED`` events on every transition,
+        and the builder cross-checks the event counts against the
+        governor counters before rendering).
+
+        ``ingestion_errors`` is the runner-side count of failed REST
+        ingest attempts (e.g. transport failures that did NOT trigger
+        a 429 or 418).
         """
         finished_ms = (
             finished_at_ms
@@ -223,6 +279,8 @@ class DailyReportBuilder:
             paper_cloud_summary=paper_cloud_summary or {},
             error_notes=tuple(error_notes),
             degraded_notes=tuple(degraded_notes),
+            rate_limit_metrics=dict(rate_limit_metrics or {}),
+            ingestion_errors=ingestion_errors,
         )
 
         if write_to_disk:
@@ -244,6 +302,8 @@ class DailyReportBuilder:
         paper_cloud_summary: Mapping[str, Any],
         error_notes: tuple[str, ...],
         degraded_notes: tuple[str, ...],
+        rate_limit_metrics: Mapping[str, Any] | None = None,
+        ingestion_errors: int | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -316,6 +376,47 @@ class DailyReportBuilder:
 
         capital_count = sum(
             type_counts.get(t.value, 0) for t in CAPITAL_EVENT_TYPES
+        )
+
+        # Phase 11C.1A - rate-limit metrics. The runner passes the
+        # governor's metrics_payload() through ``rate_limit_metrics``.
+        # Counts are double-checked against the events.db audit trail
+        # so a stale governor counter cannot hide a real protection
+        # event.
+        gov_metrics = dict(rate_limit_metrics or {})
+        rate_limit_429_count = max(
+            int(gov_metrics.get("rate_limit_429_count", 0) or 0),
+            int(type_counts.get(EventType.RATE_LIMIT_429.value, 0)),
+        )
+        rate_limit_418_count = max(
+            int(gov_metrics.get("rate_limit_418_count", 0) or 0),
+            int(type_counts.get(EventType.RATE_LIMIT_418.value, 0)),
+        )
+        backoff_started_from_events = int(
+            type_counts.get(EventType.RATE_LIMIT_BACKOFF_STARTED.value, 0)
+        )
+        backoff_ended_from_events = int(
+            type_counts.get(EventType.RATE_LIMIT_BACKOFF_ENDED.value, 0)
+        )
+        protection_entered_from_events = int(
+            type_counts.get(
+                EventType.RATE_LIMIT_PROTECTION_ENTERED.value, 0
+            )
+        )
+        rate_limit_protection_triggered = bool(
+            gov_metrics.get("rate_limit_protection_triggered", False)
+        ) or protection_entered_from_events > 0
+        rate_limit_ban = bool(
+            gov_metrics.get("rate_limit_ban", False)
+        ) or rate_limit_418_count > 0
+        # If the governor never saw a 429/418 the daily report still
+        # shows zero - that is the steady-state Phase 11C.1A
+        # invariant: a healthy run shows zero counts and the
+        # protection flag stays False.
+        ingestion_errors_value = int(
+            ingestion_errors
+            if ingestion_errors is not None
+            else int(gov_metrics.get("ingestion_errors", 0) or 0)
         )
 
         snapshot = DailyReportSnapshot(
@@ -400,6 +501,45 @@ class DailyReportBuilder:
             degraded_notes=tuple(list(degraded_notes) + local_degraded_notes),
             safety_summary=dict(safety_summary),
             paper_cloud_summary=dict(paper_cloud_summary),
+            # Phase 11C.1A rate-limit metrics.
+            rate_limit_429_count=int(rate_limit_429_count),
+            rate_limit_418_count=int(rate_limit_418_count),
+            retry_after_seconds_last=int(
+                gov_metrics.get("retry_after_seconds_last", 0) or 0
+            ),
+            retry_after_seconds_total=int(
+                gov_metrics.get("retry_after_seconds_total", 0) or 0
+            ),
+            used_weight_1m_last=int(
+                gov_metrics.get("used_weight_1m_last", 0) or 0
+            ),
+            used_weight_1m_max=int(
+                gov_metrics.get("used_weight_1m_max", 0) or 0
+            ),
+            rest_requests_total=int(
+                gov_metrics.get("rest_requests_total", 0) or 0
+            ),
+            rest_requests_skipped_by_budget=int(
+                gov_metrics.get("rest_requests_skipped_by_budget", 0) or 0
+            ),
+            rate_limit_protection_triggered=bool(
+                rate_limit_protection_triggered
+            ),
+            rate_limit_ban=bool(rate_limit_ban),
+            rate_limit_backoff_started_count=int(
+                max(
+                    int(gov_metrics.get("backoff_started_count", 0) or 0),
+                    backoff_started_from_events,
+                )
+            ),
+            rate_limit_backoff_ended_count=int(
+                max(
+                    int(gov_metrics.get("backoff_ended_count", 0) or 0),
+                    backoff_ended_from_events,
+                )
+            ),
+            ingestion_errors=int(ingestion_errors_value),
+            rate_limit_metrics=dict(gov_metrics),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -443,6 +583,32 @@ class DailyReportBuilder:
         degraded_notes = "\n".join(
             f"- `{n}`" for n in snapshot.degraded_notes
         ) or "- (no degraded notes in this window)"
+
+        rate_limit_block = (
+            f"- HTTP 429 count: **{snapshot.rate_limit_429_count}**\n"
+            f"- HTTP 418 count: **{snapshot.rate_limit_418_count}**\n"
+            f"- Retry-After last (seconds): "
+            f"**{snapshot.retry_after_seconds_last}**\n"
+            f"- Retry-After total (seconds): "
+            f"**{snapshot.retry_after_seconds_total}**\n"
+            f"- X-MBX-USED-WEIGHT-1M last: "
+            f"**{snapshot.used_weight_1m_last}**\n"
+            f"- X-MBX-USED-WEIGHT-1M max: "
+            f"**{snapshot.used_weight_1m_max}**\n"
+            f"- REST requests total: **{snapshot.rest_requests_total}**\n"
+            f"- REST requests skipped by budget: "
+            f"**{snapshot.rest_requests_skipped_by_budget}**\n"
+            f"- Backoff windows started: "
+            f"**{snapshot.rate_limit_backoff_started_count}**\n"
+            f"- Backoff windows ended: "
+            f"**{snapshot.rate_limit_backoff_ended_count}**\n"
+            f"- Rate-limit protection triggered: "
+            f"**{snapshot.rate_limit_protection_triggered}**\n"
+            f"- Rate-limit IP ban observed: "
+            f"**{snapshot.rate_limit_ban}**\n"
+            f"- Ingestion errors (transport): "
+            f"**{snapshot.ingestion_errors}**\n"
+        )
 
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
@@ -492,6 +658,7 @@ class DailyReportBuilder:
             f"- LLM events: interpreted={snapshot.llm_interpreted_count} "
             f"degraded={snapshot.llm_degraded_count} "
             f"schema_rejected={snapshot.llm_schema_rejected_count}\n\n"
+            f"## Phase 11C.1A rate-limit governor\n{rate_limit_block}\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"
