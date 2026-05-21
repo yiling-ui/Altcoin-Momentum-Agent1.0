@@ -58,7 +58,23 @@ def test_phase11c_market_data_section_locked_to_public_only():
     md = s.market_data
     assert md.provider == "binance_public"
     assert md.read_only is True
-    assert md.symbol_limit == 20
+    # Phase 11C.1A lowered the default symbol_limit from 20 to 5 after
+    # the first 24h test against the real Binance public REST endpoints
+    # triggered HTTP 429 / 418. The lower default leaves more headroom
+    # for the new BinancePublicRestGovernor.
+    assert md.symbol_limit == 5
+    # Phase 11C.1A lowered the default poll cadence from 5 s to 60 s.
+    assert md.rest_poll_interval_seconds == 60.0
+    # Phase 11C.1A REST rate-limit governor defaults.
+    rg = md.rest_governor
+    assert rg.weight_budget_per_minute == 300
+    assert rg.soft_weight_ratio == 0.50
+    assert rg.hard_weight_ratio == 0.75
+    assert rg.retry_after_default_seconds == 300
+    assert rg.on_429 == "backoff"
+    assert rg.on_418 == "shutdown"
+    assert rg.candidate_detail_limit == 3
+    assert rg.rest_layering_enabled is True
     # Schema validators reject every other provider / read_only=False.
     from pydantic import ValidationError
 

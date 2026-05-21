@@ -60,6 +60,13 @@ from app.exchanges.binance_public import (  # noqa: E402
     DEFAULT_REST_BASE_URL,
     PublicTransport,
 )
+from app.exchanges.binance_rate_limit import (  # noqa: E402
+    BinancePublicRestGovernor,
+    RateLimitBackoffActive,
+    RateLimitBudgetExceeded,
+    RateLimitProtectionError,
+    RestGovernorConfig,
+)
 from app.exports.service import TestDataExportService  # noqa: E402
 from app.incidents.repository import IncidentRepository  # noqa: E402
 from app.market_data.buffer import MarketDataBuffer  # noqa: E402
@@ -146,9 +153,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--symbol-limit",
         type=int,
-        default=20,
+        default=5,
         dest="symbol_limit",
-        help="number of top USDT-perpetual symbols to track (default 20).",
+        help=(
+            "number of top USDT-perpetual symbols to track "
+            "(default 5; Phase 11C.1A lowered the default from 20 "
+            "after the first 24h test triggered Binance HTTP 429/418)."
+        ),
     )
     p.add_argument(
         "--rest-base-url",
@@ -204,6 +215,33 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "path to paper_cloud.yaml. Defaults to app/config/paper_cloud.yaml. "
             "Used to share the env-guard configuration with Phase 11B."
+        ),
+    )
+    p.add_argument(
+        "--candidate-detail-limit",
+        type=int,
+        default=None,
+        dest="candidate_detail_limit",
+        help=(
+            "Phase 11C.1A: maximum number of candidate symbols that may "
+            "receive per-loop detail REST calls (depth / aggTrades / "
+            "openInterest / premiumIndex). Defaults to "
+            "settings.market_data.rest_governor.candidate_detail_limit "
+            "(3). PR-A ships no candidate ranking yet, so this caps the "
+            "*future* candidate-only path; in PR-A no detail REST is "
+            "issued per loop unless --legacy-detail-per-loop is set."
+        ),
+    )
+    p.add_argument(
+        "--legacy-detail-per-loop",
+        action="store_true",
+        dest="legacy_detail_per_loop",
+        default=False,
+        help=(
+            "Phase 11C.1A: re-enable the original 'fetch every detail "
+            "endpoint for every symbol every loop' behaviour. OFF by "
+            "default because it triggered HTTP 429/418 in the first "
+            "24h test. Use only with --dry-run."
         ),
     )
     return p
@@ -325,6 +363,10 @@ class _Phase11CRunStats:
     ingestion_errors: int = 0
     endpoint_call_counts: dict[str, int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    # Phase 11C.1A - governor metrics snapshot at shutdown.
+    governor_metrics: dict[str, Any] = field(default_factory=dict)
+    rate_limit_protection_triggered: bool = False
+    rate_limit_ban: bool = False
 
 
 def _resolve_symbols(
@@ -432,7 +474,33 @@ def main(argv: list[str] | None = None) -> int:
         event_repo=event_repo,
     )
 
-    # 6. Build the public client.
+    # 6. Build the rate-limit governor + the public client.
+    governor_section = market_data_cfg.rest_governor
+    candidate_detail_limit = (
+        int(args.candidate_detail_limit)
+        if args.candidate_detail_limit is not None
+        else int(governor_section.candidate_detail_limit)
+    )
+    if candidate_detail_limit < 0:
+        candidate_detail_limit = 0
+    governor = BinancePublicRestGovernor(
+        config=RestGovernorConfig(
+            weight_budget_per_minute=int(
+                governor_section.weight_budget_per_minute
+            ),
+            soft_weight_ratio=float(governor_section.soft_weight_ratio),
+            hard_weight_ratio=float(governor_section.hard_weight_ratio),
+            retry_after_default_seconds=int(
+                governor_section.retry_after_default_seconds
+            ),
+            on_429=str(governor_section.on_429),
+            on_418=str(governor_section.on_418),
+            enabled=bool(governor_section.enabled),
+        ),
+        event_repo=event_repo,
+        protection_hook=incidents,
+    )
+
     transport = _build_dry_run_transport() if args.dry_run else None
     try:
         client = BinancePublicClient(
@@ -440,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             transport=transport,
             request_timeout_seconds=float(market_data_cfg.request_timeout_seconds),
             event_repo=event_repo,
+            governor=governor,
         )
     except SafeModeViolation as exc:
         print(
@@ -475,9 +544,24 @@ def main(argv: list[str] | None = None) -> int:
         public_client=client,
     )
 
-    # 8. Resolve symbols.
+    # 8. Resolve symbols (REST bootstrap: ticker/24hr or exchangeInfo
+    #    via the top-USDT-perpetual scan; one-shot, NOT per loop).
+    rest_layering_enabled = (
+        bool(governor_section.rest_layering_enabled)
+        and not bool(args.legacy_detail_per_loop)
+    )
     try:
-        symbols = _resolve_symbols(args, market_data_cfg=market_data_cfg, client=client)
+        symbols = _resolve_symbols(
+            args, market_data_cfg=market_data_cfg, client=client
+        )
+    except RateLimitProtectionError as exc:
+        print(
+            f"[AMA-RT][phase11c] rate-limit protection during bootstrap: {exc}",
+            file=sys.stderr,
+        )
+        client.stop(reason="phase11c_runner_protection_during_bootstrap")
+        dbs.close()
+        return 2
     except ExchangeError as exc:
         print(
             f"[AMA-RT][phase11c] symbol resolution failed: {exc}",
@@ -521,35 +605,89 @@ def main(argv: list[str] | None = None) -> int:
             poll_interval=poll_interval,
             dry_run=args.dry_run,
             env_report_passed=env_report.passed,
+            governor=governor,
+            rest_layering_enabled=rest_layering_enabled,
+            candidate_detail_limit=candidate_detail_limit,
         )
 
     # 10. Main loop.
+    #
+    # Phase 11C.1A REST layering:
+    #
+    #   * exchangeInfo / ticker/24hr: bootstrap above; not pulled per loop.
+    #   * depth / aggTrades / openInterest / premiumIndex / bookTicker:
+    #     gated on a candidate ranking. PR-A ships an empty candidate
+    #     set so no detail REST call lands per loop. The governor is
+    #     wired but its budget should remain near-zero in steady state
+    #     (only the bootstrap weight is consumed).
+    #
+    # ``--legacy-detail-per-loop`` re-enables the original behaviour
+    # (every detail endpoint for every symbol every tick). It is OFF
+    # by default because that pattern triggered Binance HTTP 429/418
+    # in the first 24h test.
     deadline = time.monotonic() + duration_seconds
     try:
         while not stop_flag["stop"] and time.monotonic() < deadline:
             stats.iterations += 1
             chain.begin_scan_batch()
-            results = ingestor.ingest_many(symbols)
-            for sym_snap in results:
+
+            # PR-A: candidate ranking lands in PR-B. We expose the
+            # extension point so the runner shape matches the brief;
+            # the empty set keeps detail REST silent.
+            candidates: list[str] = []
+            if not rest_layering_enabled:
+                # Legacy path: behave like Phase 11C pre-1A. Used only
+                # for back-compat smoke tests under --dry-run.
+                candidates = list(symbols[: candidate_detail_limit or len(symbols)])
+
+            if candidates:
                 try:
-                    chain_result = chain.drive(sym_snap)
-                except Exception as exc:  # pragma: no cover - defensive
-                    stats.notes.append(
-                        f"chain_error:{sym_snap.symbol}:{type(exc).__name__}"
+                    results = ingestor.ingest_many(candidates)
+                except RateLimitProtectionError as exc:
+                    stats.notes.append(f"rate_limit_protection:{exc}")
+                    stats.rate_limit_protection_triggered = True
+                    stats.rate_limit_ban = True
+                    print(
+                        f"[AMA-RT][phase11c] rate-limit protection latched: {exc}",
+                        file=sys.stderr,
                     )
-                    continue
-                stats.chains_emitted += 1
-                if chain_result.risk_approved:
-                    stats.risk_approved += 1
-                else:
-                    stats.risk_rejected += 1
-                if chain_result.learning_ready_attached:
-                    stats.learning_ready_attached += 1
+                    break
+                except (RateLimitBackoffActive, RateLimitBudgetExceeded) as exc:
+                    stats.notes.append(f"rate_limit_backoff:{type(exc).__name__}")
+                    results = []
+                for sym_snap in results:
+                    try:
+                        chain_result = chain.drive(sym_snap)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        stats.notes.append(
+                            f"chain_error:{sym_snap.symbol}:{type(exc).__name__}"
+                        )
+                        continue
+                    stats.chains_emitted += 1
+                    if chain_result.risk_approved:
+                        stats.risk_approved += 1
+                    else:
+                        stats.risk_rejected += 1
+                    if chain_result.learning_ready_attached:
+                        stats.learning_ready_attached += 1
+
             stats.snapshots_emitted = ingestor.snapshots_emitted
             stats.ingestion_errors = ingestor.ingestion_errors
             stats.endpoint_call_counts = dict(client.endpoint_call_counts)
+            stats.governor_metrics = governor.metrics_payload()
+            stats.rate_limit_protection_triggered = (
+                bool(governor.in_protection_mode)
+                or stats.rate_limit_protection_triggered
+            )
+            stats.rate_limit_ban = (
+                bool(governor.rate_limit_ban) or stats.rate_limit_ban
+            )
             # Pin invariants on every loop tick.
             client.assert_public_only()
+            # Hard stop if the governor latched into protection mode.
+            if governor.in_protection_mode:
+                stats.notes.append("rate_limit_protection_mode")
+                break
             # Sleep until the next tick. We use small chunks so Ctrl+C
             # is responsive.
             slept = 0.0
@@ -558,6 +696,14 @@ def main(argv: list[str] | None = None) -> int:
                 slept += 0.5
     except KeyboardInterrupt:  # pragma: no cover - rare
         stats.notes.append("keyboard_interrupt")
+    except RateLimitProtectionError as exc:
+        stats.notes.append(f"rate_limit_protection:{exc}")
+        stats.rate_limit_protection_triggered = True
+        stats.rate_limit_ban = True
+        print(
+            f"[AMA-RT][phase11c] RateLimitProtectionError in main loop: {exc}",
+            file=sys.stderr,
+        )
     except SafeModeViolation as exc:
         stats.notes.append(f"safe_mode_violation:{exc}")
         print(
@@ -568,6 +714,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     finally:
         stats.finished_at_ms = now_ms()
+        stats.governor_metrics = governor.metrics_payload()
 
     # 11. Build the daily report on shutdown.
     daily_report_path = None
@@ -593,7 +740,7 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                 },
                 paper_cloud_summary={
-                    "phase": "11C",
+                    "phase": "11C.1A",
                     "provider": "binance_public",
                     "rest_base_url": client.rest_base_url,
                     "symbol_limit": int(args.symbol_limit),
@@ -608,9 +755,13 @@ def main(argv: list[str] | None = None) -> int:
                     "ingestion_errors": int(stats.ingestion_errors),
                     "endpoint_call_counts": dict(stats.endpoint_call_counts),
                     "dry_run": bool(args.dry_run),
+                    "rest_layering_enabled": bool(rest_layering_enabled),
+                    "candidate_detail_limit": int(candidate_detail_limit),
                 },
                 error_notes=tuple(stats.notes),
                 degraded_notes=(),
+                rate_limit_metrics=dict(stats.governor_metrics),
+                ingestion_errors=int(stats.ingestion_errors),
             )
             daily_report_path = (
                 daily_dir / f"{snapshot.date}-phase11c-public-market.md"
@@ -631,7 +782,7 @@ def main(argv: list[str] | None = None) -> int:
 
     client.stop(reason="phase11c_runner_shutdown")
     dbs.close()
-    return 0
+    return 2 if stats.rate_limit_protection_triggered else 0
 
 
 # ---------------------------------------------------------------------------
@@ -648,10 +799,22 @@ def _print_banner(
     poll_interval: float,
     dry_run: bool,
     env_report_passed: bool,
+    governor: BinancePublicRestGovernor | None = None,
+    rest_layering_enabled: bool = True,
+    candidate_detail_limit: int = 0,
 ) -> None:
+    governor_summary = "off"
+    if governor is not None:
+        cfg = governor.config
+        governor_summary = (
+            f"on(budget={cfg.weight_budget_per_minute}/min "
+            f"soft={cfg.soft_weight_ratio} hard={cfg.hard_weight_ratio} "
+            f"on_429={cfg.on_429} on_418={cfg.on_418} "
+            f"retry_after_default={cfg.retry_after_default_seconds}s)"
+        )
     print(
         "[AMA-RT] Phase 11C - Real Binance Public Market Data Read-Only Paper "
-        f"v1.4.0a11c "
+        f"v1.4.0a11c.1a "
         f"mode={settings.trading_mode} "
         f"live_trading={settings.live_trading_enabled} "
         f"right_tail={settings.right_tail_enabled} "
@@ -664,6 +827,9 @@ def _print_banner(
         f"symbols={len(symbols)} "
         f"duration_seconds={int(duration_seconds)} "
         f"poll_interval_seconds={poll_interval} "
+        f"rest_layering_enabled={rest_layering_enabled} "
+        f"candidate_detail_limit={candidate_detail_limit} "
+        f"governor={governor_summary} "
         f"dry_run={dry_run} "
         f"env_guard_passed={env_report_passed}"
     )
@@ -678,6 +844,7 @@ def _print_exit_banner(
     duration_s = max(
         0, int((stats.finished_at_ms - stats.started_at_ms) // 1000)
     )
+    metrics = stats.governor_metrics or {}
     print(
         "[AMA-RT] Phase 11C run finished "
         f"duration_seconds={duration_s} "
@@ -689,6 +856,11 @@ def _print_exit_banner(
         f"snapshots_emitted={stats.snapshots_emitted} "
         f"ingestion_errors={stats.ingestion_errors} "
         f"public_endpoint_calls={client.total_calls} "
+        f"rate_limit_429_count={metrics.get('rate_limit_429_count', 0)} "
+        f"rate_limit_418_count={metrics.get('rate_limit_418_count', 0)} "
+        f"used_weight_1m_max={metrics.get('used_weight_1m_max', 0)} "
+        f"rate_limit_protection_triggered={stats.rate_limit_protection_triggered} "
+        f"rate_limit_ban={stats.rate_limit_ban} "
         f"daily_report={daily_report_path or '-'} "
         f"notes={','.join(stats.notes) or '-'}"
     )

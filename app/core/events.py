@@ -113,6 +113,32 @@ class EventType(str, Enum):
     DATA_EXPORT_GENERATED = "DATA_EXPORT_GENERATED"
     DATA_EXPORT_FAILED = "DATA_EXPORT_FAILED"
 
+    # ---- Phase 11C.1A - Binance Public REST Rate-Limit Governor ----------
+    # The governor wraps every public REST call. The five events below
+    # describe its full lifecycle:
+    #
+    #   RATE_LIMIT_429              - HTTP 429 observed; the governor is
+    #                                 about to start a Retry-After backoff.
+    #   RATE_LIMIT_BACKOFF_STARTED  - the governor entered the backoff
+    #                                 sleep window. No new REST call may
+    #                                 land until BACKOFF_ENDED is emitted.
+    #   RATE_LIMIT_BACKOFF_ENDED    - the backoff window expired and the
+    #                                 governor is accepting requests
+    #                                 again.
+    #   RATE_LIMIT_418              - HTTP 418 observed; Binance has IP
+    #                                 banned the gateway. The governor
+    #                                 latches into protection mode and
+    #                                 raises on every subsequent call.
+    #   RATE_LIMIT_PROTECTION_ENTERED - the governor latched into rate
+    #                                 limit protection mode. Pairs with
+    #                                 a P1 INCIDENT_OPENED so the
+    #                                 incident timeline matches.
+    RATE_LIMIT_429 = "RATE_LIMIT_429"
+    RATE_LIMIT_BACKOFF_STARTED = "RATE_LIMIT_BACKOFF_STARTED"
+    RATE_LIMIT_BACKOFF_ENDED = "RATE_LIMIT_BACKOFF_ENDED"
+    RATE_LIMIT_418 = "RATE_LIMIT_418"
+    RATE_LIMIT_PROTECTION_ENTERED = "RATE_LIMIT_PROTECTION_ENTERED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

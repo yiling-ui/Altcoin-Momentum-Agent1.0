@@ -49,39 +49,132 @@ real Telegram:      not connected
 real DeepSeek:      not connected
 ```
 
-## Open phase: Phase 11C
+## Open phase: Phase 11C.1A
 
-**Phase 11C - Real Binance Public Market Data Read-Only Paper.**
-First phase that talks to a real exchange. Public-market REST only;
-no API key; no signed endpoint; no account / position / leverage /
-margin endpoint; no real order; no DeepSeek; no Telegram outbound.
+**Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
+Protection.** Phase 11C real-data acceptance is paused until this
+PR-A lands. The first 24h test against real `fapi.binance.com`
+returned HTTP 429 then HTTP 418 (IP ban) at the original Phase 11C
+defaults; the safety lock held throughout (no API key, no signed
+endpoint, no real order, `mode=paper`), but the gateway was
+unusable for real-data acceptance until the rate-limit problem is
+fixed.
 
-### Phase 11C boundary (must hold for the entire run)
+Phase 11C.1A is the **first** of three follow-up PRs:
 
-| Invariant                                | Required value               |
-| ---------------------------------------- | ---------------------------- |
-| `mode`                                   | `paper`                      |
-| `live_trading`                           | `False`                      |
-| `right_tail`                             | `False`                      |
-| `llm`                                    | `False`                      |
-| `exchange_live_orders`                   | `False`                      |
-| `telegram_outbound_enabled`              | `False`                      |
-| `telegram.outbound_enabled` (schema-locked) | `False`                   |
-| `binance_private_api_enabled`            | `False`                      |
-| `safety.forbid_private_credentials`      | `True`                       |
-| `safety.forbid_signed_endpoints`         | `True`                       |
-| `safety.forbid_trade_endpoints`          | `True`                       |
-| `safety.forbid_account_endpoints`        | `True`                       |
-| `safety.forbid_position_endpoints`       | `True`                       |
-| `safety.forbid_leverage_endpoints`       | `True`                       |
-| `safety.forbid_margin_endpoints`         | `True`                       |
-| `safety.forbid_live_trading`             | `True`                       |
-| `safety.forbid_right_tail`               | `True`                       |
-| `safety.forbid_llm_trade_decisions`      | `True`                       |
-| `safety.forbid_telegram_outbound`        | `True`                       |
-| `market_data.provider`                   | `binance_public`             |
-| `market_data.read_only`                  | `True`                       |
-| `market_data.symbol_limit`               | `(0, 200]`, default 20       |
+  - **PR-A** (this branch, `feature/phase-11c1-rest-rate-limit-governor`)
+    ships `BinancePublicRestGovernor` (sliding-window weight budget,
+    429 backoff, 418 shutdown, `Retry-After`, used-weight tracking),
+    lower defaults, and the layered REST runner. NO new candidate
+    ranking, NO WebSocket transport.
+  - **PR-B** (separate branch, NOT in this PR) ships the
+    WebSocket-first all-market radar + multi-candidate priority
+    ranking + `candidate_detail_limit` consumption.
+  - **PR-C** (separate branch, NOT in this PR) ships cluster
+    exposure control.
+
+### Phase 11C.1A boundary (must hold for the entire PR-A scope)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `telegram.outbound_enabled` (schema-locked) | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| `market_data.provider`                      | `binance_public`             |
+| `market_data.read_only`                     | `True`                       |
+| `market_data.symbol_limit` (default)        | `5` (was `20`, lowered)      |
+| `market_data.rest_poll_interval_seconds` (default) | `60.0` (was `5.0`)    |
+| `market_data.rest_governor.weight_budget_per_minute` | `300`              |
+| `market_data.rest_governor.soft_weight_ratio`        | `0.50`             |
+| `market_data.rest_governor.hard_weight_ratio`        | `0.75`             |
+| `market_data.rest_governor.retry_after_default_seconds` | `300`           |
+| `market_data.rest_governor.on_429`          | `"backoff"` (only allowed)   |
+| `market_data.rest_governor.on_418`          | `"shutdown"` (only allowed)  |
+| `market_data.rest_governor.candidate_detail_limit` | `3`                   |
+| `market_data.rest_governor.rest_layering_enabled`  | `True`                |
+
+### Phase 11C.1A acceptance criteria
+
+1. `pytest` 全部通过 (currently `2089 passed`).
+2. The new test file `tests/unit/test_phase11c1a_rate_limit_governor.py`
+   pins, at minimum, every behaviour the brief calls out:
+   - `test_429_triggers_backoff_and_stops_batch`
+   - `test_418_triggers_shutdown_without_retry`
+   - `test_retry_after_header_is_respected`
+   - `test_used_weight_header_is_recorded`
+   - `test_rest_governor_blocks_when_budget_exceeded`
+   - `test_default_phase11c_polling_is_conservative`
+   - `test_rest_not_called_for_all_symbols_every_loop`
+   - `test_no_live_trading_flags_after_429`
+   - `test_no_live_trading_flags_after_418`
+   - `test_daily_report_contains_rate_limit_metrics`
+3. The four `ExchangeClientBase` write surfaces still raise
+   :class:`SafeModeViolation` (asserted by
+   `test_phase_11c_write_surfaces_still_refuse_after_418` even after
+   the governor latches into protection mode).
+4. The Phase 8.5 export pipeline accepts the five new
+   `RATE_LIMIT_*` event types.
+5. The Phase 10A replay engine accepts the new events (no schema
+   regression - asserted by the existing replay test suite).
+6. The Phase 10B reflection engine accepts the new events.
+7. The daily Markdown report contains the `Phase 11C.1A
+   rate-limit governor` section with every required field.
+8. No `binance_rate_limit.py` import touches a third-party HTTP /
+   WebSocket / SDK / LLM / Telegram bot package; only stdlib +
+   loguru + the existing `app.*` modules.
+
+### Phase 11C.1A explicitly forbids
+
+  - Connecting to the Binance trading API.
+  - Reading or storing any Binance API key / API secret.
+  - Calling any signed endpoint.
+  - Calling any /order, /account, /position, /leverage, /margin endpoint.
+  - Connecting to DeepSeek.
+  - Connecting to the real Telegram outbound HTTP transport.
+  - Auto-retrying after a 418.
+  - Switching endpoints to evade a 418.
+  - Rotating source IP to evade a 418.
+  - Entering Phase 12.
+
+### How Phase 11C.1A unblocks the Phase 11C real-data acceptance run
+
+After PR-A merges:
+
+  - The runner caps total per-IP weight at 300/min.
+  - Bootstrap costs ~41 weight (one `exchangeInfo` + one
+    `ticker/24hr`) and the steady-state loop costs ~0 weight in PR-A
+    (no candidates -> no detail REST).
+  - Any 429 sleeps the `Retry-After` window and emits the
+    `RATE_LIMIT_429` / `RATE_LIMIT_BACKOFF_STARTED` /
+    `RATE_LIMIT_BACKOFF_ENDED` audit trail.
+  - Any 418 latches protection mode, opens a P1 incident, and
+    stops the runner with `rc=2`. The runner does NOT auto-retry,
+    does NOT switch endpoints, does NOT rotate source IP.
+
+The Phase 11C real-data 24h acceptance run will resume only after
+PR-B (WebSocket-first radar + candidate ranking) has also landed,
+because PR-A on its own deliberately leaves the per-loop detail
+REST silent.
+
+## Closed phase: Phase 11C (held)
+
+Phase 11C remains open as a parent phase; its real-data acceptance
+run is paused until Phase 11C.1A + 11C.1B + 11C.1C ship. The
+public-market client, allowlist, event chain, and runner skeleton
+all continue to satisfy their original Phase 11C acceptance gates;
+only the cadence and detail-REST behaviour have been narrowed.
+
+## Closed phases (carry-forward)
+
+The closed-phase ledger above remains unchanged. The Phase 11C
+parent phase stays open until all three follow-up PRs land and the
+real-data 24h acceptance run is reproduced.
 
 ### Phase 11C acceptance criteria
 

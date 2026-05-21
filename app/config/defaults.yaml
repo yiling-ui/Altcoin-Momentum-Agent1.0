@@ -66,10 +66,17 @@ market_data:
   # order / position / leverage / margin endpoint). The runner
   # refuses to start if any flag below is changed in a way that
   # would imply a private endpoint is being called.
+  #
+  # Phase 11C.1A defaults are conservative because the gateway hit
+  # HTTP 429 / 418 the first time it ran against the real exchange
+  # at the original (symbol_limit=20, rest_poll_interval=5s) cadence.
+  # The Phase 11C.1A governor (app/exchanges/binance_rate_limit.py)
+  # protects from the worst case; the lower defaults below give that
+  # governor extra headroom on a 2C/4G VPS.
   provider: binance_public           # only allowed value in Phase 11C
   enabled: true
   read_only: true                    # MUST stay true in Phase 11C
-  symbol_limit: 20                   # 20 symbols on a 2C/4G VPS by default
+  symbol_limit: 5                    # Phase 11C.1A: 5 symbols (was 20)
   symbols_mode: top_usdt_perpetual   # top USDT-M perpetual contracts by 24h vol
   rest_base_url: https://fapi.binance.com
   websocket_enabled: true            # accepted as a future-capability hook
@@ -84,10 +91,21 @@ market_data:
   max_ws_staleness_ms: 3000
   max_rest_latency_ms: 2000
   reconnect_backoff_seconds: 5
-  rest_poll_interval_seconds: 5.0
+  rest_poll_interval_seconds: 60.0   # Phase 11C.1A: 60s (was 5s)
   snapshot_interval_seconds: 5.0
   request_timeout_seconds: 5.0
   explicit_symbols: []               # leave empty to use top_usdt_perpetual
+  # Phase 11C.1A - Binance public REST rate-limit governor.
+  rest_governor:
+    enabled: true
+    weight_budget_per_minute: 300    # half of Binance's 1200/min budget
+    soft_weight_ratio: 0.50          # warn at >=150 weight in window
+    hard_weight_ratio: 0.75          # refuse at >=225 weight in window
+    retry_after_default_seconds: 300 # used when Retry-After is missing
+    on_429: backoff                  # PR-A: only supported value
+    on_418: shutdown                 # PR-A: only supported value
+    candidate_detail_limit: 3        # max candidates per loop for detail REST
+    rest_layering_enabled: true      # bootstrap-only public REST
 
 safety:
   # Phase 11C - hard safety assertions (the runner refuses to start

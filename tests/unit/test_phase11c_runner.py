@@ -60,10 +60,13 @@ def test_parse_duration_rejects_malformed(value: str):
         _parse_duration(value)
 
 
-def test_arg_parser_default_symbol_limit_is_20():
+def test_arg_parser_default_symbol_limit_is_5():
+    """Phase 11C.1A lowered the default symbol limit from 20 to 5 to
+    keep the gateway well below Binance's public-data weight budget
+    after the first 24h test triggered HTTP 429 / 418."""
     parser = _build_arg_parser()
     args = parser.parse_args([])
-    assert args.symbol_limit == 20
+    assert args.symbol_limit == 5
 
 
 def test_phase_11c_forbidden_env_vars_includes_binance_and_telegram():

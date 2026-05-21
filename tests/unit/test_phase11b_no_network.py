@@ -315,7 +315,7 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
     Execution FSM, Telegram dispatcher, Export bridge)."""
     import re
 
-    pattern = re.compile(r"EventType\.([A-Z_]+)")
+    pattern = re.compile(r"EventType\.([A-Z0-9_]+)")
     paper_run_text = " ".join(
         p.read_text(encoding="utf-8") for p in PHASE_11B_FILES
     )
@@ -372,6 +372,16 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "MARKET_SNAPSHOT",
         "DATA_UNRELIABLE",
         "OPPORTUNITY_GRADED",
+        # Phase 11C.1A - rate-limit governor read-only references in
+        # the daily report aggregator. The aggregator counts these
+        # event types but never emits them; emission lives in
+        # app/exchanges/binance_rate_limit.py which is NOT a
+        # paper_run file.
+        "RATE_LIMIT_429",
+        "RATE_LIMIT_418",
+        "RATE_LIMIT_BACKOFF_STARTED",
+        "RATE_LIMIT_BACKOFF_ENDED",
+        "RATE_LIMIT_PROTECTION_ENTERED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (

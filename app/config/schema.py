@@ -101,13 +101,116 @@ class CapitalConfig(BaseModel):
     harvest_suggest_at_10x: bool = True
 
 
+class RestGovernorSection(BaseModel):
+    """Phase 11C.1A - Binance public REST rate-limit governor knobs.
+
+    All defaults are conservative. The whole section is consumed by
+    :class:`app.exchanges.binance_rate_limit.BinancePublicRestGovernor`
+    via :meth:`from_market_data_config`. The schema validators below
+    refuse pathological values at boot rather than at the first 429.
+
+    Phase 11C.1A boundary - the field defaults match the brief:
+
+      - ``weight_budget_per_minute = 300``  (half of Binance's 1200/min
+        public-data budget; leaves headroom for shared-IP deploys)
+      - ``soft_weight_ratio = 0.50``        (warn at 150 weight)
+      - ``hard_weight_ratio = 0.75``        (refuse at 225 weight)
+      - ``retry_after_default_seconds = 300``
+      - ``on_429 = backoff``                (PR-A: only supported value)
+      - ``on_418 = shutdown``               (PR-A: only supported value)
+      - ``candidate_detail_limit = 3``      (max candidates that may
+                                             receive per-loop detail
+                                             REST calls)
+      - ``rest_layering_enabled = True``    (bootstrap-only public REST;
+                                             detail endpoints gated on
+                                             candidate ranking)
+    """
+
+    enabled: bool = True
+    weight_budget_per_minute: int = 300
+    soft_weight_ratio: float = 0.50
+    hard_weight_ratio: float = 0.75
+    retry_after_default_seconds: int = 300
+    on_429: str = "backoff"
+    on_418: str = "shutdown"
+    candidate_detail_limit: int = 3
+    rest_layering_enabled: bool = True
+
+    @field_validator("weight_budget_per_minute")
+    @classmethod
+    def _budget_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "rest_governor.weight_budget_per_minute must be > 0"
+            )
+        return value
+
+    @field_validator("soft_weight_ratio")
+    @classmethod
+    def _soft_in_range(cls, value: float) -> float:
+        if not (0.0 < value <= 1.0):
+            raise ValueError(
+                "rest_governor.soft_weight_ratio must be in (0, 1]"
+            )
+        return value
+
+    @field_validator("hard_weight_ratio")
+    @classmethod
+    def _hard_in_range(cls, value: float) -> float:
+        if not (0.0 < value <= 1.0):
+            raise ValueError(
+                "rest_governor.hard_weight_ratio must be in (0, 1]"
+            )
+        return value
+
+    @field_validator("retry_after_default_seconds")
+    @classmethod
+    def _retry_after_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "rest_governor.retry_after_default_seconds must be > 0"
+            )
+        return value
+
+    @field_validator("on_429")
+    @classmethod
+    def _on_429_supported(cls, value: str) -> str:
+        if value not in {"backoff"}:
+            raise ValueError(
+                "rest_governor.on_429 must be 'backoff' in Phase 11C.1A"
+            )
+        return value
+
+    @field_validator("on_418")
+    @classmethod
+    def _on_418_supported(cls, value: str) -> str:
+        if value not in {"shutdown"}:
+            raise ValueError(
+                "rest_governor.on_418 must be 'shutdown' in Phase 11C.1A"
+            )
+        return value
+
+    @field_validator("candidate_detail_limit")
+    @classmethod
+    def _candidate_detail_in_range(cls, value: int) -> int:
+        if value < 0 or value > 20:
+            raise ValueError(
+                "rest_governor.candidate_detail_limit must be in [0, 20]"
+            )
+        return value
+
+
 class MarketDataConfig(BaseModel):
     """Phase 11C - public market data ingestion configuration.
 
     All defaults are conservative so a 2C/4G VPS can run a 24h paper
-    session without saturating CPU / network. ``symbol_limit`` starts
-    at 20; ``provider`` is fixed to ``binance_public`` and the runner
-    refuses to start with any other value.
+    session without saturating CPU / network. Phase 11C.1A lowers
+    ``symbol_limit`` from 20 to 5 and ``rest_poll_interval_seconds``
+    from 5.0 to 60.0 so the gateway never approaches the Binance
+    sliding-window weight budget while the new rate-limit governor
+    is the only line of defence. ``provider`` is fixed to
+    ``binance_public`` and the runner refuses to start with any
+    other value.
 
     Phase 11C boundary - encoded as defaults that the runner pins:
 
@@ -115,12 +218,18 @@ class MarketDataConfig(BaseModel):
       - ``provider="binance_public"`` - the only Phase 11C provider
       - ``websocket_enabled=true`` is accepted but only the REST poller
         is wired in this PR; the WS adapter is a future enhancement
+        (Phase 11C.1B PR-B WebSocket-first radar)
+
+    Phase 11C.1A additions:
+
+      - ``rest_governor`` - rate-limit / 429 / 418 protection knobs
+        consumed by :class:`BinancePublicRestGovernor`.
     """
 
     provider: str = "binance_public"
     enabled: bool = True
     read_only: bool = True
-    symbol_limit: int = 20
+    symbol_limit: int = 5
     symbols_mode: str = "top_usdt_perpetual"
     rest_base_url: str = "https://fapi.binance.com"
     websocket_enabled: bool = True
@@ -135,10 +244,13 @@ class MarketDataConfig(BaseModel):
     max_ws_staleness_ms: int = 3000
     max_rest_latency_ms: int = 2000
     reconnect_backoff_seconds: int = 5
-    rest_poll_interval_seconds: float = 5.0
+    rest_poll_interval_seconds: float = 60.0
     snapshot_interval_seconds: float = 5.0
     request_timeout_seconds: float = 5.0
     explicit_symbols: list[str] = Field(default_factory=list)
+    rest_governor: RestGovernorSection = Field(
+        default_factory=RestGovernorSection
+    )
 
     @field_validator("read_only")
     @classmethod
