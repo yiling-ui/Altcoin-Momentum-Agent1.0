@@ -86,14 +86,23 @@ class Settings:
 
     @property
     def telegram_outbound_enabled(self) -> bool:
-        """Phase 11C convenience accessor.
+        """Phase 11C real-outbound gate.
 
-        ``app/config/defaults.yaml`` keeps Telegram outbound disabled
-        in Phase 11C (the supervisor / runner uses the in-process
-        :class:`FakeTelegramClient`). The acceptance criteria require
-        this to remain ``False``.
+        Returns the **independent** ``defaults.telegram.outbound_enabled``
+        field. Phase 11C explicitly does NOT derive this from
+        ``defaults.telegram.enabled`` so that flipping
+        ``telegram.enabled=True`` (to wire the in-process command-bus +
+        :class:`FakeTelegramClient`) cannot accidentally enable real
+        Telegram HTTP outbound.
+
+        The schema-level validator on
+        :class:`app.config.schema.TelegramConfig.outbound_enabled`
+        refuses to load ``True`` for this field, so a malicious or
+        accidental YAML edit is rejected at boot. The runner
+        additionally checks ``safety.forbid_telegram_outbound`` before
+        any database is opened.
         """
-        return bool(self.defaults.telegram.enabled)
+        return bool(self.defaults.telegram.outbound_enabled)
 
     @property
     def data_dir(self) -> Path:

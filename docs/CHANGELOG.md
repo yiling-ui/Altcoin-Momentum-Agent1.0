@@ -148,9 +148,20 @@ emits `MARKET_SNAPSHOT`, `PRE_ANOMALY_DETECTED`,
   - `tests/unit/test_phase11c_export_and_replay.py` - Phase 8.5
     export round-trip + Phase 10A replay round-trip + Phase 10B
     Reflection compatibility.
+  - `tests/unit/test_phase11c_telegram_outbound.py` - reviewer-
+    requested defence-in-depth on the
+    `telegram_outbound_enabled` semantics. Pins:
+    `Settings.telegram_outbound_enabled` reads
+    `defaults.telegram.outbound_enabled`, NOT
+    `defaults.telegram.enabled`; the schema refuses
+    `outbound_enabled=True`; the Phase 11C runtime source set
+    imports no real Telegram transport
+    (:class:`TelegramHttpClient` /
+    :class:`TelegramExportBridge` /
+    :class:`TelegramCommandCenter`).
 
-Total Phase 11C coverage: 107 new tests; 0 failures; full suite
-2066 passed.
+Total Phase 11C coverage: 112 new tests; 0 failures; full suite
+2071 passed.
 
 #### Phase 1 - 10D contracts that remain in force
 

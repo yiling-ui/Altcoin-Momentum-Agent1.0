@@ -66,6 +66,7 @@ margin endpoint; no real order; no DeepSeek; no Telegram outbound.
 | `llm`                                    | `False`                      |
 | `exchange_live_orders`                   | `False`                      |
 | `telegram_outbound_enabled`              | `False`                      |
+| `telegram.outbound_enabled` (schema-locked) | `False`                   |
 | `binance_private_api_enabled`            | `False`                      |
 | `safety.forbid_private_credentials`      | `True`                       |
 | `safety.forbid_signed_endpoints`         | `True`                       |
