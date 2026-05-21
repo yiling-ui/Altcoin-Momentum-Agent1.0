@@ -10,6 +10,7 @@ without per-symbol REST detail polling.
 **Branch (PR-B):** `feature/phase-11c1-ws-first-all-market-radar`
 **Version (PR-B):** `1.4.0a11c.1b`
 **Predecessor:** Phase 11C.1A - Binance Public REST Rate Limit Governor & 418 Protection (PR-A, merged)
+**Dry-run evidence:** see [`docs/PHASE_11C_1B_DRY_RUN_EVIDENCE.md`](./PHASE_11C_1B_DRY_RUN_EVIDENCE.md) for the actual `--dry-run` boot banner, exit banner, events.db audit, per-iteration tracking record, discovered demon-coin list, daily-report excerpt, and rate-limit governor evidence captured on this branch.
 
 ---
 
