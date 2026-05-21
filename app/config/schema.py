@@ -6,7 +6,7 @@ Used by `app.config.settings.load_settings` to validate `defaults.yaml`,
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ModeConfig(BaseModel):
@@ -63,6 +63,124 @@ class CapitalConfig(BaseModel):
     harvest_suggest_at_10x: bool = True
 
 
+class MarketDataConfig(BaseModel):
+    """Phase 11C - public market data ingestion configuration.
+
+    All defaults are conservative so a 2C/4G VPS can run a 24h paper
+    session without saturating CPU / network. ``symbol_limit`` starts
+    at 20; ``provider`` is fixed to ``binance_public`` and the runner
+    refuses to start with any other value.
+
+    Phase 11C boundary - encoded as defaults that the runner pins:
+
+      - ``read_only=True``  - never flipped to write mode
+      - ``provider="binance_public"`` - the only Phase 11C provider
+      - ``websocket_enabled=true`` is accepted but only the REST poller
+        is wired in this PR; the WS adapter is a future enhancement
+    """
+
+    provider: str = "binance_public"
+    enabled: bool = True
+    read_only: bool = True
+    symbol_limit: int = 20
+    symbols_mode: str = "top_usdt_perpetual"
+    rest_base_url: str = "https://fapi.binance.com"
+    websocket_enabled: bool = True
+    rest_enabled: bool = True
+    depth_enabled: bool = True
+    trades_enabled: bool = True
+    klines_enabled: bool = True
+    funding_enabled: bool = True
+    open_interest_enabled: bool = True
+    mark_price_enabled: bool = True
+    book_ticker_enabled: bool = True
+    max_ws_staleness_ms: int = 3000
+    max_rest_latency_ms: int = 2000
+    reconnect_backoff_seconds: int = 5
+    rest_poll_interval_seconds: float = 5.0
+    snapshot_interval_seconds: float = 5.0
+    request_timeout_seconds: float = 5.0
+    explicit_symbols: list[str] = Field(default_factory=list)
+
+    @field_validator("read_only")
+    @classmethod
+    def _read_only_must_remain_true(cls, value: bool) -> bool:
+        # Phase 11C hard rule: market data is read-only by construction.
+        # The schema refuses any deployment that flips this; flipping
+        # is a Phase 12+ concern and would require lifting the Phase 1
+        # safety lock too.
+        if not value:
+            raise ValueError(
+                "market_data.read_only must remain True in Phase 11C; "
+                "Phase 11C is public-market read-only paper."
+            )
+        return value
+
+    @field_validator("provider")
+    @classmethod
+    def _provider_must_be_public(cls, value: str) -> str:
+        if value != "binance_public":
+            raise ValueError(
+                f"market_data.provider must be 'binance_public' in "
+                f"Phase 11C; got {value!r}."
+            )
+        return value
+
+    @field_validator("symbol_limit")
+    @classmethod
+    def _symbol_limit_in_range(cls, value: int) -> int:
+        if value <= 0 or value > 200:
+            raise ValueError(
+                "market_data.symbol_limit must be in (0, 200]; default "
+                "is 20 to stay within 2C/4G VPS budget."
+            )
+        return value
+
+
+class SafetyConfig(BaseModel):
+    """Phase 11C - public-market safety guard rails.
+
+    These flags are *assertions*, not opt-ins. A deployment that flips
+    any of them to ``False`` is refused by :func:`SafetyConfig.validate`
+    so an operator who tries to weaken Phase 11C sees the failure
+    before the runner boots.
+    """
+
+    forbid_private_credentials: bool = True
+    forbid_signed_endpoints: bool = True
+    forbid_trade_endpoints: bool = True
+    forbid_account_endpoints: bool = True
+    forbid_position_endpoints: bool = True
+    forbid_leverage_endpoints: bool = True
+    forbid_margin_endpoints: bool = True
+    forbid_live_trading: bool = True
+    forbid_right_tail: bool = True
+    forbid_llm_trade_decisions: bool = True
+    forbid_telegram_outbound: bool = True
+
+    @field_validator(
+        "forbid_private_credentials",
+        "forbid_signed_endpoints",
+        "forbid_trade_endpoints",
+        "forbid_account_endpoints",
+        "forbid_position_endpoints",
+        "forbid_leverage_endpoints",
+        "forbid_margin_endpoints",
+        "forbid_live_trading",
+        "forbid_right_tail",
+        "forbid_llm_trade_decisions",
+        "forbid_telegram_outbound",
+    )
+    @classmethod
+    def _flag_must_be_true(cls, value: bool, info) -> bool:
+        if not value:
+            raise ValueError(
+                f"safety.{info.field_name} must remain True in Phase 11C; "
+                "Phase 11C cannot loosen any Phase 1 / Phase 11B safety flag."
+            )
+        return value
+
+
 class DefaultsConfig(BaseModel):
     """Schema for `app/config/defaults.yaml`."""
 
@@ -73,6 +191,8 @@ class DefaultsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     capital: CapitalConfig = Field(default_factory=CapitalConfig)
+    market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
+    safety: SafetyConfig = Field(default_factory=SafetyConfig)
 
 
 class RiskThresholds(BaseModel):

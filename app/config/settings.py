@@ -75,6 +75,27 @@ class Settings:
         return self.defaults.mode.exchange_live_order_enabled
 
     @property
+    def market_data(self):
+        """Phase 11C - public-market read-only ingestion config."""
+        return self.defaults.market_data
+
+    @property
+    def safety(self):
+        """Phase 11C - public-market safety guard rails."""
+        return self.defaults.safety
+
+    @property
+    def telegram_outbound_enabled(self) -> bool:
+        """Phase 11C convenience accessor.
+
+        ``app/config/defaults.yaml`` keeps Telegram outbound disabled
+        in Phase 11C (the supervisor / runner uses the in-process
+        :class:`FakeTelegramClient`). The acceptance criteria require
+        this to remain ``False``.
+        """
+        return bool(self.defaults.telegram.enabled)
+
+    @property
     def data_dir(self) -> Path:
         d = Path(self.defaults.database.data_dir)
         if not d.is_absolute():
