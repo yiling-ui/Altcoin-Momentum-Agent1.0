@@ -52,3 +52,49 @@ capital:
   harvest_suggest_at_2x: true
   harvest_suggest_at_5x: true
   harvest_suggest_at_10x: true
+
+market_data:
+  # Phase 11C - Public-market read-only ingestion.
+  #
+  # Phase 11C connects to Binance USDT-M perpetual futures public
+  # market endpoints ONLY (no API key, no signature, no account /
+  # order / position / leverage / margin endpoint). The runner
+  # refuses to start if any flag below is changed in a way that
+  # would imply a private endpoint is being called.
+  provider: binance_public           # only allowed value in Phase 11C
+  enabled: true
+  read_only: true                    # MUST stay true in Phase 11C
+  symbol_limit: 20                   # 20 symbols on a 2C/4G VPS by default
+  symbols_mode: top_usdt_perpetual   # top USDT-M perpetual contracts by 24h vol
+  rest_base_url: https://fapi.binance.com
+  websocket_enabled: true            # accepted as a future-capability hook
+  rest_enabled: true
+  depth_enabled: true
+  trades_enabled: true
+  klines_enabled: true
+  funding_enabled: true
+  open_interest_enabled: true
+  mark_price_enabled: true
+  book_ticker_enabled: true
+  max_ws_staleness_ms: 3000
+  max_rest_latency_ms: 2000
+  reconnect_backoff_seconds: 5
+  rest_poll_interval_seconds: 5.0
+  snapshot_interval_seconds: 5.0
+  request_timeout_seconds: 5.0
+  explicit_symbols: []               # leave empty to use top_usdt_perpetual
+
+safety:
+  # Phase 11C - hard safety assertions (the runner refuses to start
+  # if any of these are flipped to false).
+  forbid_private_credentials: true
+  forbid_signed_endpoints: true
+  forbid_trade_endpoints: true
+  forbid_account_endpoints: true
+  forbid_position_endpoints: true
+  forbid_leverage_endpoints: true
+  forbid_margin_endpoints: true
+  forbid_live_trading: true
+  forbid_right_tail: true
+  forbid_llm_trade_decisions: true
+  forbid_telegram_outbound: true
