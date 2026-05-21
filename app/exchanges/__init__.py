@@ -27,6 +27,17 @@ from app.exchanges.base import (
     WebSocketManager,
 )
 from app.exchanges.binance import BinanceClient
+from app.exchanges.binance_public import (
+    ALLOWED_PUBLIC_HOSTS,
+    BinancePublicClient,
+    DEFAULT_REST_BASE_URL,
+    FORBIDDEN_PRIVATE_ENDPOINTS,
+    FORBIDDEN_QUERY_PARAMETERS,
+    PUBLIC_MARKET_ENDPOINT_ALLOWLIST,
+    PublicMarkPrice,
+    PublicTransport,
+    assert_public_endpoint_allowed,
+)
 from app.exchanges.mock import MockExchangeClient
 from app.exchanges.models import (
     AccountSnapshot,
@@ -44,6 +55,7 @@ __all__ = [
     "ExchangeHealth",
     "WebSocketManager",
     "BinanceClient",
+    "BinancePublicClient",
     "MockExchangeClient",
     "AccountSnapshot",
     "ExchangeSymbol",
@@ -51,6 +63,14 @@ __all__ = [
     "OpenInterest",
     "OrderBook",
     "OrderBookLevel",
+    "PublicMarkPrice",
+    "PublicTransport",
     "RecentTrade",
     "TradeSide",
+    "ALLOWED_PUBLIC_HOSTS",
+    "DEFAULT_REST_BASE_URL",
+    "FORBIDDEN_PRIVATE_ENDPOINTS",
+    "FORBIDDEN_QUERY_PARAMETERS",
+    "PUBLIC_MARKET_ENDPOINT_ALLOWLIST",
+    "assert_public_endpoint_allowed",
 ]

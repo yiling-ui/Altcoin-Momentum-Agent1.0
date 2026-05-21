@@ -62,9 +62,12 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
 
     captured = capsys.readouterr().out
     assert "AMA-RT" in captured
-    # Phase 10D entrypoint string. The Phase 1 safety lock is still asserted.
-    assert "Phase 10D - Telegram Outbound + Export Commands" in captured
-    assert "v1.4.0a10d" in captured
+    # Phase 11C bumped the version label; the boot drill itself remains
+    # the Phase 10D scaffolding (paper trade + reconciliation +
+    # reflection + LLM + Telegram outbound self-checks). Phase 11C
+    # ships a dedicated runner under ``scripts/run_public_market_paper``.
+    assert "Phase 11C - Real Binance Public Market Data Read-Only Paper" in captured
+    assert "v1.4.0a11c" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured
     assert "right_tail=False" in captured

@@ -7,6 +7,170 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C - Real Binance Public Market Data Read-Only Paper
+
+**Version:** `1.4.0a11c` - Phase 11C - Real Binance Public Market
+Data Read-Only Paper. **Closes Issue #11C.**
+
+Phase 11C is the FIRST phase in the project allowed to talk to a
+real exchange. It is **public-market read-only** ingestion of
+Binance USDT-M perpetual futures data, driven through the existing
+Phase 1 - 11B paper pipeline. Phase 11C is NOT live trading, NOT
+connected to the trading API, NOT connected to DeepSeek, NOT
+connected to a real Telegram bot, NOT a path into Phase 12.
+
+#### Public surface
+
+- `app/exchanges/binance_public.py`
+  - `BinancePublicClient` - public-market read-only Binance USDT-M
+    perpetual gateway. Subclasses `ExchangeClientBase`; the four
+    write surfaces (`create_order`, `cancel_order`, `set_leverage`,
+    `set_margin_mode`) inherit `SafeModeViolation` refusal
+    unchanged. `get_account_snapshot` is overridden to raise
+    `SafeModeViolation` explicitly. Constructor refuses `api_key` /
+    `api_secret` and any credential-shaped `**kwargs`.
+  - `assert_public_endpoint_allowed(url)` - hard endpoint allowlist.
+    Refuses any path not in the public-market set, any URL on a
+    non-Binance host, any `http://` URL, any URL carrying
+    `signature` / `timestamp` / `recvWindow` / `apiKey`.
+  - `PUBLIC_MARKET_ENDPOINT_ALLOWLIST` - the closed list of paths
+    Phase 11C is allowed to call.
+  - `FORBIDDEN_PRIVATE_ENDPOINTS` - explicit deny-list of trading /
+    account / position / leverage / margin endpoints.
+  - `PublicMarkPrice` - mark + index + last funding + next funding
+    envelope from `/fapi/v1/premiumIndex`.
+
+- `app/market_data_public/`
+  - `PublicMarketIngestor` - drives REST polling against
+    `BinancePublicClient`, feeds the `MarketDataBuffer`, and
+    produces enriched `MarketSnapshot` objects (mark_price + fresh
+    book ticker on top of the Phase 4 contract).
+  - `PaperEventChainDriver` - emits the full Phase 11C event chain
+    per `(symbol, snapshot)`. Attaches a Phase 8.5
+    `LearningReadyContext` (opportunity / signal_snapshot /
+    virtual_trade_plan / config_versions) to every `RISK_REJECTED`
+    and `STATE_TRANSITION`.
+
+- `scripts/run_public_market_paper.py`
+  - `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20`
+  - `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 20`
+  - `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 20`
+  - Runs the Phase 11B `EnvGuard` against `BINANCE_API_KEY`,
+    `BINANCE_API_SECRET`, `TELEGRAM_BOT_TOKEN`, `DEEPSEEK_API_KEY`,
+    ... before opening any database. Refuses to start if any
+    forbidden credential env-var is set non-empty.
+  - Pins `client.assert_public_only()` on every loop tick.
+  - Builds a daily Markdown report at
+    `data/reports/phase11c/{date}-phase11c-public-market.md` on
+    graceful shutdown.
+  - `--dry-run` swaps the default `urllib.request` transport for an
+    in-process deterministic transport so CI / smoke tests never
+    touch the network.
+
+#### New configuration
+
+`app/config/defaults.yaml` gains two top-level sections, each
+strictly validated by Pydantic field-validators in
+`app/config/schema.py`:
+
+- `market_data:` - `provider: binance_public` (only allowed value),
+  `read_only: true` (cannot be flipped), `symbol_limit: 20` (in
+  `(0, 200]`), `rest_base_url: https://fapi.binance.com`, plus
+  feature flags for the public surfaces.
+- `safety:` - 11 `forbid_*` flags. The schema raises
+  `ValidationError` if any of them is loaded as `False`.
+
+`Settings` exposes the Phase 11C convenience accessors
+`Settings.market_data`, `Settings.safety`,
+`Settings.telegram_outbound_enabled`.
+
+#### No new EventType
+
+Phase 11C reuses the existing Phase 1 - 10D vocabulary. The chain
+emits `MARKET_SNAPSHOT`, `PRE_ANOMALY_DETECTED`,
+`ANOMALY_DETECTED`, `LIQUIDITY_CHECKED`, `TRADE_CONFIRMED`,
+`MANIPULATION_DETECTED`, `RISK_APPROVED` / `RISK_REJECTED`,
+`STATE_TRANSITION` per symbol per tick.
+
+#### Phase 11C boundary (every clause enforced by tests)
+
+  1. **No live trading.** The five Phase 1 safety flags remain locked.
+     `telegram_outbound_enabled` and `binance_private_api_enabled`
+     are both False.
+  2. **No API key.** The constructor refuses `api_key` /
+     `api_secret`. `tests/unit/test_phase11c_binance_public_client.py`
+     pins both refusal paths.
+  3. **No signed endpoint.** Every URL goes through
+     `assert_public_endpoint_allowed`. The function refuses every
+     entry in `FORBIDDEN_PRIVATE_ENDPOINTS` and every URL carrying
+     a `signature` / `timestamp` / `recvWindow` / `apiKey` query
+     parameter.
+  4. **No third-party HTTP / WebSocket / exchange / LLM / Telegram
+     SDK.** Phase 11C uses `urllib.request` from the Python standard
+     library only. `tests/unit/test_phase3_no_network.py` and
+     `tests/unit/test_phase11c_no_network.py` AST-audit the source
+     set.
+  5. **The four ExchangeClientBase write surfaces remain refused.**
+     Inherited from Phase 3.
+  6. **`MarketDataConfig.read_only` cannot be set to False** at the
+     schema layer.
+  7. **`SafetyConfig.forbid_*` cannot be set to False** at the
+     schema layer.
+  8. **No `os.environ` read** anywhere in the Phase 11C source set.
+     Env inspection is delegated to the Phase 11B `EnvGuard`.
+  9. **No `create_order` / `cancel_order` / `set_leverage` /
+     `set_margin_mode` call.** AST-audited.
+
+#### Phase 11C does NOT implement
+
+  - Real WebSocket transport (the `websocket_enabled` flag is
+    accepted as a future-capability hook; Phase 11C ships the REST
+    poller only).
+  - Real account / position / equity persistence (the public client
+    refuses every authenticated endpoint).
+  - Any LLM / DeepSeek / Telegram / 币安广场 surface.
+  - Phase 12. Passing Phase 11C does NOT authorise Phase 12.
+
+#### Tests
+
+  - `tests/unit/test_phase11c_binance_public_client.py` - construction,
+    credential refusal, endpoint allowlist (positive + negative),
+    read-only API behaviour, MarketSnapshot serialization.
+  - `tests/unit/test_phase11c_event_chain.py` - end-to-end event
+    chain + learning-ready payload + STATE_TRANSITION carries
+    learning_ready.
+  - `tests/unit/test_phase11c_safety_flags.py` - the five Phase 1
+    flags + 11 Phase 11C `forbid_*` flags + write-surface refusal
+    + LLM-decision boundary + signed-query-parameter refusal.
+  - `tests/unit/test_phase11c_runner.py` - argparse, duration parser,
+    dry-run smoke, env-guard refusal, host refusal.
+  - `tests/unit/test_phase11c_no_network.py` - source-tree audit.
+  - `tests/unit/test_phase11c_export_and_replay.py` - Phase 8.5
+    export round-trip + Phase 10A replay round-trip + Phase 10B
+    Reflection compatibility.
+  - `tests/unit/test_phase11c_telegram_outbound.py` - reviewer-
+    requested defence-in-depth on the
+    `telegram_outbound_enabled` semantics. Pins:
+    `Settings.telegram_outbound_enabled` reads
+    `defaults.telegram.outbound_enabled`, NOT
+    `defaults.telegram.enabled`; the schema refuses
+    `outbound_enabled=True`; the Phase 11C runtime source set
+    imports no real Telegram transport
+    (:class:`TelegramHttpClient` /
+    :class:`TelegramExportBridge` /
+    :class:`TelegramCommandCenter`).
+
+Total Phase 11C coverage: 112 new tests; 0 failures; full suite
+2071 passed.
+
+#### Phase 1 - 10D contracts that remain in force
+
+All Phase 1 - 10D contracts remain in force unchanged. Phase 11C
+ADDS one new exchange client + one new ingestion package + one new
+runner + four documentation files; it does NOT modify any existing
+event type, any existing schema field, or any existing safety
+constant.
+
 ### Phase 10D - Telegram Outbound + Export Commands (Issue #10 Part 4)
 
 **Version:** `1.4.0a10d` - Phase 10D - Telegram Outbound + Export Commands.

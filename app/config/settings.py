@@ -75,6 +75,36 @@ class Settings:
         return self.defaults.mode.exchange_live_order_enabled
 
     @property
+    def market_data(self):
+        """Phase 11C - public-market read-only ingestion config."""
+        return self.defaults.market_data
+
+    @property
+    def safety(self):
+        """Phase 11C - public-market safety guard rails."""
+        return self.defaults.safety
+
+    @property
+    def telegram_outbound_enabled(self) -> bool:
+        """Phase 11C real-outbound gate.
+
+        Returns the **independent** ``defaults.telegram.outbound_enabled``
+        field. Phase 11C explicitly does NOT derive this from
+        ``defaults.telegram.enabled`` so that flipping
+        ``telegram.enabled=True`` (to wire the in-process command-bus +
+        :class:`FakeTelegramClient`) cannot accidentally enable real
+        Telegram HTTP outbound.
+
+        The schema-level validator on
+        :class:`app.config.schema.TelegramConfig.outbound_enabled`
+        refuses to load ``True`` for this field, so a malicious or
+        accidental YAML edit is rejected at boot. The runner
+        additionally checks ``safety.forbid_telegram_outbound`` before
+        any database is opened.
+        """
+        return bool(self.defaults.telegram.outbound_enabled)
+
+    @property
     def data_dir(self) -> Path:
         d = Path(self.defaults.database.data_dir)
         if not d.is_absolute():
