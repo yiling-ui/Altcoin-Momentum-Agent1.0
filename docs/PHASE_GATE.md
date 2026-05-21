@@ -71,8 +71,15 @@ PR-B subscribes to FIVE public Binance WebSocket streams only:
 PR-B does NOT subscribe to `listenKey`, the user data stream, the
 trading WebSocket API, or any private WebSocket. The default WS
 transport refuses to open a real socket (`NotImplementedError`); the
-in-process pump is wired under `--dry-run` and the stdlib WS adapter
-is a follow-up PR.
+in-process pump is wired under `--dry-run`; **the real-network
+stdlib WS adapter (`StdlibPublicWSTransport`) ships in this PR
+(originally deferred to a follow-up)**. The runner refuses to
+silently fall back to REST under `--ws-first` without `--dry-run`:
+if the real public WS transport cannot be constructed, the runner
+exits with `rc=2`. Operators who genuinely cannot reach
+`fstream.binance.com` use `--ws-disabled` (PR-A bootstrap-only
+REST), which is documented as **not** the Phase 11C.1B all-market
+demon-radar acceptance path.
 
 ### Phase 11C.1B boundary (must hold for the entire PR-B scope)
 
@@ -100,20 +107,35 @@ is a follow-up PR.
 
 ### Phase 11C.1B acceptance criteria
 
-1. `pytest` 全部通过. Currently `2144 passed`.
-2. The new test file
-   `tests/unit/test_phase11c_1b_ws_radar.py` pins every behaviour
-   the brief calls out (15 explicit + 13 supporting). Full list in
+1. `pytest` 全部通过. Currently `2163 passed`.
+2. The new test files
+   `tests/unit/test_phase11c_1b_ws_radar.py` (scaffold + radar +
+   pool + chain) and
+   `tests/unit/test_phase11c_1b_real_ws_adapter.py` (real public
+   WS adapter + runner refusal + reconnect backoff + staleness
+   gate + safety flags + RFC 6455 handshake / frame audit) pin
+   every behaviour the brief calls out (15 brief-mandated +
+   supporting). Full list in
    `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B.
 3. The four `ExchangeClientBase` write surfaces still raise
    `SafeModeViolation`.
 4. No file in the Phase 11C source set imports a third-party HTTP /
-   WebSocket / SDK / LLM / Telegram bot package.
+   WebSocket / SDK / LLM / Telegram bot package. The
+   `StdlibPublicWSTransport` is implemented entirely on top of
+   `socket` + `ssl` + `select` + `struct` + `base64` + `hashlib`
+   + `json` + `os.urandom` (RFC 6455 client).
 5. The Phase 11B daily-report Markdown body contains the new
    `Phase 11C.1B WebSocket all-market radar` section with every
-   brief-mandated metric.
+   brief-mandated metric, including the new `ws_real_transport`
+   and `ws_data_degraded_ticks` fields.
 6. The Phase 8.5 export, Phase 10A replay, and Phase 10B reflection
    pipelines accept the three new `PUBLIC_WS_*` event types.
+7. Under `--ws-first` without `--dry-run`, the runner uses the real
+   `StdlibPublicWSTransport` and does NOT silently fall back to
+   REST bootstrap. If the transport factory returns `None` or
+   raises, the runner exits with `rc=2` and the message
+   `real public WebSocket transport is required for --ws-first
+   without --dry-run`.
 
 ### Phase 11C.1B explicitly forbids
 
@@ -134,8 +156,9 @@ is a follow-up PR.
 
 ### How Phase 11C.1B unblocks the Phase 11C real-data acceptance run
 
-After PR-B merges (and once the stdlib WS adapter follow-up PR
-lands), the Phase 11C real-data 24h acceptance run resumes with:
+After PR-B merges (which now includes the real
+`StdlibPublicWSTransport`), the Phase 11C real-data 24h acceptance
+run resumes with:
 
   - bootstrap REST: one `exchangeInfo` + one `ticker/24hr`.
   - public WS: 5 ALLOWLIST streams covering every USDT-M perpetual.
@@ -143,13 +166,25 @@ lands), the Phase 11C real-data 24h acceptance run resumes with:
   - per-loop REST detail: ONLY for the active head, gated on the
     PR-A rate-limit governor.
 
-PR-C (cluster exposure control) remains a separate branch.
+The acceptance ladder:
+
+| Cloud smoke         | Command                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 30 s dry-run        | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                |
+| 5 min real WS       | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              |
+| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             |
+| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                |
+| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                |
+| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               |
+
+PR-C (priority_score / cluster classifier / same-cluster leader /
+multi-candidate arbitration) remains a separate branch.
 
 ## Closed phase: Phase 11C.1A
 
 **Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
 Protection (PR-A).** Merged. Phase 11C real-data acceptance is paused
-until PR-B + the stdlib WS adapter follow-up land.
+until PR-B lands (which now folds the stdlib WS adapter in).
 
   - **PR-A** (closed, `feature/phase-11c1-rest-rate-limit-governor`)
     ships `BinancePublicRestGovernor` (sliding-window weight budget,
@@ -159,11 +194,15 @@ until PR-B + the stdlib WS adapter follow-up land.
   - **PR-B** (this branch, `feature/phase-11c1-ws-first-all-market-radar`)
     ships the WebSocket-first all-market radar +
     multi-candidate priority ranking + `candidate_detail_limit`
-    consumption. The default WS transport refuses to open a real
-    socket; the in-process pump covers `--dry-run`; the stdlib WS
-    adapter is a follow-up PR.
-  - **PR-C** (separate branch, NOT in this PR) ships cluster
-    exposure control.
+    consumption + the real-network `StdlibPublicWSTransport` (RFC
+    6455 over `socket` + `ssl`, stdlib only). The default WS
+    transport still refuses to open a real socket
+    (`NotImplementedError`); the in-process pump covers
+    `--dry-run`; `StdlibPublicWSTransport` is selected by the
+    runner whenever `--ws-first` is set without `--dry-run`.
+  - **PR-C** (separate branch, NOT in this PR) ships
+    priority_score / cluster classifier / same-cluster leader /
+    multi-candidate arbitration.
 
 ### Phase 11C.1A boundary (must hold for the entire PR-A scope)
 

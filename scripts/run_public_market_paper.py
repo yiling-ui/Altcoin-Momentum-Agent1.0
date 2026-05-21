@@ -64,9 +64,12 @@ from app.exchanges.binance_public_ws import (  # noqa: E402
     BinancePublicWSClient,
     DEFAULT_WS_BASE_URL,
     InProcessWSPump,
+    PublicWSError,
+    StdlibPublicWSTransport,
     WSConfig,
     WSMessage,
     WSMessagePump,
+    create_real_public_ws_transport,
 )
 from app.exchanges.binance_rate_limit import (  # noqa: E402
     BinancePublicRestGovernor,
@@ -107,6 +110,56 @@ from app.risk.engine import RiskEngine  # noqa: E402
 PHASE_11C_FORBIDDEN_CRED_ENV_VARS: tuple[str, ...] = tuple(
     sorted(set(DEFAULT_FORBIDDEN_CRED_ENV_VARS))
 )
+
+
+# ---------------------------------------------------------------------------
+# Phase 11C.1B - real public WebSocket transport factory (PR-B-followup).
+#
+# The runner calls :func:`_build_real_public_ws_transport` whenever
+# the user requests ``--ws-first`` without ``--dry-run``. The default
+# implementation returns a :class:`StdlibPublicWSTransport`
+# (stdlib-only RFC 6455 client). Tests monkey-patch this attribute to
+# inject a deterministic in-process pump masquerading as a "real"
+# transport (``test_runner_real_ws_first_uses_ws_adapter``) or a
+# refusal sentinel (``test_runner_real_ws_first_refuses_if_transport_missing``).
+#
+# Two failure modes are deliberately distinct:
+#
+#   * the factory returns ``None``  -> the runner refuses with rc=2
+#     ("real public WebSocket transport is required for --ws-first
+#     without --dry-run");
+#   * the factory raises an exception -> the runner refuses with
+#     rc=2 and prints the exception message.
+#
+# Phase 11C.1B does NOT silently fall back to the PR-A bootstrap-only
+# REST path under ``--ws-first``. The fallback path is reachable ONLY
+# via an explicit ``--ws-disabled`` flag.
+# ---------------------------------------------------------------------------
+RealWSTransportFactory = Callable[[WSConfig], WSMessagePump | None]
+
+
+def _build_real_public_ws_transport(
+    config: WSConfig,
+) -> WSMessagePump | None:
+    """Default factory for the Phase 11C.1B real-network WS transport.
+
+    Returns a :class:`StdlibPublicWSTransport` bound to the supplied
+    configuration. Never reads ``BINANCE_API_KEY`` /
+    ``BINANCE_API_SECRET``; never accepts a credential-shaped kwarg.
+    """
+    return create_real_public_ws_transport(config=config)
+
+
+def _build_rest_transport(*, dry_run: bool):
+    """Module-level REST transport factory.
+
+    Returns the deterministic in-process stub under ``--dry-run`` and
+    ``None`` (which makes :class:`BinancePublicClient` use stdlib
+    ``urllib``) otherwise. Tests monkey-patch this attribute to swap
+    in a fake REST transport so the runner can be exercised without
+    real network access.
+    """
+    return _build_dry_run_transport() if dry_run else None
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +524,9 @@ class _Phase11CRunStats:
     pre_anomaly_candidates: int = 0
     liquidation_events_seen: int = 0
     radar_score_top_symbols: list[dict[str, Any]] = field(default_factory=list)
+    # Phase 11C.1B - data-degraded gate (staleness) counters.
+    ws_data_degraded_ticks: int = 0
+    ws_real_transport: bool = False
 
 
 def _push_dry_run_ws_messages(
@@ -742,7 +798,7 @@ def main(argv: list[str] | None = None) -> int:
         protection_hook=incidents,
     )
 
-    transport = _build_dry_run_transport() if args.dry_run else None
+    transport = _build_rest_transport(dry_run=args.dry_run)
     try:
         client = BinancePublicClient(
             rest_base_url=args.rest_base_url,
@@ -784,6 +840,77 @@ def main(argv: list[str] | None = None) -> int:
         event_repo=event_repo,
         public_client=client,
     )
+
+    # 7b. Phase 11C.1B - WS-first transport pre-flight refusal.
+    #
+    # The brief makes this load-bearing: under ``--ws-first`` without
+    # ``--dry-run``, the runner MUST refuse with rc=2 if the real
+    # public WebSocket transport is unavailable - it does NOT silently
+    # fall back to the PR-A bootstrap-only REST path. We run the
+    # check HERE (before symbol resolution issues a real REST call)
+    # so the refusal is observable on hosts that have no network at
+    # all - the failure mode the brief targets.
+    _ws_first_default = True
+    if args.ws_disabled:
+        _ws_first_resolved = False
+    elif args.ws_first_explicit is True:
+        _ws_first_resolved = True
+    else:
+        _ws_first_resolved = _ws_first_default
+    _ws_staleness_ms_pre = (
+        int(args.ws_staleness_threshold_ms)
+        if args.ws_staleness_threshold_ms is not None
+        else int(market_data_cfg.max_ws_staleness_ms)
+    )
+    if _ws_staleness_ms_pre <= 0:
+        _ws_staleness_ms_pre = 3000
+    _ws_pump_preflight: WSMessagePump | None = None
+    _ws_pump_preflight_is_in_process: bool = False
+    if _ws_first_resolved and not args.dry_run:
+        ws_config_preflight = WSConfig(
+            staleness_threshold_ms=_ws_staleness_ms_pre
+        )
+        try:
+            _ws_pump_preflight = _build_real_public_ws_transport(
+                ws_config_preflight
+            )
+        except SafeModeViolation as exc:
+            print(
+                f"[AMA-RT][phase11c.1b] real public WebSocket "
+                f"transport refused construction: {exc}",
+                file=sys.stderr,
+            )
+            client.stop(
+                reason="phase11c_runner_ws_construction_refused"
+            )
+            dbs.close()
+            return 2
+        except Exception as exc:
+            print(
+                "[AMA-RT][phase11c.1b] real public WebSocket "
+                "transport is required for --ws-first without "
+                f"--dry-run; factory raised {type(exc).__name__}: "
+                f"{exc}",
+                file=sys.stderr,
+            )
+            client.stop(reason="phase11c_runner_ws_factory_error")
+            dbs.close()
+            return 2
+        if _ws_pump_preflight is None:
+            print(
+                "[AMA-RT][phase11c.1b] real public WebSocket "
+                "transport is required for --ws-first without "
+                "--dry-run; the factory returned None. Use "
+                "--dry-run to exercise the in-process pump or "
+                "--ws-disabled to run the REST-only fallback "
+                "(NOT the Phase 11C.1B acceptance path).",
+                file=sys.stderr,
+            )
+            client.stop(
+                reason="phase11c_runner_no_real_ws_transport"
+            )
+            dbs.close()
+            return 2
 
     # 8. Resolve symbols (REST bootstrap: ticker/24hr or exchangeInfo
     #    via the top-USDT-perpetual scan; one-shot, NOT per loop).
@@ -833,12 +960,22 @@ def main(argv: list[str] | None = None) -> int:
     # gated on a multi-candidate priority ranking (radar score) rather
     # than a fixed top-N REST cadence.
     #
-    # Phase 11C.1B does NOT ship a real-network WS adapter: the
-    # default :class:`_RefusalTransport` raises NotImplementedError on
-    # connect. Under ``--dry-run`` we wire :class:`InProcessWSPump`;
-    # without ``--dry-run`` AND without ``--ws-disabled`` the runner
-    # detects the refusal and degrades cleanly to the bootstrap-only
-    # REST path (PR-A behaviour) rather than crash.
+    # Phase 11C.1B (this revision) ships a real-network public WS
+    # transport built on the Python standard library
+    # (:class:`StdlibPublicWSTransport`). Three execution modes:
+    #
+    #   1. ``--dry-run`` + ``--ws-first`` (default): the in-process
+    #      :class:`InProcessWSPump` is wired and the radar is
+    #      exercised against synthetic messages. NO socket is opened.
+    #   2. ``--ws-first`` (without ``--dry-run``): the runner calls
+    #      :func:`_build_real_public_ws_transport`, which returns a
+    #      :class:`StdlibPublicWSTransport`. If the factory returns
+    #      ``None`` or raises, the runner refuses with rc=2 - it does
+    #      NOT silently fall back to the PR-A bootstrap-only REST
+    #      path.
+    #   3. ``--ws-disabled``: the runner falls back to the PR-A
+    #      bootstrap-only REST path. Documented as NOT the all-market
+    #      demon-radar acceptance path.
     ws_first_default = True
     if args.ws_disabled:
         ws_first = False
@@ -871,36 +1008,48 @@ def main(argv: list[str] | None = None) -> int:
         ws_staleness_ms = 3000
 
     ws_client: BinancePublicWSClient | None = None
-    ws_pump: InProcessWSPump | None = None
+    ws_pump: WSMessagePump | None = None
+    ws_pump_is_in_process: bool = False
     radar_buffer: AllMarketRadarBuffer | None = None
     candidate_pool: CandidatePool | None = None
     ws_chain: WSRadarChainDriver | None = None
     radar_score_config = RadarScoreConfig()
 
     if ws_first:
+        ws_config = WSConfig(staleness_threshold_ms=ws_staleness_ms)
         if args.dry_run:
             ws_pump = InProcessWSPump()
+            ws_pump_is_in_process = True
+        else:
+            # Pre-flight (step 7b) already vetted the factory and
+            # holds the constructed transport. Re-use it instead of
+            # rebuilding so the test-injected fake transport (and the
+            # real-network handshake state in the production path)
+            # is preserved across the symbol-resolution boundary.
+            ws_pump = _ws_pump_preflight
+            ws_pump_is_in_process = False
+            if ws_pump is None:
+                # Defensive: should be unreachable because step 7b
+                # already returned rc=2 on this branch.
+                print(
+                    "[AMA-RT][phase11c.1b] real public WebSocket "
+                    "transport is required for --ws-first without "
+                    "--dry-run; the pre-flight transport handle is "
+                    "missing.",
+                    file=sys.stderr,
+                )
+                client.stop(
+                    reason="phase11c_runner_no_real_ws_transport"
+                )
+                dbs.close()
+                return 2
         try:
-            ws_config = WSConfig(staleness_threshold_ms=ws_staleness_ms)
             ws_client = BinancePublicWSClient(
                 config=ws_config,
                 pump=ws_pump,
                 event_repo=event_repo,
             )
             ws_client.connect()
-        except NotImplementedError:
-            # Default _RefusalTransport - PR-B does not ship a real WS.
-            print(
-                "[AMA-RT][phase11c.1b] no stdlib WebSocket adapter ships "
-                "in PR-B; degrading to --ws-disabled (bootstrap-only "
-                "REST). Use --dry-run to exercise the in-process pump, "
-                "or wait for the follow-up PR that wires the real WS "
-                "adapter.",
-                file=sys.stderr,
-            )
-            ws_client = None
-            ws_pump = None
-            ws_first = False
         except SafeModeViolation as exc:
             print(
                 f"[AMA-RT][phase11c.1b] BinancePublicWSClient refused "
@@ -910,19 +1059,51 @@ def main(argv: list[str] | None = None) -> int:
             client.stop(reason="phase11c_runner_ws_refused")
             dbs.close()
             return 2
-        if ws_first:
-            radar_buffer = AllMarketRadarBuffer()
-            candidate_pool = CandidatePool(
-                config=CandidatePoolConfig(
-                    candidate_pool_size=candidate_pool_size,
-                    active_detail_limit=active_detail_limit,
-                    candidate_ttl_seconds=candidate_ttl_seconds,
-                ),
+        except NotImplementedError as exc:
+            # The default _RefusalTransport reaches here. Under
+            # --ws-first without --dry-run that is a configuration
+            # error: the factory must return a real transport.
+            print(
+                "[AMA-RT][phase11c.1b] real public WebSocket "
+                "transport is required for --ws-first without "
+                f"--dry-run (refusal transport raised: {exc}). Use "
+                "--dry-run to exercise the in-process pump or "
+                "--ws-disabled to run the REST-only fallback "
+                "(NOT the Phase 11C.1B acceptance path).",
+                file=sys.stderr,
             )
-            ws_chain = WSRadarChainDriver(
-                risk_engine=risk,
-                event_repo=event_repo,
+            client.stop(reason="phase11c_runner_ws_refusal_transport")
+            dbs.close()
+            return 2
+        except Exception as exc:
+            print(
+                "[AMA-RT][phase11c.1b] real public WebSocket "
+                f"transport failed to connect: {type(exc).__name__}: "
+                f"{exc}",
+                file=sys.stderr,
             )
+            try:
+                if ws_client is not None:
+                    ws_client.disconnect(
+                        reason="phase11c_runner_ws_connect_failed"
+                    )
+            except Exception:  # pragma: no cover - protective
+                pass
+            client.stop(reason="phase11c_runner_ws_connect_failed")
+            dbs.close()
+            return 2
+        radar_buffer = AllMarketRadarBuffer()
+        candidate_pool = CandidatePool(
+            config=CandidatePoolConfig(
+                candidate_pool_size=candidate_pool_size,
+                active_detail_limit=active_detail_limit,
+                candidate_ttl_seconds=candidate_ttl_seconds,
+            ),
+        )
+        ws_chain = WSRadarChainDriver(
+            risk_engine=risk,
+            event_repo=event_repo,
+        )
 
     # 9. Set up signal handling for graceful shutdown.
     stop_flag = {"stop": False}
@@ -942,6 +1123,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     stats.ws_first_enabled = bool(ws_first)
+    stats.ws_real_transport = bool(
+        ws_first
+        and ws_pump is not None
+        and not ws_pump_is_in_process
+    )
 
     if args.emit_banner:
         _print_banner(
@@ -956,6 +1142,7 @@ def main(argv: list[str] | None = None) -> int:
             rest_layering_enabled=rest_layering_enabled,
             candidate_detail_limit=candidate_detail_limit,
             ws_first=ws_first,
+            ws_real_transport=stats.ws_real_transport,
             ws_staleness_threshold_ms=ws_staleness_ms,
             candidate_pool_size=candidate_pool_size,
             active_detail_limit=active_detail_limit,
@@ -1001,7 +1188,11 @@ def main(argv: list[str] | None = None) -> int:
             # the candidate pool.
             ws_active_symbols: list[str] = []
             if ws_first and ws_client is not None and radar_buffer is not None and candidate_pool is not None:
-                if args.dry_run and ws_pump is not None:
+                if (
+                    args.dry_run
+                    and ws_pump_is_in_process
+                    and isinstance(ws_pump, InProcessWSPump)
+                ):
                     _push_dry_run_ws_messages(
                         ws_pump,
                         symbols=symbols,
@@ -1026,22 +1217,33 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     candidate_pool.offer(snap, score)
                 candidate_pool.expire()
-                # Drive the WS-radar event chain on the active head.
-                for cand in candidate_pool.active_head():
-                    try:
-                        ws_result = ws_chain.drive(cand)
-                    except Exception as exc:  # pragma: no cover - defensive
-                        stats.notes.append(
-                            f"ws_chain_error:{cand.symbol}:"
-                            f"{type(exc).__name__}"
-                        )
-                        continue
-                    stats.ws_chains_emitted += 1
-                    if not ws_result.risk_approved:
-                        stats.ws_risk_rejected += 1
-                    if ws_result.learning_ready_attached:
-                        stats.ws_learning_ready_attached += 1
-                    ws_active_symbols.append(cand.symbol)
+                # Phase 11C.1B: when the WS link is stale, the radar
+                # snapshots cannot be trusted to reflect the live
+                # market. The DATA_DEGRADED guard SKIPS the active
+                # head iteration so no PRE_ANOMALY / ANOMALY /
+                # STATE_TRANSITION events fire on stale data. The
+                # safety flags are unchanged - this is purely a
+                # read-only quality downgrade. The PUBLIC_WS_STALE
+                # event is already emitted by the BinancePublicWSClient.
+                if ws_client.is_stale:
+                    stats.ws_data_degraded_ticks += 1
+                else:
+                    # Drive the WS-radar event chain on the active head.
+                    for cand in candidate_pool.active_head():
+                        try:
+                            ws_result = ws_chain.drive(cand)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            stats.notes.append(
+                                f"ws_chain_error:{cand.symbol}:"
+                                f"{type(exc).__name__}"
+                            )
+                            continue
+                        stats.ws_chains_emitted += 1
+                        if not ws_result.risk_approved:
+                            stats.ws_risk_rejected += 1
+                        if ws_result.learning_ready_attached:
+                            stats.ws_learning_ready_attached += 1
+                        ws_active_symbols.append(cand.symbol)
 
             # Phase 11C.1A REST layering: only the candidate pool
             # active head receives detail REST. PR-B routes that head
@@ -1215,6 +1417,8 @@ def main(argv: list[str] | None = None) -> int:
                     "rest_layering_enabled": bool(rest_layering_enabled),
                     "candidate_detail_limit": int(candidate_detail_limit),
                     "ws_first": bool(stats.ws_first_enabled),
+                    "ws_real_transport": bool(stats.ws_real_transport),
+                    "ws_data_degraded_ticks": int(stats.ws_data_degraded_ticks),
                     "ws_chains_emitted": int(stats.ws_chains_emitted),
                     "ws_risk_rejected": int(stats.ws_risk_rejected),
                     "ws_learning_ready_attached": int(
@@ -1277,6 +1481,7 @@ def _print_banner(
     rest_layering_enabled: bool = True,
     candidate_detail_limit: int = 0,
     ws_first: bool = False,
+    ws_real_transport: bool = False,
     ws_staleness_threshold_ms: int = 3000,
     candidate_pool_size: int = 20,
     active_detail_limit: int = 3,
@@ -1308,6 +1513,7 @@ def _print_banner(
         f"rest_layering_enabled={rest_layering_enabled} "
         f"candidate_detail_limit={candidate_detail_limit} "
         f"ws_first={ws_first} "
+        f"ws_real_transport={ws_real_transport} "
         f"ws_staleness_threshold_ms={ws_staleness_threshold_ms} "
         f"candidate_pool_size={candidate_pool_size} "
         f"active_detail_limit={active_detail_limit} "
@@ -1346,6 +1552,8 @@ def _print_exit_banner(
         f"ws_reconnect_count={ws_metrics.get('ws_reconnect_count', 0)} "
         f"ws_staleness_ms_max={ws_metrics.get('ws_staleness_ms_max', 0)} "
         f"ws_stale_count={ws_metrics.get('ws_stale_count', 0)} "
+        f"ws_real_transport={stats.ws_real_transport} "
+        f"ws_data_degraded_ticks={stats.ws_data_degraded_ticks} "
         f"radar_candidates_seen={stats.radar_candidates_seen} "
         f"candidate_pool_size_max={stats.candidate_pool_size_max} "
         f"liquidation_events_seen={stats.liquidation_events_seen} "

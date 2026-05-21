@@ -62,15 +62,16 @@ PR is allowed to subscribe to:
 
 | Surface                                              | Behaviour                                                                          |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `app/exchanges/binance_public_ws.py`                 | New module: `BinancePublicWSClient`, `WSConfig`, `WSMessage`, `WSMessagePump`, `InProcessWSPump`, `_RefusalTransport`, `assert_public_ws_stream_allowed`, `assert_public_ws_url_allowed`, `PublicWSCredentialForbidden`, `PublicWSStreamForbidden`. |
+| `app/exchanges/binance_public_ws.py`                 | New module: `BinancePublicWSClient`, `WSConfig`, `WSMessage`, `WSMessagePump`, `InProcessWSPump`, `_RefusalTransport`, **`StdlibPublicWSTransport`** (real-network RFC 6455 client - stdlib only), `create_real_public_ws_transport`, `assert_public_ws_stream_allowed`, `assert_public_ws_url_allowed`, `assert_public_ws_path_allowed`, `PublicWSCredentialForbidden`, `PublicWSStreamForbidden`, `PublicWSTransportError`. |
 | `app/market_data_public/radar.py`                    | New module: `AllMarketRadarSnapshot` (frozen pydantic v2 model), `AllMarketRadarBuffer` (per-symbol rolling state for price / volume history + per-batch volume rank), `pre_anomaly_score_light` (pure additive scoring with deterministic reason tags). |
 | `app/market_data_public/candidate_pool.py`           | New module: `CandidatePool`, `CandidatePoolConfig`, `Candidate`. Default `candidate_pool_size=20`, `active_detail_limit=3`, `candidate_ttl_seconds=900`, `radar_score_threshold=30.0`. Each candidate carries a Phase 8.5 `OpportunityIdentity` with `source_phase="phase_11c_1b_ws_first_radar"`. |
 | `app/market_data_public/ws_radar_chain.py`           | New module: `WSRadarChainDriver` emits PRE_ANOMALY_DETECTED -> ANOMALY_DETECTED -> STATE_TRANSITION (+ Phase 8.5 LearningReadyContext on each, + RISK_REJECTED via the live RiskEngine) per ACTIVE candidate. |
 | `app/core/events.py`                                 | Three new EventType entries: `PUBLIC_WS_CONNECTED`, `PUBLIC_WS_DISCONNECTED`, `PUBLIC_WS_STALE`. |
 | `app/paper_run/daily_report.py`                      | `DailyReportSnapshot` + `DailyReportBuilder` extended with WS + radar metrics; new "Phase 11C.1B WebSocket all-market radar" Markdown section. |
-| `scripts/run_public_market_paper.py`                 | New CLI flags `--ws-first` / `--ws-disabled` (mutex), `--candidate-pool-size`, `--active-detail-limit`, `--ws-staleness-threshold-ms`, `--candidate-ttl-seconds`. Default `ws_first=True`. Per-loop body: pump WS messages -> radar.ingest_messages -> score every snapshot -> pool.offer -> pool.expire -> drive WSRadarChainDriver on the active head. The active head also receives REST detail through the existing PR-A governor. |
-| `tests/unit/test_phase11c_1b_ws_radar.py`            | 28 new tests pinning every behaviour the brief calls out. |
-| `tests/unit/test_phase11c_no_network.py`             | Source-tree audit extended: PHASE_11C_FILES grew the four new files; `test_no_private_websocket_artefacts` blocks listenKey / userDataStream / ws-api / trading-api / @accountUpdate / @orderTradeUpdate / @marginCall / @balanceUpdate / @positionUpdate as non-docstring string literals across the source set. |
+| `scripts/run_public_market_paper.py`                 | New CLI flags `--ws-first` / `--ws-disabled` (mutex), `--candidate-pool-size`, `--active-detail-limit`, `--ws-staleness-threshold-ms`, `--candidate-ttl-seconds`. Default `ws_first=True`. Module-level `_build_real_public_ws_transport` + `_build_rest_transport` factories (testability hooks). Pre-flight refusal: `--ws-first` without `--dry-run` REQUIRES a real public WS transport - rc=2 if the factory returns `None` or raises. Per-loop body: pump WS messages -> radar.ingest_messages -> score every snapshot -> pool.offer -> pool.expire -> when `ws_client.is_stale` skip the active head (DATA_DEGRADED gate, no events on stale data) -> drive WSRadarChainDriver on the active head. The active head also receives REST detail through the existing PR-A governor. |
+| `tests/unit/test_phase11c_1b_ws_radar.py`            | Scaffold + radar + pool + chain tests (28). |
+| `tests/unit/test_phase11c_1b_real_ws_adapter.py`     | Real WS adapter + runner refusal + reconnect backoff + staleness + safety flags + RFC 6455 handshake/frame audit tests (19). |
+| `tests/unit/test_phase11c_no_network.py`             | Source-tree audit extended: PHASE_11C_FILES grew the four new files; `test_no_private_websocket_artefacts` blocks listenKey / userDataStream / ws-api / trading-api / @accountUpdate / @orderTradeUpdate / @marginCall / @balanceUpdate / @positionUpdate as non-docstring string literals across the source set; the third-party HTTP / WebSocket package deny-list (`websockets` / `websocket-client` / `aiohttp` / `requests` / `httpx` / `urllib3`) continues to hold. |
 
 ### How the WS-first pipeline works
 
@@ -118,7 +119,9 @@ calls **only for the candidate pool's active head** (default
 | `reconnect` (auto)        | Disconnect + sleep configured backoff (default 1 s, max 30 s) + reconnect; reconnect_count++. |
 | `pump_messages` no data   | Updates the staleness detector; if the last-message gap >= `staleness_threshold_ms` (default 3000 ms) the manager emits `PUBLIC_WS_STALE` and flips `is_stale=True`. |
 | Pump drops underneath     | Detected on the next `pump_messages` call; auto-disconnect + emit. |
-| Default transport         | `_RefusalTransport` raises `NotImplementedError` on `connect`. PR-B does NOT ship a real-network WS adapter; the runner detects the refusal and degrades cleanly to the PR-A bootstrap-only path with a stderr notice. The in-process pump is wired under `--dry-run`. |
+| Default transport         | `_RefusalTransport` raises `NotImplementedError` on `connect`. The runner picks **`StdlibPublicWSTransport`** (real-network RFC 6455 client) instead whenever `--ws-first` is set without `--dry-run`. The runner refuses to start (rc=2) if the real transport factory returns `None` or raises - it does NOT silently fall back to REST. The in-process pump is wired under `--dry-run`. |
+| Real-network adapter      | `StdlibPublicWSTransport` connects to `wss://fstream.binance.com` only, sends a stdlib-only RFC 6455 client handshake (`GET /stream?streams=...`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version: 13`), validates `Sec-WebSocket-Accept`, parses RFC 6455 text frames, answers pings inline, and surfaces decoded `WSMessage` envelopes. Refuses every credential-shaped kwarg; never reads `BINANCE_API_KEY` / `BINANCE_API_SECRET`; refuses any non-`/ws` / non-`/stream` path root; refuses any URL embedding `listenKey` / `userdata` / `ws-api` / `trading-api` / `signature` / `apiKey`. |
+| Data-degraded gate        | When `ws_client.is_stale=True` the runner SKIPS the candidate-pool active-head iteration: no PRE_ANOMALY_DETECTED / ANOMALY_DETECTED / STATE_TRANSITION events fire on stale data. The PUBLIC_WS_STALE event is still emitted. The Phase 1 / Phase 11C safety flags are unchanged - this is a pure read-only quality downgrade. The runner counts `ws_data_degraded_ticks` for the daily report. |
 
 ### Candidate pool behaviour
 
@@ -168,28 +171,47 @@ counter cannot hide a real connection event.
 
 ### Phase 11C.1B acceptance criteria
 
-1. `pytest` 全部通过 (currently `2144 passed`).
-2. The new test file
-   `tests/unit/test_phase11c_1b_ws_radar.py` pins every behaviour
-   the brief calls out:
-   - `test_public_ws_stream_allowlist`
-   - `test_private_ws_forbidden`
-   - `test_listen_key_forbidden`
-   - `test_user_data_stream_forbidden`
-   - `test_all_market_ticker_updates_radar_snapshot`
-   - `test_book_ticker_updates_spread`
-   - `test_mark_price_updates_funding`
-   - `test_force_order_sets_liquidation_event`
-   - `test_radar_score_detects_price_volume_acceleration`
-   - `test_candidate_pool_adds_top_radar_symbols`
-   - `test_candidate_pool_expires_old_candidates`
-   - `test_ws_stale_enters_data_degraded`
-   - `test_ws_first_runner_does_not_call_rest_detail_for_all_symbols`
-   - `test_learning_ready_payload_from_ws_candidate`
-   - `test_safety_flags_unchanged_with_ws_enabled`
-   plus 13 supporting tests covering reconnect, refusal of private
-   subscriptions, default config conservatism, and the in-process
-   pump's stream allowlist enforcement.
+1. `pytest` 全部通过 (currently `2163 passed`).
+2. The new test files
+   `tests/unit/test_phase11c_1b_ws_radar.py` (scaffold + radar +
+   pool + chain) and
+   `tests/unit/test_phase11c_1b_real_ws_adapter.py` (real public
+   WS adapter + runner refusal + reconnect backoff + staleness
+   gate + safety flags) pin every behaviour the brief calls out:
+   - **Scaffold + radar + pool + chain**:
+     - `test_public_ws_stream_allowlist`
+     - `test_private_ws_forbidden`
+     - `test_listen_key_forbidden`
+     - `test_user_data_stream_forbidden`
+     - `test_all_market_ticker_updates_radar_snapshot`
+     - `test_book_ticker_updates_spread`
+     - `test_mark_price_updates_funding`
+     - `test_force_order_sets_liquidation_event`
+     - `test_radar_score_detects_price_volume_acceleration`
+     - `test_candidate_pool_adds_top_radar_symbols`
+     - `test_candidate_pool_expires_old_candidates`
+     - `test_ws_stale_enters_data_degraded`
+     - `test_ws_first_runner_does_not_call_rest_detail_for_all_symbols`
+     - `test_learning_ready_payload_from_ws_candidate`
+     - `test_safety_flags_unchanged_with_ws_enabled`
+   - **Real public WS adapter + runner refusal**:
+     - `test_real_public_ws_adapter_allows_only_public_hosts`
+     - `test_real_public_ws_adapter_rejects_private_hosts`
+     - `test_real_public_ws_adapter_rejects_listen_key`
+     - `test_real_public_ws_adapter_rejects_user_data_stream`
+     - `test_real_public_ws_adapter_rejects_trading_ws_api`
+     - `test_real_public_ws_adapter_rejects_credentials`
+     - `test_runner_real_ws_first_refuses_if_transport_missing`
+     - `test_runner_real_ws_first_uses_ws_adapter`
+     - `test_runner_real_ws_first_does_not_silent_fallback_to_rest`
+     - `test_ws_reconnect_backoff`
+     - `test_ws_staleness_enters_data_degraded`
+     - `test_public_ws_connected_event_written`
+     - `test_public_ws_stale_event_written`
+     - `test_safety_flags_unchanged_with_real_ws_enabled`
+     - `test_no_private_ws_or_listen_key_in_phase11c1b`
+   plus supporting tests (RFC 6455 handshake validation, frame
+   parsing, private-shaped message drop).
 3. The four `ExchangeClientBase` write surfaces still raise
    `SafeModeViolation` when invoked on the public REST client.
 4. The Phase 8.5 export pipeline accepts the three new
@@ -199,19 +221,24 @@ counter cannot hide a real connection event.
    accept the new event types (asserted by the existing
    `test_phase11c_export_and_replay.py` continuing to pass).
 6. The daily Markdown report contains the new "Phase 11C.1B
-   WebSocket all-market radar" section with every required field.
+   WebSocket all-market radar" section with every required field,
+   including the new `ws_real_transport` and
+   `ws_data_degraded_ticks` fields.
 7. No file in the Phase 11C source set imports a third-party HTTP /
    WebSocket / SDK / LLM / Telegram bot package; only stdlib +
-   loguru + pydantic + the existing `app.*` modules. The PR-B
-   default transport refuses to open a real socket
-   (`NotImplementedError`); a stdlib WS adapter is a follow-up PR.
+   loguru + pydantic + the existing `app.*` modules. The
+   `StdlibPublicWSTransport` is implemented entirely on top of
+   `socket` + `ssl` + `select` + `struct` + `base64` + `hashlib`
+   + `json` + `os.urandom` (RFC 6455 client).
+8. Under `--ws-first` without `--dry-run`, the runner uses the
+   real `StdlibPublicWSTransport` and does NOT silently fall back
+   to REST bootstrap. If the transport factory returns `None` or
+   raises, the runner exits with `rc=2` and the message
+   `real public WebSocket transport is required for --ws-first
+   without --dry-run`.
 
 ### Phase 11C.1B explicitly does NOT
 
-- ship a real-network WebSocket transport (the default
-  `_RefusalTransport` raises `NotImplementedError`; the in-process
-  pump covers `--dry-run`; the stdlib WS adapter ships in a
-  follow-up PR).
 - accept any Binance API key / API secret.
 - accept any `listenKey`.
 - subscribe to any user data stream.
@@ -219,6 +246,13 @@ counter cannot hide a real connection event.
 - subscribe to any account / margin / position / leverage / balance
   / order private WebSocket variant.
 - call any signed REST endpoint.
+- import any third-party HTTP / WebSocket / SDK package. The
+  real-network `StdlibPublicWSTransport` is stdlib-only.
+- silently fall back to REST under `--ws-first` without
+  `--dry-run`. The runner refuses with rc=2 if the real public
+  WS transport cannot be constructed; only `--ws-disabled`
+  switches to the REST-only path (which is **not** the Phase
+  11C.1B acceptance path).
 - connect to DeepSeek.
 - connect to a real Telegram bot.
 - connect to Binance Square.
@@ -226,8 +260,9 @@ counter cannot hide a real connection event.
 
 ### Resuming the Phase 11C real-data 24h acceptance run
 
-After PR-B merges (and once the follow-up stdlib WS adapter PR
-lands), the Phase 11C real-data 24h acceptance run resumes with:
+After PR-B merges (which now includes the real
+`StdlibPublicWSTransport`), the Phase 11C real-data 24h
+acceptance run resumes with:
 
   - bootstrap REST: one `exchangeInfo` + one `ticker/24hr`.
   - public WS: 5 ALLOWLIST streams covering every USDT-M perpetual.
@@ -237,7 +272,29 @@ lands), the Phase 11C real-data 24h acceptance run resumes with:
   - daily report: WS lifecycle + radar candidates + rate-limit
     governor metrics in one Markdown body.
 
-PR-C (cluster exposure control) remains a separate branch.
+### Phase 11C.1B cloud smoke acceptance ladder
+
+The legacy command:
+
+```
+python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5
+```
+
+is **deprecated**. It exercises the pre-PR-A "fetch every detail
+endpoint for every symbol every loop" pattern that triggered HTTP
+418. The current acceptance ladder is:
+
+| Stage              | Command                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 30 s dry-run       | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                |
+| 5 min real WS      | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              |
+| 10 min real WS     | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             |
+| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                               |
+| 6 h WS-first       | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                |
+| 24 h WS-first      | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               |
+
+PR-C (priority_score / cluster classifier / same-cluster leader /
+multi-candidate arbitration) remains a separate branch.
 
 ---
 

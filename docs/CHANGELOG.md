@@ -47,9 +47,22 @@ discovery throughput while keeping REST pressure near zero.
   envelope.
 - `WSMessagePump` (abstract) + `InProcessWSPump` (deterministic
   test pump) + `_RefusalTransport` (default; raises
-  `NotImplementedError` on `connect` because PR-B does NOT ship a
-  real-network WS adapter; the in-process pump covers `--dry-run`;
-  the stdlib WS adapter is a follow-up PR).
+  `NotImplementedError` on `connect`) +
+  **`StdlibPublicWSTransport`** (real-network RFC 6455 client
+  built on the Python standard library only - `socket` + `ssl` +
+  `select` + `struct` + `base64` + `hashlib` + `json` +
+  `os.urandom`; refuses every credential-shaped kwarg; never
+  reads `BINANCE_API_KEY` / `BINANCE_API_SECRET`; only opens
+  connections to allowlisted hosts and `/ws` / `/stream` path
+  roots).
+- `create_real_public_ws_transport(config=WSConfig(), **kwargs)`
+  - public factory for the real-network transport. The runner
+  imports this and calls it whenever `--ws-first` is set without
+  `--dry-run`.
+- `assert_public_ws_path_allowed(path)` +
+  `ALLOWED_PUBLIC_WS_PATH_ROOTS = {"ws", "stream"}` - stricter
+  than the URL parser; refuses any path whose root is not on the
+  allowlist (e.g. `/ws-api`, `/userDataStream`, `/account`).
 - Public allowlist: `!ticker@arr`, `!miniTicker@arr`,
   `!bookTicker`, `!markPrice@arr`, `!forceOrder@arr` plus the
   per-symbol variants of those streams.
@@ -156,23 +169,43 @@ pipelines accept the new types unchanged.
   `!bookTicker` / `!markPrice@arr` per iteration so the radar /
   pool / chain pipeline can exercise every code path without a
   network.
-- Without `--dry-run`: the default `_RefusalTransport` raises
-  `NotImplementedError` on `connect`; the runner catches that and
-  degrades cleanly to the PR-A bootstrap-only path with a stderr
-  notice. The stdlib WS adapter is a follow-up PR.
+- Without `--dry-run` AND with `--ws-first` (the Phase 11C.1B
+  acceptance path): the runner calls
+  `_build_real_public_ws_transport(config)` (module-level factory
+  defaulting to `StdlibPublicWSTransport`). If the factory returns
+  `None` or raises, **the runner refuses to start** with rc=2 and
+  the message `real public WebSocket transport is required for
+  --ws-first without --dry-run`. The runner does NOT silently fall
+  back to the PR-A bootstrap-only REST path. Operators who cannot
+  reach `fstream.binance.com` use the explicit `--ws-disabled`
+  flag, documented as **not** the Phase 11C.1B all-market
+  demon-radar acceptance path.
+- The pre-flight refusal happens BEFORE the REST symbol resolution
+  call so a host with no public Binance access at all surfaces the
+  refusal cleanly.
+- Module-level `_build_rest_transport(*, dry_run)` factory mirrors
+  the WS factory; tests monkey-patch both to drive the runner
+  end-to-end without any real network.
 - Per-loop body:
   1. pump WS messages -> `radar_buffer.ingest_messages`;
   2. score every symbol with new state via
      `pre_anomaly_score_light` and offer to the pool;
   3. `pool.expire()`;
-  4. drive `WSRadarChainDriver` on the active head;
-  5. feed the active head into `PublicMarketIngestor.ingest_many`
+  4. when `ws_client.is_stale=True`: increment
+     `ws_data_degraded_ticks` and SKIP the active-head iteration
+     (no PRE_ANOMALY_DETECTED / ANOMALY_DETECTED /
+     STATE_TRANSITION events on stale data; safety flags
+     unchanged);
+  5. otherwise drive `WSRadarChainDriver` on the active head;
+  6. feed the active head into `PublicMarketIngestor.ingest_many`
      so the existing MARKET_SNAPSHOT / Phase 4 contract continues
      to fire for those symbols (gated by the PR-A rate-limit
      governor).
 - Banner: `[AMA-RT] Phase 11C.1B - WebSocket-First All-Market
-  Demon Coin Radar v1.4.0a11c.1b ...`. Exit banner reports
-  WS metrics + radar candidates + governor metrics on shutdown.
+  Demon Coin Radar v1.4.0a11c.1b ...` now also reports
+  `ws_real_transport=...`. Exit banner reports `ws_real_transport`
+  + `ws_data_degraded_ticks` + WS metrics + radar candidates +
+  governor metrics on shutdown.
 
 #### Daily report (`app/paper_run/daily_report.py`)
 
@@ -228,15 +261,24 @@ raise `SafeModeViolation` on the public REST client.
 
 #### Phase 11C.1B explicitly does NOT
 
-- ship a real-network WebSocket transport. The default
-  `_RefusalTransport` raises `NotImplementedError`; the in-process
-  pump covers `--dry-run`; the stdlib WS adapter is a follow-up PR.
 - accept any Binance API key / API secret / `listenKey`.
 - subscribe to any user data stream / private WebSocket / trading
   WebSocket API / account / margin / position / leverage / balance
   / order private WS variant.
 - call any signed REST endpoint.
 - connect to DeepSeek / a real Telegram bot / Binance Square.
+- import any third-party HTTP / WebSocket / SDK package. The
+  `StdlibPublicWSTransport` is implemented entirely on top of the
+  Python standard library (`socket` + `ssl` + `select` + `struct`
+  + `base64` + `hashlib` + `json` + `os.urandom`) and the existing
+  source-tree audit (`tests/unit/test_phase11c_no_network.py`)
+  continues to ban `websockets` / `websocket-client` / `aiohttp`
+  / `requests` / `httpx` / `urllib3`.
+- silently fall back to REST under `--ws-first` without
+  `--dry-run`. The runner refuses with rc=2 if the real public WS
+  transport cannot be constructed; only `--ws-disabled` switches
+  to the REST-only path (which is **not** the Phase 11C.1B
+  acceptance path).
 - enter Phase 12.
 
 #### Tests

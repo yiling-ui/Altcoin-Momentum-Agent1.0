@@ -56,6 +56,14 @@ single-threaded polling loop PR-A introduced.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
+import os
+import select
+import socket
+import ssl
+import struct
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -154,9 +162,22 @@ ALLOWED_PUBLIC_WS_HOSTS: frozenset[str] = frozenset(
     }
 )
 
+#: Allowed top-level path roots for the Phase 11C.1B public WebSocket
+#: client. The Binance USDⓈ-M Futures public WebSocket reference
+#: defines exactly two public path roots: ``/ws/<stream>`` for a
+#: single-stream subscription and ``/stream?streams=<a>/<b>`` for a
+#: combined-stream subscription. Anything else (``/ws-api`` /
+#: ``/userDataStream`` / ``/ws-fapi`` etc.) is private.
+ALLOWED_PUBLIC_WS_PATH_ROOTS: frozenset[str] = frozenset({"ws", "stream"})
+
 #: Default WebSocket base URL for Binance USDT-M perpetual futures
 #: public-market streams.
 DEFAULT_WS_BASE_URL: str = "wss://fstream.binance.com"
+
+#: RFC 6455 magic GUID. Used to build the ``Sec-WebSocket-Accept``
+#: header from the ``Sec-WebSocket-Key`` we send during the upgrade
+#: handshake. This is a fixed protocol constant, NOT a credential.
+_WS_RFC6455_GUID: str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +309,34 @@ def assert_public_ws_url_allowed(url: str) -> str:
                     f"query parameter {name!r} is forbidden."
                 )
     return url
+
+
+def assert_public_ws_path_allowed(path: str) -> str:
+    """Phase 11C.1B path-root allowlist.
+
+    Stricter than :func:`assert_public_ws_url_allowed`: the path must
+    begin with ``/ws`` or ``/stream``. The Binance USDⓈ-M Futures
+    public WebSocket reference defines exactly these two public path
+    roots; ``/ws-api`` / ``/ws-fapi`` / ``/userDataStream`` /
+    ``/listenKey/...`` are all private and refused here even before
+    the denylist substring check fires.
+    """
+    if not path:
+        raise PublicWSStreamForbidden(
+            "BinancePublicWS: refused empty WS path"
+        )
+    parts = path.lstrip("/").split("/", 1)
+    if not parts or not parts[0]:
+        raise PublicWSStreamForbidden(
+            f"BinancePublicWS: refused WS path {path!r}; empty root"
+        )
+    root = parts[0].lower()
+    if root not in ALLOWED_PUBLIC_WS_PATH_ROOTS:
+        raise PublicWSStreamForbidden(
+            f"BinancePublicWS: refused WS path {path!r}; only "
+            f"{sorted(ALLOWED_PUBLIC_WS_PATH_ROOTS)} are allowed roots."
+        )
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -939,8 +988,653 @@ class BinancePublicWSClient:
             )
 
 
+# ---------------------------------------------------------------------------
+# Real-network transport (stdlib-only RFC 6455 client)
+# ---------------------------------------------------------------------------
+#
+# Phase 11C.1B promotes the runner from "scaffold + dry-run pump" to
+# "real all-market WS-first radar". The real-network adapter below is
+# implemented entirely on top of the Python standard library
+# (``socket`` + ``ssl`` + ``select`` + ``struct`` + ``base64`` +
+# ``hashlib`` + ``json`` + ``os.urandom``). NO third-party WebSocket
+# library is imported; the Phase 11C source-tree audit
+# (:mod:`tests.unit.test_phase11c_no_network`) keeps the
+# ``websockets`` / ``websocket-client`` / ``aiohttp`` / ``requests``
+# packages on the deny-list and this module continues to satisfy that
+# audit.
+#
+# The transport's responsibilities:
+#
+#   * connect to ``wss://fstream.binance.com`` (or
+#     ``wss://fstream.binancefuture.com`` for the testnet) ONLY;
+#   * speak only the public path roots ``/ws`` and ``/stream``;
+#   * subscribe ONLY to streams on
+#     :data:`PUBLIC_WS_STREAM_ALLOWLIST`;
+#   * refuse every credential-shaped kwarg (``api_key`` /
+#     ``api_secret`` / ``listen_key`` / ``token`` / ``signature`` /
+#     ``passphrase``) at construction time;
+#   * never read ``BINANCE_API_KEY`` / ``BINANCE_API_SECRET`` (the
+#     adapter does not import ``os.environ`` and the source-tree audit
+#     blocks any ``os.environ.get`` / ``os.getenv`` call in this
+#     file);
+#   * never connect to a private host, ``/ws-api`` /
+#     ``/userDataStream`` / ``/listenKey/...`` path, or send a
+#     signed-WS query parameter (``signature`` / ``timestamp`` /
+#     ``recvWindow`` / ``apiKey`` / ``listenKey``);
+#   * never send a frame with the ``ws-api`` / ``trading-api`` /
+#     account / order / position / balance / margin / leverage shapes.
+#
+# The adapter is single-threaded; the host
+# :class:`BinancePublicWSClient` already documents that constraint
+# and the runner already calls into one client from one thread.
+# ---------------------------------------------------------------------------
+
+
+class PublicWSTransportError(PublicWSError):
+    """The transport could not connect / handshake / read a frame."""
+
+
+class StdlibPublicWSTransport(WSMessagePump):
+    """Phase 11C.1B real-network public-market WebSocket adapter.
+
+    The class implements the RFC 6455 client handshake + frame
+    layer using only the Python standard library. It is the default
+    transport the runner injects into :class:`BinancePublicWSClient`
+    when ``--ws-first`` is set without ``--dry-run``.
+
+    Construction-time refusals (Phase 11C.1B boundary):
+
+      - any non-``None`` ``api_key`` / ``api_secret`` /
+        ``listen_key`` argument raises
+        :class:`PublicWSCredentialForbidden`;
+      - any extra kwarg whose name matches the credential pattern
+        (``api_key`` / ``api_secret`` / ``apikey`` / ``secret`` /
+        ``token`` / ``signature`` / ``passphrase`` / ``listen_key`` /
+        ``listenkey``) raises :class:`PublicWSCredentialForbidden`;
+      - the configured ``base_url`` MUST resolve to one of
+        :data:`ALLOWED_PUBLIC_WS_HOSTS`;
+      - the resulting subscribe URL MUST pass
+        :func:`assert_public_ws_url_allowed` AND
+        :func:`assert_public_ws_path_allowed`;
+      - every entry in ``config.streams`` MUST pass
+        :func:`assert_public_ws_stream_allowed`.
+
+    The adapter is intentionally minimal: it can subscribe to the
+    five public array streams (``!ticker@arr`` / ``!miniTicker@arr``
+    / ``!bookTicker`` / ``!markPrice@arr`` / ``!forceOrder@arr``)
+    and per-symbol public variants. It does NOT implement
+    fragmentation, compression, or any signed-WS feature.
+    """
+
+    OPCODE_CONTINUATION = 0x0
+    OPCODE_TEXT = 0x1
+    OPCODE_BINARY = 0x2
+    OPCODE_CLOSE = 0x8
+    OPCODE_PING = 0x9
+    OPCODE_PONG = 0xA
+
+    DEFAULT_CONNECT_TIMEOUT_SECONDS: float = 10.0
+    DEFAULT_RECV_CHUNK_SIZE: int = 65_536
+    MAX_HANDSHAKE_BYTES: int = 65_536
+
+    def __init__(
+        self,
+        *,
+        config: WSConfig | None = None,
+        connect_timeout_seconds: float | None = None,
+        recv_chunk_size: int | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+        socket_factory: Callable[..., socket.socket] | None = None,
+        ssl_wrap_fn: Callable[[socket.socket, str], socket.socket]
+        | None = None,
+        random_bytes_fn: Callable[[int], bytes] = os.urandom,
+        # Refusal sentinels - same pattern as BinancePublicWSClient.
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        listen_key: str | None = None,
+        **forbidden_credentials: Any,
+    ) -> None:
+        if (
+            api_key is not None
+            or api_secret is not None
+            or listen_key is not None
+        ):
+            raise PublicWSCredentialForbidden(
+                "StdlibPublicWSTransport must not be instantiated with "
+                "api_key / api_secret / listen_key. Phase 11C.1B is "
+                "public-market read-only; credentials and listenKey "
+                "are forbidden."
+            )
+        for name in forbidden_credentials:
+            lowered = name.lower()
+            if any(
+                needle in lowered
+                for needle in (
+                    "api_key",
+                    "api_secret",
+                    "apikey",
+                    "secret",
+                    "token",
+                    "signature",
+                    "passphrase",
+                    "listen_key",
+                    "listenkey",
+                )
+            ):
+                raise PublicWSCredentialForbidden(
+                    f"StdlibPublicWSTransport: refused credential-shaped "
+                    f"keyword argument {name!r}."
+                )
+        if forbidden_credentials:
+            raise TypeError(
+                "StdlibPublicWSTransport got unexpected keyword "
+                f"argument(s): {sorted(forbidden_credentials)}"
+            )
+
+        self._config = config or WSConfig()
+        # Validate every stream against the allowlist.
+        for stream in self._config.streams:
+            assert_public_ws_stream_allowed(stream)
+        # Build + validate the subscribe URL. The combined endpoint
+        # ``/stream?streams=<a>/<b>`` lets us subscribe to all five
+        # array streams in a single connection.
+        self._url = self._build_subscribe_url(self._config)
+        assert_public_ws_url_allowed(self._url)
+        parsed = urllib.parse.urlsplit(self._url)
+        host = (parsed.netloc or "").split(":", 1)[0].lower()
+        if host not in ALLOWED_PUBLIC_WS_HOSTS:
+            raise PublicWSStreamForbidden(
+                f"StdlibPublicWSTransport: refused host {host!r}; "
+                "Phase 11C.1B only allows Binance public WS hosts "
+                f"({sorted(ALLOWED_PUBLIC_WS_HOSTS)})."
+            )
+        assert_public_ws_path_allowed(parsed.path or "")
+        self._host = host
+        self._port = int(parsed.port or 443)
+        self._path = parsed.path or "/stream"
+        if parsed.query:
+            self._path = f"{self._path}?{parsed.query}"
+
+        self._connect_timeout_seconds = float(
+            connect_timeout_seconds
+            if connect_timeout_seconds is not None
+            else self.DEFAULT_CONNECT_TIMEOUT_SECONDS
+        )
+        self._recv_chunk_size = int(
+            recv_chunk_size
+            if recv_chunk_size is not None
+            else self.DEFAULT_RECV_CHUNK_SIZE
+        )
+        self._ssl_context = ssl_context
+        self._socket_factory = socket_factory or socket.socket
+        self._ssl_wrap_fn = ssl_wrap_fn
+        self._random_bytes_fn = random_bytes_fn
+
+        self._sock: socket.socket | None = None
+        self._connected: bool = False
+        self._closed: bool = False
+        self._recv_buffer: bytearray = bytearray()
+        self._subscribed_streams: tuple[str, ...] = ()
+
+    # ------------------------------------------------------------------
+    # URL construction
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_subscribe_url(config: WSConfig) -> str:
+        """Build the canonical combined-subscribe URL.
+
+        Returns ``<base_url>/stream?streams=<a>/<b>/...`` where every
+        ``<>`` entry is an allowlisted public stream. The combined
+        endpoint is preferred over per-stream ``/ws/<x>`` because it
+        keeps the connection count to one for the full all-market
+        radar.
+        """
+        streams = list(config.streams)
+        if not streams:
+            raise PublicWSStreamForbidden(
+                "StdlibPublicWSTransport: refused empty stream set"
+            )
+        for stream in streams:
+            assert_public_ws_stream_allowed(stream)
+        joined = "/".join(streams)
+        return f"{config.base_url}/stream?streams={joined}"
+
+    # ------------------------------------------------------------------
+    # Connect / disconnect
+    # ------------------------------------------------------------------
+    def connect(self) -> None:
+        """Open a real TCP+TLS+WebSocket connection.
+
+        Raises :class:`PublicWSTransportError` (a
+        :class:`SafeModeViolation` subclass) on every failure mode:
+        DNS error, refused connection, TLS handshake error, malformed
+        upgrade response, missing / wrong ``Sec-WebSocket-Accept``.
+        """
+        if self._connected:
+            return
+        if self._closed:
+            # Allow re-connect after a close.
+            self._closed = False
+        sock: socket.socket | None = None
+        try:
+            sock = self._socket_factory(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self._connect_timeout_seconds)
+            try:
+                sock.connect((self._host, self._port))
+            except OSError as exc:
+                raise PublicWSTransportError(
+                    f"StdlibPublicWSTransport: TCP connect to "
+                    f"{self._host}:{self._port} failed: {exc}"
+                ) from exc
+
+            if self._ssl_wrap_fn is not None:
+                wrapped = self._ssl_wrap_fn(sock, self._host)
+            else:
+                ctx = self._ssl_context or ssl.create_default_context()
+                try:
+                    wrapped = ctx.wrap_socket(
+                        sock, server_hostname=self._host
+                    )
+                except ssl.SSLError as exc:
+                    raise PublicWSTransportError(
+                        f"StdlibPublicWSTransport: TLS handshake to "
+                        f"{self._host}:{self._port} failed: {exc}"
+                    ) from exc
+
+            # Build + send the WebSocket upgrade request.
+            random_key_bytes = self._random_bytes_fn(16)
+            sec_ws_key = base64.b64encode(random_key_bytes).decode(
+                "ascii"
+            )
+            request = (
+                f"GET {self._path} HTTP/1.1\r\n"
+                f"Host: {self._host}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {sec_ws_key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                "User-Agent: ama-rt-phase11c1b/1.0 (+stdlib)\r\n"
+                "\r\n"
+            )
+            wrapped.settimeout(self._connect_timeout_seconds)
+            try:
+                wrapped.sendall(request.encode("ascii"))
+            except OSError as exc:
+                raise PublicWSTransportError(
+                    f"StdlibPublicWSTransport: send upgrade failed: {exc}"
+                ) from exc
+
+            response = bytearray()
+            while b"\r\n\r\n" not in response:
+                try:
+                    chunk = wrapped.recv(4096)
+                except OSError as exc:
+                    raise PublicWSTransportError(
+                        "StdlibPublicWSTransport: read upgrade response "
+                        f"failed: {exc}"
+                    ) from exc
+                if not chunk:
+                    raise PublicWSTransportError(
+                        "StdlibPublicWSTransport: upgrade response "
+                        "truncated; server closed before \\r\\n\\r\\n"
+                    )
+                response.extend(chunk)
+                if len(response) > self.MAX_HANDSHAKE_BYTES:
+                    raise PublicWSTransportError(
+                        "StdlibPublicWSTransport: upgrade response too "
+                        f"large (>{self.MAX_HANDSHAKE_BYTES} bytes)"
+                    )
+
+            header_end = response.index(b"\r\n\r\n")
+            head = bytes(response[:header_end]).decode(
+                "latin-1", errors="replace"
+            )
+            lines = head.split("\r\n")
+            status_line = lines[0] if lines else ""
+            # "HTTP/1.1 101 Switching Protocols"
+            status_parts = status_line.split(" ", 2)
+            if (
+                len(status_parts) < 2
+                or not status_parts[1].strip() == "101"
+            ):
+                raise PublicWSTransportError(
+                    "StdlibPublicWSTransport: unexpected upgrade "
+                    f"response status {status_line!r}"
+                )
+            accept_header: str | None = None
+            for line in lines[1:]:
+                if ":" in line:
+                    name, value = line.split(":", 1)
+                    if name.strip().lower() == "sec-websocket-accept":
+                        accept_header = value.strip()
+                        break
+            expected_accept = base64.b64encode(
+                hashlib.sha1(
+                    (sec_ws_key + _WS_RFC6455_GUID).encode("ascii")
+                ).digest()
+            ).decode("ascii")
+            if accept_header != expected_accept:
+                raise PublicWSTransportError(
+                    "StdlibPublicWSTransport: Sec-WebSocket-Accept "
+                    f"mismatch (got {accept_header!r}, expected "
+                    f"{expected_accept!r})"
+                )
+
+            # Save any bytes after the handshake into the recv buffer.
+            self._recv_buffer = bytearray(response[header_end + 4 :])
+            wrapped.setblocking(False)
+            self._sock = wrapped
+            self._connected = True
+            self._closed = False
+            self._subscribed_streams = tuple(self._config.streams)
+            sock = None  # ownership transferred
+            logger.info(
+                "[phase11c.1b] StdlibPublicWSTransport connected "
+                "host={} path={} streams={}",
+                self._host,
+                self._path.split("?", 1)[0],
+                len(self._config.streams),
+            )
+        finally:
+            if sock is not None and not self._connected:
+                try:
+                    sock.close()
+                except Exception:  # pragma: no cover - protective
+                    pass
+
+    def disconnect(self) -> None:
+        """Send a CLOSE frame and tear the socket down."""
+        sock = self._sock
+        self._sock = None
+        self._connected = False
+        self._closed = True
+        if sock is not None:
+            try:
+                self._send_frame(self.OPCODE_CLOSE, b"\x03\xe8", sock=sock)
+            except Exception:  # pragma: no cover - protective
+                pass
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except Exception:  # pragma: no cover - protective
+                pass
+            try:
+                sock.close()
+            except Exception:  # pragma: no cover - protective
+                pass
+
+    # ------------------------------------------------------------------
+    # Subscribe (SUBSCRIBE method on /stream endpoint)
+    # ------------------------------------------------------------------
+    def subscribe(self, streams: Sequence[str]) -> None:
+        """Send a JSON SUBSCRIBE message for the given streams.
+
+        Every stream is run through
+        :func:`assert_public_ws_stream_allowed` before the frame goes
+        out. The combined ``/stream?streams=<>`` URL we used for the
+        initial subscribe still works; this method is for additional
+        per-symbol subscribes a future runner may add.
+        """
+        canonical: list[str] = []
+        for stream in streams:
+            canonical.append(assert_public_ws_stream_allowed(stream))
+        if not canonical:
+            return
+        if self._sock is None:
+            self._subscribed_streams = tuple(canonical)
+            return
+        # JSON subscribe message - public-only payload.
+        payload = json.dumps(
+            {
+                "method": "SUBSCRIBE",
+                "params": canonical,
+                "id": int(now_ms() % 1_000_000),
+            }
+        ).encode("utf-8")
+        self._send_frame(self.OPCODE_TEXT, payload)
+        # Merge with the URL-side subscriptions.
+        merged = list(self._subscribed_streams)
+        for s in canonical:
+            if s not in merged:
+                merged.append(s)
+        self._subscribed_streams = tuple(merged)
+
+    # ------------------------------------------------------------------
+    # Poll
+    # ------------------------------------------------------------------
+    def poll(self, *, timeout_seconds: float) -> list[WSMessage]:
+        """Drain currently-buffered frames + read up to
+        ``timeout_seconds`` seconds of new bytes from the socket.
+
+        Returns the list of fresh :class:`WSMessage` envelopes; an
+        empty list means "no traffic yet, try again". Frames that
+        arrive but fail the public allowlist are silently dropped
+        (we already refuse them at subscribe time; this is
+        defence-in-depth against a server that pushes an unsolicited
+        private-shaped event).
+        """
+        if self._sock is None or self._closed:
+            return []
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        out: list[WSMessage] = []
+        while True:
+            msg = self._try_extract_message()
+            if msg is not None:
+                out.append(msg)
+                continue
+            if not self._connected:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                # No more time; return what we have.
+                break
+            try:
+                ready, _, _ = select.select(
+                    [self._sock], [], [], remaining
+                )
+            except (OSError, ValueError):
+                self._connected = False
+                break
+            if not ready:
+                break
+            try:
+                chunk = self._sock.recv(self._recv_chunk_size)
+            except (BlockingIOError, ssl.SSLWantReadError):
+                continue
+            except (OSError, ssl.SSLError):
+                self._connected = False
+                break
+            if not chunk:
+                # Server closed.
+                self._connected = False
+                break
+            self._recv_buffer.extend(chunk)
+        return out
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected and not self._closed
+
+    @property
+    def url(self) -> str:
+        return self._url
+
+    @property
+    def subscribed_streams(self) -> tuple[str, ...]:
+        return self._subscribed_streams
+
+    # ------------------------------------------------------------------
+    # Frame helpers
+    # ------------------------------------------------------------------
+    def _send_frame(
+        self,
+        opcode: int,
+        data: bytes,
+        *,
+        sock: socket.socket | None = None,
+    ) -> None:
+        target = sock if sock is not None else self._sock
+        if target is None:
+            return
+        # FIN=1, RSV=0, opcode in low 4 bits.
+        b1 = 0x80 | (opcode & 0x0F)
+        length = len(data)
+        if length < 126:
+            header = struct.pack("!BB", b1, 0x80 | length)
+        elif length < 65_536:
+            header = struct.pack("!BBH", b1, 0x80 | 126, length)
+        else:
+            header = struct.pack("!BBQ", b1, 0x80 | 127, length)
+        mask_key = self._random_bytes_fn(4)
+        masked = bytes(b ^ mask_key[i % 4] for i, b in enumerate(data))
+        try:
+            target.sendall(header + mask_key + masked)
+        except (OSError, ssl.SSLError):
+            self._connected = False
+
+    def _try_extract_message(self) -> WSMessage | None:
+        """Try to consume one complete message from ``_recv_buffer``.
+
+        Returns ``None`` if no complete frame is available. Pings are
+        answered with a pong inline. Close frames flip ``_connected``
+        off. Fragmented and binary frames are skipped (the public
+        allowlist endpoints only push complete text frames).
+        """
+        buf = self._recv_buffer
+        while True:
+            if len(buf) < 2:
+                return None
+            b0 = buf[0]
+            b1 = buf[1]
+            fin = (b0 >> 7) & 1
+            opcode = b0 & 0x0F
+            masked = (b1 >> 7) & 1
+            length = b1 & 0x7F
+            offset = 2
+            if length == 126:
+                if len(buf) < 4:
+                    return None
+                length = struct.unpack("!H", bytes(buf[2:4]))[0]
+                offset = 4
+            elif length == 127:
+                if len(buf) < 10:
+                    return None
+                length = struct.unpack("!Q", bytes(buf[2:10]))[0]
+                offset = 10
+            mask_key = b""
+            if masked:
+                if len(buf) < offset + 4:
+                    return None
+                mask_key = bytes(buf[offset : offset + 4])
+                offset += 4
+            if len(buf) < offset + length:
+                return None
+            payload = bytes(buf[offset : offset + length])
+            if masked and mask_key:
+                payload = bytes(
+                    p ^ mask_key[i % 4] for i, p in enumerate(payload)
+                )
+            del buf[: offset + length]
+
+            if opcode == self.OPCODE_PING:
+                # Echo the payload back as a pong.
+                self._send_frame(self.OPCODE_PONG, payload)
+                continue
+            if opcode == self.OPCODE_PONG:
+                continue
+            if opcode == self.OPCODE_CLOSE:
+                self._connected = False
+                return None
+            if opcode != self.OPCODE_TEXT:
+                # We don't accept binary or continuation frames in the
+                # public-market endpoint; silently skip.
+                continue
+            if not fin:
+                # The public endpoints don't fragment; if Binance ever
+                # changes that we re-implement reassembly. For now we
+                # skip the partial frame.
+                continue
+            try:
+                decoded = json.loads(payload.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                continue
+            stream, data = self._extract_stream_and_data(decoded)
+            try:
+                stream = assert_public_ws_stream_allowed(stream)
+            except PublicWSStreamForbidden:
+                # Defence-in-depth: drop any stream the server sent that
+                # didn't match the public allowlist.
+                continue
+            return WSMessage(stream=stream, data=data)
+
+    def _extract_stream_and_data(
+        self, decoded: Any
+    ) -> tuple[str, Any]:
+        """Map a decoded WS message to ``(stream, data)``.
+
+        The combined ``/stream?streams=`` endpoint wraps each push in
+        ``{"stream": "<name>", "data": <payload>}``. Single-stream
+        ``/ws/<name>`` connections push the bare payload; the caller
+        knows the stream from the URL so we fall back to the first
+        configured subscription. Defensive against unexpected shapes.
+        """
+        if isinstance(decoded, dict):
+            if "stream" in decoded and "data" in decoded:
+                return str(decoded.get("stream", "")), decoded.get("data")
+            # Some Binance pushes (e.g. !forceOrder@arr) deliver a
+            # raw object whose ``e`` field is the event type.
+            event_type = decoded.get("e") if isinstance(decoded, dict) else None
+            if event_type == "forceOrder":
+                return "!forceOrder@arr", decoded
+            if event_type == "markPriceUpdate":
+                return "!markPrice@arr", decoded
+            if event_type == "24hrTicker":
+                return "!ticker@arr", decoded
+            if event_type == "24hrMiniTicker":
+                return "!miniTicker@arr", decoded
+            if event_type == "bookTicker":
+                return "!bookTicker", decoded
+        if (
+            isinstance(decoded, list)
+            and decoded
+            and isinstance(decoded[0], dict)
+        ):
+            event_type = decoded[0].get("e")
+            if event_type == "24hrTicker":
+                return "!ticker@arr", decoded
+            if event_type == "24hrMiniTicker":
+                return "!miniTicker@arr", decoded
+            if event_type == "markPriceUpdate":
+                return "!markPrice@arr", decoded
+        # Fall back to the first configured stream so the message
+        # is at least attributed to the radar buffer.
+        fallback = (
+            self._subscribed_streams[0]
+            if self._subscribed_streams
+            else "!ticker@arr"
+        )
+        return fallback, decoded
+
+
+def create_real_public_ws_transport(
+    *,
+    config: WSConfig | None = None,
+    **kwargs: Any,
+) -> StdlibPublicWSTransport:
+    """Public factory for the Phase 11C.1B real-network transport.
+
+    The runner calls this when ``--ws-first`` is set without
+    ``--dry-run``. Tests can monkey-patch the runner-side reference
+    to inject a fake transport without touching the production
+    constructor. The factory itself refuses every credential-shaped
+    kwarg and never reads ``BINANCE_API_KEY`` / ``BINANCE_API_SECRET``
+    (the implementation does not import ``os.environ``).
+    """
+    return StdlibPublicWSTransport(config=config, **kwargs)
+
+
 __all__ = [
     "ALLOWED_PUBLIC_WS_HOSTS",
+    "ALLOWED_PUBLIC_WS_PATH_ROOTS",
     "BinancePublicWSClient",
     "DEFAULT_WS_BASE_URL",
     "FORBIDDEN_WS_QUERY_TOKENS",
@@ -951,9 +1645,13 @@ __all__ = [
     "PublicWSCredentialForbidden",
     "PublicWSError",
     "PublicWSStreamForbidden",
+    "PublicWSTransportError",
+    "StdlibPublicWSTransport",
     "WSConfig",
     "WSMessage",
     "WSMessagePump",
+    "assert_public_ws_path_allowed",
     "assert_public_ws_stream_allowed",
     "assert_public_ws_url_allowed",
+    "create_real_public_ws_transport",
 ]

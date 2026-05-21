@@ -7,7 +7,7 @@ intentionally short. The full phase-gate ledger lives in
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2026-05-21 | Phase 11C.1B | WebSocket-First All-Market Demon Coin Radar | in-development | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B     |
+| 2026-05-21 | Phase 11C.1B | WebSocket-First All-Market Demon Coin Radar | in-development - real public WS adapter implemented; PR awaiting cloud smoke | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B     |
 | 2026-05-21 | Phase 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | merged        | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A     |
 | 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | paused (24h acceptance held until PR-B + stdlib WS adapter merge) | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
 | 2026-05-19 | Phase 11B-HF | Cloud Paper - High-Frequency observation     | accepted (GO) | 30/30 dry-run PASS, 648/648 24h@2min observations PASS |
@@ -118,12 +118,21 @@ PR-B adds three new modules + extends two existing ones:
 
   - `app/exchanges/binance_public_ws.py` -
     `BinancePublicWSClient` + `WSConfig` + `WSMessage` +
-    `WSMessagePump` + `InProcessWSPump` +
+    `WSMessagePump` + `InProcessWSPump` + `_RefusalTransport`
+    (default; refuses any real-network call) +
+    **`StdlibPublicWSTransport`** (real-network RFC 6455 client
+    built on the Python standard library only) +
+    `create_real_public_ws_transport` factory +
     `assert_public_ws_stream_allowed` +
-    `assert_public_ws_url_allowed`. Stream allowlist:
+    `assert_public_ws_url_allowed` +
+    `assert_public_ws_path_allowed`. Stream allowlist:
     `!ticker@arr`, `!miniTicker@arr`, `!bookTicker`,
-    `!markPrice@arr`, `!forceOrder@arr`. Default transport refuses
-    to open a real socket (`NotImplementedError`).
+    `!markPrice@arr`, `!forceOrder@arr`. Path-root allowlist:
+    `/ws`, `/stream`. Host allowlist: `fstream.binance.com`,
+    `fstream.binancefuture.com`. The transport refuses every
+    credential-shaped kwarg (`api_key` / `api_secret` /
+    `listen_key` / `token` / `signature` / `passphrase`) and
+    never reads `BINANCE_API_KEY` / `BINANCE_API_SECRET`.
   - `app/market_data_public/radar.py` -
     `AllMarketRadarSnapshot` (frozen pydantic model) +
     `AllMarketRadarBuffer` (per-symbol rolling state) +
@@ -151,5 +160,38 @@ PR-B adds three new modules + extends two existing ones:
     `--ws-staleness-threshold-ms`, `--candidate-ttl-seconds`. The
     runner pumps WS -> ingest into radar -> score every snapshot
     -> offer to pool -> expire stale candidates -> drive
-    WSRadarChainDriver on the active head; the active head also
-    receives REST detail through the existing PR-A governor.
+    WSRadarChainDriver on the active head (skipped while
+    `ws_client.is_stale=True`, the data-degraded gate); the
+    active head also receives REST detail through the existing
+    PR-A governor.
+
+### Real public WS adapter (PR-B-followup folded in)
+
+PR #32 now ships the real-network public WebSocket adapter that
+PR-B originally deferred. **`StdlibPublicWSTransport`** is a
+single-class, stdlib-only RFC 6455 client. It performs the
+HTTP/1.1 Upgrade handshake (`GET /stream?streams=<a>/<b>` with
+`Sec-WebSocket-Key` / `Sec-WebSocket-Version: 13`), validates the
+server's `Sec-WebSocket-Accept`, parses RFC 6455 text frames, and
+surfaces decoded `WSMessage` envelopes to the host
+`BinancePublicWSClient`. The third-party WebSocket package
+deny-list (`websockets` / `websocket-client` / `aiohttp` /
+`requests` / `httpx` / `urllib3`) in
+`tests/unit/test_phase11c_no_network.py` continues to hold.
+
+The runner refuses to silently fall back to the PR-A
+bootstrap-only REST path: `--ws-first` without `--dry-run`
+**requires** a real public WS transport. If the factory returns
+`None` or raises, the runner exits with `rc=2` and the message
+`real public WebSocket transport is required for --ws-first
+without --dry-run`. The only path to REST-only operation is the
+explicit `--ws-disabled` flag, documented as NOT the Phase 11C.1B
+acceptance path.
+
+## Phase 11C.1B execution modes
+
+| CLI                                       | Behaviour                                                                                                              |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--ws-first --dry-run` (default)          | In-process pump, deterministic synthetic messages, no socket, full event chain.                                        |
+| `--ws-first` (no `--dry-run`)             | Real `StdlibPublicWSTransport`. RC=2 if the factory cannot produce one - never silently falls back to REST.            |
+| `--ws-disabled`                           | PR-A bootstrap-only REST path. Documented as **not** the Phase 11C.1B all-market demon-radar acceptance path.          |
