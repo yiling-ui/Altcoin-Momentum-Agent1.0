@@ -12,6 +12,82 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 **Version:** `1.4.0a11c.1b` - Phase 11C.1B. Tracks the Phase 11C
 real-data acceptance recovery PR-B.
 
+#### PR-B revision: routed public/market WebSocket endpoints
+
+PR #32 now connects to the documented Binance USDⓈ-M Futures
+*routed* public-market WebSocket endpoints:
+
+```
+PUBLIC route :  wss://fstream.binance.com/public/stream?streams=!bookTicker
+MARKET route :  wss://fstream.binance.com/market/stream?streams=
+                  !ticker@arr/!miniTicker@arr/!markPrice@arr/!forceOrder@arr
+PRIVATE route:  wss://fstream.binance.com/private          # FORBIDDEN
+```
+
+The unrouted `wss://fstream.binance.com/stream?streams=...` URL
+is NOT the acceptance path: per the Binance public-WS reference,
+an unrouted connection silently drops market-class streams
+(`!markPrice@arr`, `!ticker@arr`, etc.) so a runner that reports
+`PUBLIC_WS_CONNECTED` against `/stream` would in fact miss most
+of the radar's data. The new
+`MultiTransportPublicWSManager` opens one routed
+`StdlibPublicWSTransport` per route in parallel, splits the
+configured stream set via `classify_stream_route` /
+`split_streams_by_route`, and merges per-route messages behind a
+single `WSMessagePump` interface so the
+`BinancePublicWSClient` and the runner can pump the union without
+any awareness of the underlying topology.
+
+The `/private` routed endpoint is on `FORBIDDEN_WS_PATH_ROOTS`;
+`assert_public_ws_path_allowed` refuses it explicitly. New
+constants:
+
+- `ALLOWED_PUBLIC_WS_PATH_ROOTS` (routed acceptance) =
+  `{"public/ws", "public/stream", "market/ws", "market/stream"}`
+- `LEGACY_UNROUTED_WS_PATH_ROOTS` (back-compat for in-process
+  pump fixtures only) = `{"ws", "stream"}`
+- `FORBIDDEN_WS_PATH_ROOTS` =
+  `{"private", "ws-api", "ws-fapi", "ws-papi", "trading-api",
+  "userdatastream"}`
+- `STREAM_ROUTE_PUBLIC` / `STREAM_ROUTE_MARKET` /
+  `STREAM_SUFFIX_ROUTE_PUBLIC` / `STREAM_SUFFIX_ROUTE_MARKET`
+  - per-stream route classification.
+
+The runner's WS-first acceptance path now uses the
+`MultiTransportPublicWSManager` by default; the unrouted
+`/stream` path is kept accepted by the URL parser only so the
+in-process pump's existing fixtures still validate. The runner
+continues to refuse `--ws-first` without `--dry-run` with rc=2 if
+the factory cannot produce a real pump - it does NOT silently
+fall back to REST.
+
+The new `tests/unit/test_phase11c_1b_routed_public_market_ws.py`
+file pins every behaviour the brief's PR #32 merge checklist
+calls out (14 tests):
+
+- `test_routed_public_ws_path_allowed`
+- `test_routed_market_ws_path_allowed`
+- `test_private_routed_ws_forbidden`
+- `test_unrouted_market_stream_rejected_or_not_used`
+- `test_mark_price_stream_uses_market_route`
+- `test_book_ticker_stream_uses_public_route`
+- `test_multi_transport_ws_manager_merges_public_and_market_messages`
+- `test_multi_transport_ws_manager_subscribe_routes_to_correct_transport`
+- `test_multi_transport_ws_manager_refuses_credentials`
+- `test_multi_transport_ws_manager_refuses_private_streams_at_construction`
+- `test_runner_real_ws_first_uses_routed_public_and_market_transports`
+- `test_no_followup_adapter_stale_text_in_docs_or_help`
+- `test_safety_flags_unchanged_with_routed_ws`
+- `test_no_private_ws_listen_key_or_user_data_stream`
+
+The Phase 1 safety lock continues to hold throughout. No Binance
+API key / secret / `listenKey` is read; no signed REST endpoint
+is called; the four ExchangeClientBase write surfaces continue
+to refuse on the public client; DeepSeek / Square / real Telegram
+outbound stay disconnected; Phase 12 is not entered.
+
+#### Original PR-B scope below
+
 Phase 11C.1A (PR-A, merged) capped the public REST gateway with a
 sliding-window rate-limit governor and shut every per-loop detail
 REST surface so the bootstrap path could not trigger HTTP 429 / 418
@@ -51,18 +127,42 @@ discovery throughput while keeping REST pressure near zero.
   **`StdlibPublicWSTransport`** (real-network RFC 6455 client
   built on the Python standard library only - `socket` + `ssl` +
   `select` + `struct` + `base64` + `hashlib` + `json` +
-  `os.urandom`; refuses every credential-shaped kwarg; never
-  reads `BINANCE_API_KEY` / `BINANCE_API_SECRET`; only opens
-  connections to allowlisted hosts and `/ws` / `/stream` path
-  roots).
+  `os.urandom`; route-aware via the new `route="public" |
+  "market" | None` constructor parameter; refuses every
+  credential-shaped kwarg; never reads `BINANCE_API_KEY` /
+  `BINANCE_API_SECRET`; only opens connections to allowlisted
+  hosts and routed `/public/{ws,stream}` / `/market/{ws,stream}`
+  path roots) +
+  **`MultiTransportPublicWSManager`** (Phase 11C.1B routed
+  public + market connection group; owns one routed
+  `StdlibPublicWSTransport` per route; splits the configured
+  streams via `classify_stream_route` and `split_streams_by_route`
+  - `!bookTicker` -> PUBLIC, the four MARKET array streams ->
+  MARKET; presents the union behind a single `WSMessagePump`
+  interface; merges `poll()` output PUBLIC-first MARKET-second;
+  exposes `routes` / `transports` / `messages_received_by_route`
+  / `metrics_payload`).
 - `create_real_public_ws_transport(config=WSConfig(), **kwargs)`
-  - public factory for the real-network transport. The runner
-  imports this and calls it whenever `--ws-first` is set without
-  `--dry-run`.
+  - public factory for the real-network WS pump. Returns a
+  `MultiTransportPublicWSManager` (routed PUBLIC + MARKET
+  topology). The runner imports this and calls it whenever
+  `--ws-first` is set without `--dry-run`.
+- `classify_stream_route(stream)` and
+  `split_streams_by_route(streams)` - public helpers that map
+  each allowlisted stream to its `"public"` / `"market"` route
+  per the Binance USDⓈ-M Futures public-WS reference.
 - `assert_public_ws_path_allowed(path)` +
-  `ALLOWED_PUBLIC_WS_PATH_ROOTS = {"ws", "stream"}` - stricter
-  than the URL parser; refuses any path whose root is not on the
-  allowlist (e.g. `/ws-api`, `/userDataStream`, `/account`).
+  `ALLOWED_PUBLIC_WS_PATH_ROOTS = {"public/ws", "public/stream",
+  "market/ws", "market/stream"}` (the routed acceptance set)
+  + `LEGACY_UNROUTED_WS_PATH_ROOTS = {"ws", "stream"}` (kept as
+  back-compat for the in-process pump fixtures only) +
+  `FORBIDDEN_WS_PATH_ROOTS = {"private", "ws-api", "ws-fapi",
+  "ws-papi", "trading-api", "userdatastream"}` (refused at the
+  path-root layer in addition to the substring deny-list).
+  `assert_public_ws_url_allowed` now runs
+  `assert_public_ws_path_allowed` so a hand-composed
+  `wss://fstream.binance.com/private/...` URL is refused before
+  any socket is opened.
 - Public allowlist: `!ticker@arr`, `!miniTicker@arr`,
   `!bookTicker`, `!markPrice@arr`, `!forceOrder@arr` plus the
   per-symbol variants of those streams.
@@ -172,14 +272,16 @@ pipelines accept the new types unchanged.
 - Without `--dry-run` AND with `--ws-first` (the Phase 11C.1B
   acceptance path): the runner calls
   `_build_real_public_ws_transport(config)` (module-level factory
-  defaulting to `StdlibPublicWSTransport`). If the factory returns
-  `None` or raises, **the runner refuses to start** with rc=2 and
-  the message `real public WebSocket transport is required for
-  --ws-first without --dry-run`. The runner does NOT silently fall
-  back to the PR-A bootstrap-only REST path. Operators who cannot
-  reach `fstream.binance.com` use the explicit `--ws-disabled`
-  flag, documented as **not** the Phase 11C.1B all-market
-  demon-radar acceptance path.
+  defaulting to `MultiTransportPublicWSManager`, which owns one
+  routed `StdlibPublicWSTransport` per route - PUBLIC at
+  `/public/stream`, MARKET at `/market/stream`). If the factory
+  returns `None` or raises, **the runner refuses to start** with
+  rc=2 and the message `real public WebSocket transport is
+  required for --ws-first without --dry-run`. The runner does NOT
+  silently fall back to the PR-A bootstrap-only REST path.
+  Operators who cannot reach `fstream.binance.com` use the
+  explicit `--ws-disabled` flag, documented as **not** the Phase
+  11C.1B all-market demon-radar acceptance path.
 - The pre-flight refusal happens BEFORE the REST symbol resolution
   call so a host with no public Binance access at all surfaces the
   refusal cleanly.
@@ -265,10 +367,22 @@ raise `SafeModeViolation` on the public REST client.
 - subscribe to any user data stream / private WebSocket / trading
   WebSocket API / account / margin / position / leverage / balance
   / order private WS variant.
+- open the routed-private endpoint
+  `wss://fstream.binance.com/private` or any
+  `/ws-api` / `/ws-fapi` / `/ws-papi` / `/trading-api` /
+  `/userDataStream` path-root variant. `/private` is on
+  `FORBIDDEN_WS_PATH_ROOTS`; the path-root allowlist refuses it
+  before connect runs.
+- treat the unrouted `wss://fstream.binance.com/stream` URL as
+  the WS-first acceptance path. Binance silently drops
+  market-class streams over an unrouted connection (per the
+  public-WS reference); the runner therefore opens routed PUBLIC
+  + MARKET transports through the `MultiTransportPublicWSManager`.
 - call any signed REST endpoint.
 - connect to DeepSeek / a real Telegram bot / Binance Square.
 - import any third-party HTTP / WebSocket / SDK package. The
-  `StdlibPublicWSTransport` is implemented entirely on top of the
+  `StdlibPublicWSTransport` and `MultiTransportPublicWSManager`
+  are implemented entirely on top of the
   Python standard library (`socket` + `ssl` + `select` + `struct`
   + `base64` + `hashlib` + `json` + `os.urandom`) and the existing
   source-tree audit (`tests/unit/test_phase11c_no_network.py`)

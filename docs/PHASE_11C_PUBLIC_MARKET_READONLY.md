@@ -55,6 +55,9 @@ PR is allowed to subscribe to:
 | Signed endpoint                             | refused at allowlist check   |
 | `listenKey` / user data stream              | refused at WS allowlist + URL parser |
 | Private WebSocket / trading WS API          | refused at WS allowlist      |
+| Routed-private endpoint (`/private`)        | refused at path-root allowlist (`FORBIDDEN_WS_PATH_ROOTS`) |
+| Routed acceptance path                      | `/public/{ws,stream}` + `/market/{ws,stream}` (`ALLOWED_PUBLIC_WS_PATH_ROOTS`) |
+| Stream route classification                 | `!bookTicker` -> PUBLIC; `!ticker@arr` / `!miniTicker@arr` / `!markPrice@arr` / `!forceOrder@arr` -> MARKET |
 | DeepSeek / Square / real Telegram outbound  | not connected                |
 | Phase 12                                    | NOT entered                  |
 
@@ -62,7 +65,7 @@ PR is allowed to subscribe to:
 
 | Surface                                              | Behaviour                                                                          |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `app/exchanges/binance_public_ws.py`                 | New module: `BinancePublicWSClient`, `WSConfig`, `WSMessage`, `WSMessagePump`, `InProcessWSPump`, `_RefusalTransport`, **`StdlibPublicWSTransport`** (real-network RFC 6455 client - stdlib only), `create_real_public_ws_transport`, `assert_public_ws_stream_allowed`, `assert_public_ws_url_allowed`, `assert_public_ws_path_allowed`, `PublicWSCredentialForbidden`, `PublicWSStreamForbidden`, `PublicWSTransportError`. |
+| `app/exchanges/binance_public_ws.py`                 | New module: `BinancePublicWSClient`, `WSConfig`, `WSMessage`, `WSMessagePump`, `InProcessWSPump`, `_RefusalTransport`, **`StdlibPublicWSTransport`** (real-network RFC 6455 client, stdlib only, route-aware), **`MultiTransportPublicWSManager`** (owns one routed `StdlibPublicWSTransport` per route - PUBLIC + MARKET - and merges their messages behind a single `WSMessagePump` interface), `create_real_public_ws_transport` (returns the manager), `classify_stream_route`, `split_streams_by_route`, `assert_public_ws_stream_allowed`, `assert_public_ws_url_allowed`, `assert_public_ws_path_allowed`, `PublicWSCredentialForbidden`, `PublicWSStreamForbidden`, `PublicWSTransportError`. Path-root allowlist (`ALLOWED_PUBLIC_WS_PATH_ROOTS`): `/public/ws`, `/public/stream`, `/market/ws`, `/market/stream`. Forbidden path roots (`FORBIDDEN_WS_PATH_ROOTS`): `private`, `ws-api`, `ws-fapi`, `ws-papi`, `trading-api`, `userDataStream`. Legacy unrouted `/ws` / `/stream` accepted for back-compat fixtures only (NOT the WS-first acceptance path). |
 | `app/market_data_public/radar.py`                    | New module: `AllMarketRadarSnapshot` (frozen pydantic v2 model), `AllMarketRadarBuffer` (per-symbol rolling state for price / volume history + per-batch volume rank), `pre_anomaly_score_light` (pure additive scoring with deterministic reason tags). |
 | `app/market_data_public/candidate_pool.py`           | New module: `CandidatePool`, `CandidatePoolConfig`, `Candidate`. Default `candidate_pool_size=20`, `active_detail_limit=3`, `candidate_ttl_seconds=900`, `radar_score_threshold=30.0`. Each candidate carries a Phase 8.5 `OpportunityIdentity` with `source_phase="phase_11c_1b_ws_first_radar"`. |
 | `app/market_data_public/ws_radar_chain.py`           | New module: `WSRadarChainDriver` emits PRE_ANOMALY_DETECTED -> ANOMALY_DETECTED -> STATE_TRANSITION (+ Phase 8.5 LearningReadyContext on each, + RISK_REJECTED via the live RiskEngine) per ACTIVE candidate. |
@@ -119,8 +122,8 @@ calls **only for the candidate pool's active head** (default
 | `reconnect` (auto)        | Disconnect + sleep configured backoff (default 1 s, max 30 s) + reconnect; reconnect_count++. |
 | `pump_messages` no data   | Updates the staleness detector; if the last-message gap >= `staleness_threshold_ms` (default 3000 ms) the manager emits `PUBLIC_WS_STALE` and flips `is_stale=True`. |
 | Pump drops underneath     | Detected on the next `pump_messages` call; auto-disconnect + emit. |
-| Default transport         | `_RefusalTransport` raises `NotImplementedError` on `connect`. The runner picks **`StdlibPublicWSTransport`** (real-network RFC 6455 client) instead whenever `--ws-first` is set without `--dry-run`. The runner refuses to start (rc=2) if the real transport factory returns `None` or raises - it does NOT silently fall back to REST. The in-process pump is wired under `--dry-run`. |
-| Real-network adapter      | `StdlibPublicWSTransport` connects to `wss://fstream.binance.com` only, sends a stdlib-only RFC 6455 client handshake (`GET /stream?streams=...`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version: 13`), validates `Sec-WebSocket-Accept`, parses RFC 6455 text frames, answers pings inline, and surfaces decoded `WSMessage` envelopes. Refuses every credential-shaped kwarg; never reads `BINANCE_API_KEY` / `BINANCE_API_SECRET`; refuses any non-`/ws` / non-`/stream` path root; refuses any URL embedding `listenKey` / `userdata` / `ws-api` / `trading-api` / `signature` / `apiKey`. |
+| Default transport         | `_RefusalTransport` raises `NotImplementedError` on `connect`. The runner picks **`MultiTransportPublicWSManager`** (which owns two routed `StdlibPublicWSTransport` adapters - one PUBLIC at `/public/stream`, one MARKET at `/market/stream`) instead whenever `--ws-first` is set without `--dry-run`. The runner refuses to start (rc=2) if the real transport factory returns `None` or raises - it does NOT silently fall back to REST. The in-process pump is wired under `--dry-run`. |
+| Routed real-network adapter | `StdlibPublicWSTransport(route="public" \| "market")` connects to `wss://fstream.binance.com/<route>/stream?streams=...` only, sends a stdlib-only RFC 6455 client handshake (`Sec-WebSocket-Key`, `Sec-WebSocket-Version: 13`), validates `Sec-WebSocket-Accept`, parses RFC 6455 text frames, answers pings inline, and surfaces decoded `WSMessage` envelopes. Refuses every credential-shaped kwarg; never reads `BINANCE_API_KEY` / `BINANCE_API_SECRET`; refuses any non-routed (and non-legacy-fixture) path; refuses any URL embedding `listenKey` / `userdata` / `ws-api` / `ws-fapi` / `ws-papi` / `trading-api` / `signature` / `apiKey`; refuses the `/private` routed endpoint at the path-root allowlist. The `MultiTransportPublicWSManager` runs one routed transport per route, splits streams via `classify_stream_route` (`!bookTicker` -> PUBLIC; `!ticker@arr` / `!miniTicker@arr` / `!markPrice@arr` / `!forceOrder@arr` -> MARKET), and drains both transports on `poll()`. |
 | Data-degraded gate        | When `ws_client.is_stale=True` the runner SKIPS the candidate-pool active-head iteration: no PRE_ANOMALY_DETECTED / ANOMALY_DETECTED / STATE_TRANSITION events fire on stale data. The PUBLIC_WS_STALE event is still emitted. The Phase 1 / Phase 11C safety flags are unchanged - this is a pure read-only quality downgrade. The runner counts `ws_data_degraded_ticks` for the daily report. |
 
 ### Candidate pool behaviour
@@ -171,13 +174,19 @@ counter cannot hide a real connection event.
 
 ### Phase 11C.1B acceptance criteria
 
-1. `pytest` 全部通过 (currently `2163 passed`).
+1. `pytest` 全部通过 (currently `2177 passed`).
 2. The new test files
    `tests/unit/test_phase11c_1b_ws_radar.py` (scaffold + radar +
-   pool + chain) and
+   pool + chain),
    `tests/unit/test_phase11c_1b_real_ws_adapter.py` (real public
    WS adapter + runner refusal + reconnect backoff + staleness
-   gate + safety flags) pin every behaviour the brief calls out:
+   gate + safety flags), and
+   `tests/unit/test_phase11c_1b_routed_public_market_ws.py`
+   (routed `/public/{ws,stream}` + `/market/{ws,stream}`
+   acceptance, `/private` refusal, stream-route classification,
+   `MultiTransportPublicWSManager` merge, runner uses both
+   routed transports, no follow-up wording in source / docs)
+   pin every behaviour the brief calls out:
    - **Scaffold + radar + pool + chain**:
      - `test_public_ws_stream_allowlist`
      - `test_private_ws_forbidden`
@@ -210,6 +219,21 @@ counter cannot hide a real connection event.
      - `test_public_ws_stale_event_written`
      - `test_safety_flags_unchanged_with_real_ws_enabled`
      - `test_no_private_ws_or_listen_key_in_phase11c1b`
+   - **Routed public/market WebSocket endpoints**:
+     - `test_routed_public_ws_path_allowed`
+     - `test_routed_market_ws_path_allowed`
+     - `test_private_routed_ws_forbidden`
+     - `test_unrouted_market_stream_rejected_or_not_used`
+     - `test_mark_price_stream_uses_market_route`
+     - `test_book_ticker_stream_uses_public_route`
+     - `test_multi_transport_ws_manager_merges_public_and_market_messages`
+     - `test_multi_transport_ws_manager_subscribe_routes_to_correct_transport`
+     - `test_multi_transport_ws_manager_refuses_credentials`
+     - `test_multi_transport_ws_manager_refuses_private_streams_at_construction`
+     - `test_runner_real_ws_first_uses_routed_public_and_market_transports`
+     - `test_no_followup_adapter_stale_text_in_docs_or_help`
+     - `test_safety_flags_unchanged_with_routed_ws`
+     - `test_no_private_ws_listen_key_or_user_data_stream`
    plus supporting tests (RFC 6455 handshake validation, frame
    parsing, private-shaped message drop).
 3. The four `ExchangeClientBase` write surfaces still raise
@@ -245,14 +269,27 @@ counter cannot hide a real connection event.
 - subscribe to the trading WebSocket API.
 - subscribe to any account / margin / position / leverage / balance
   / order private WebSocket variant.
+- open the routed-private endpoint
+  `wss://fstream.binance.com/private` (or any
+  `/ws-api` / `/ws-fapi` / `/ws-papi` / `/trading-api` /
+  `/userDataStream` path-root variant). The `/private` root is on
+  `FORBIDDEN_WS_PATH_ROOTS` and the path-root allowlist refuses
+  it before connect runs.
+- treat the unrouted `wss://fstream.binance.com/stream` URL as the
+  WS-first acceptance path. Binance silently drops market-class
+  streams over an unrouted connection (per the public-WS
+  reference); the runner therefore opens routed PUBLIC + MARKET
+  transports through `MultiTransportPublicWSManager` and only
+  accepts the unrouted path on the in-process pump fixtures.
 - call any signed REST endpoint.
 - import any third-party HTTP / WebSocket / SDK package. The
-  real-network `StdlibPublicWSTransport` is stdlib-only.
+  real-network `StdlibPublicWSTransport` and the routed
+  `MultiTransportPublicWSManager` are stdlib-only.
 - silently fall back to REST under `--ws-first` without
   `--dry-run`. The runner refuses with rc=2 if the real public
-  WS transport cannot be constructed; only `--ws-disabled`
-  switches to the REST-only path (which is **not** the Phase
-  11C.1B acceptance path).
+  WS pump cannot be constructed; only `--ws-disabled` switches
+  to the REST-only path (which is **not** the Phase 11C.1B
+  acceptance path).
 - connect to DeepSeek.
 - connect to a real Telegram bot.
 - connect to Binance Square.
@@ -260,17 +297,27 @@ counter cannot hide a real connection event.
 
 ### Resuming the Phase 11C real-data 24h acceptance run
 
-After PR-B merges (which now includes the real
-`StdlibPublicWSTransport`), the Phase 11C real-data 24h
-acceptance run resumes with:
+After PR #32 merges (which ships the routed real-network
+`MultiTransportPublicWSManager` inline), the Phase 11C real-data
+24h acceptance run resumes with:
 
   - bootstrap REST: one `exchangeInfo` + one `ticker/24hr`.
-  - public WS: 5 ALLOWLIST streams covering every USDT-M perpetual.
+  - public routed WS:
+    `wss://fstream.binance.com/public/stream?streams=!bookTicker`.
+  - market routed WS:
+    `wss://fstream.binance.com/market/stream?streams=!ticker@arr/!miniTicker@arr/!markPrice@arr/!forceOrder@arr`.
   - candidate pool: top N (default 20) demon coins, active head 3.
   - per-loop REST detail: ONLY for the active head, gated on the
     PR-A rate-limit governor.
   - daily report: WS lifecycle + radar candidates + rate-limit
-    governor metrics in one Markdown body.
+    governor metrics + per-route message counts in one Markdown
+    body.
+
+PR-B is responsible for the WS radar + `CandidatePool`
+foundational candidate set + the learning-ready event chain.
+PR-C is responsible for `priority_score` / cluster classifier /
+same-cluster leader / multi-candidate arbitration; it remains a
+separate branch.
 
 ### Phase 11C.1B cloud smoke acceptance ladder
 
@@ -282,7 +329,8 @@ python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll
 
 is **deprecated**. It exercises the pre-PR-A "fetch every detail
 endpoint for every symbol every loop" pattern that triggered HTTP
-418. The current acceptance ladder is:
+418, and it predates the routed public+market WebSocket
+endpoints. The current acceptance ladder is:
 
 | Stage              | Command                                                                                                                              |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |

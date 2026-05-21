@@ -64,6 +64,7 @@ from app.exchanges.binance_public_ws import (  # noqa: E402
     BinancePublicWSClient,
     DEFAULT_WS_BASE_URL,
     InProcessWSPump,
+    MultiTransportPublicWSManager,
     PublicWSError,
     StdlibPublicWSTransport,
     WSConfig,
@@ -113,15 +114,20 @@ PHASE_11C_FORBIDDEN_CRED_ENV_VARS: tuple[str, ...] = tuple(
 
 
 # ---------------------------------------------------------------------------
-# Phase 11C.1B - real public WebSocket transport factory (PR-B-followup).
+# Phase 11C.1B - real public WebSocket transport factory.
 #
 # The runner calls :func:`_build_real_public_ws_transport` whenever
 # the user requests ``--ws-first`` without ``--dry-run``. The default
-# implementation returns a :class:`StdlibPublicWSTransport`
-# (stdlib-only RFC 6455 client). Tests monkey-patch this attribute to
-# inject a deterministic in-process pump masquerading as a "real"
-# transport (``test_runner_real_ws_first_uses_ws_adapter``) or a
-# refusal sentinel (``test_runner_real_ws_first_refuses_if_transport_missing``).
+# implementation returns a :class:`MultiTransportPublicWSManager`
+# that owns one routed :class:`StdlibPublicWSTransport` per route
+# (PUBLIC + MARKET) so the runner connects to the documented Binance
+# routed public-market WebSocket endpoints
+# (``wss://fstream.binance.com/public/stream`` and
+# ``wss://fstream.binance.com/market/stream``). Tests monkey-patch
+# this attribute to inject a deterministic in-process pump
+# masquerading as a "real" transport
+# (``test_runner_real_ws_first_uses_ws_adapter``) or a refusal
+# sentinel (``test_runner_real_ws_first_refuses_if_transport_missing``).
 #
 # Two failure modes are deliberately distinct:
 #
@@ -141,11 +147,17 @@ RealWSTransportFactory = Callable[[WSConfig], WSMessagePump | None]
 def _build_real_public_ws_transport(
     config: WSConfig,
 ) -> WSMessagePump | None:
-    """Default factory for the Phase 11C.1B real-network WS transport.
+    """Default factory for the Phase 11C.1B real-network WS pump.
 
-    Returns a :class:`StdlibPublicWSTransport` bound to the supplied
-    configuration. Never reads ``BINANCE_API_KEY`` /
-    ``BINANCE_API_SECRET``; never accepts a credential-shaped kwarg.
+    Returns a :class:`MultiTransportPublicWSManager` bound to the
+    supplied configuration. The manager owns one routed
+    :class:`StdlibPublicWSTransport` per route (PUBLIC + MARKET) and
+    presents them behind a single :class:`WSMessagePump` interface
+    so the host :class:`BinancePublicWSClient` and this runner can
+    pump the union without any awareness of the underlying
+    routed-endpoint topology. Never reads ``BINANCE_API_KEY`` /
+    ``BINANCE_API_SECRET``; never accepts a credential-shaped kwarg;
+    never opens the routed-private surface.
     """
     return create_real_public_ws_transport(config=config)
 
@@ -325,11 +337,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Phase 11C.1B: enable the WebSocket-first all-market radar. "
             "Subscribes to the public ALLOWLISTED streams "
             "(!ticker@arr / !miniTicker@arr / !bookTicker / "
-            "!markPrice@arr / !forceOrder@arr), feeds the radar buffer, "
-            "and drives the candidate pool. Default: ON. NEVER opens a "
-            "real WS in PR-B (the in-process pump is wired under "
-            "--dry-run; the real-network WS adapter ships in a "
-            "follow-up PR). Mutually exclusive with --ws-disabled."
+            "!markPrice@arr / !forceOrder@arr) over the routed Binance "
+            "USDⓈ-M Futures public WebSocket endpoints "
+            "(wss://fstream.binance.com/public/stream and "
+            "wss://fstream.binance.com/market/stream); feeds the radar "
+            "buffer and drives the candidate pool. Default: ON. With "
+            "--dry-run the in-process pump is wired (no socket); "
+            "without --dry-run the runner uses the real "
+            "MultiTransportPublicWSManager (stdlib-only RFC 6455) "
+            "and refuses with rc=2 rather than silently falling back "
+            "to REST if the routed transport cannot be constructed. "
+            "Mutually exclusive with --ws-disabled."
         ),
     )
     ws_group.add_argument(
@@ -951,7 +969,10 @@ def main(argv: list[str] | None = None) -> int:
     #
     # Default: ON. The runner subscribes to the public ALLOWLISTED
     # streams (!ticker@arr / !miniTicker@arr / !bookTicker /
-    # !markPrice@arr / !forceOrder@arr), feeds the
+    # !markPrice@arr / !forceOrder@arr) over the Binance routed
+    # public-market WebSocket endpoints
+    # (wss://fstream.binance.com/public/stream and
+    # wss://fstream.binance.com/market/stream), feeds the
     # AllMarketRadarBuffer, scores every symbol with a radar update,
     # and offers the (snapshot, score) pair to the CandidatePool. The
     # candidate pool's active head drives the Phase 11C event chain
@@ -960,19 +981,22 @@ def main(argv: list[str] | None = None) -> int:
     # gated on a multi-candidate priority ranking (radar score) rather
     # than a fixed top-N REST cadence.
     #
-    # Phase 11C.1B (this revision) ships a real-network public WS
-    # transport built on the Python standard library
-    # (:class:`StdlibPublicWSTransport`). Three execution modes:
+    # Phase 11C.1B ships a real-network public WS pump built on the
+    # Python standard library (:class:`MultiTransportPublicWSManager`
+    # owning two routed :class:`StdlibPublicWSTransport` adapters -
+    # one PUBLIC, one MARKET). Three execution modes:
     #
     #   1. ``--dry-run`` + ``--ws-first`` (default): the in-process
     #      :class:`InProcessWSPump` is wired and the radar is
     #      exercised against synthetic messages. NO socket is opened.
     #   2. ``--ws-first`` (without ``--dry-run``): the runner calls
     #      :func:`_build_real_public_ws_transport`, which returns a
-    #      :class:`StdlibPublicWSTransport`. If the factory returns
+    #      :class:`MultiTransportPublicWSManager` that opens the
+    #      routed public + market endpoints. If the factory returns
     #      ``None`` or raises, the runner refuses with rc=2 - it does
     #      NOT silently fall back to the PR-A bootstrap-only REST
-    #      path.
+    #      path. The unrouted /stream legacy URL is NOT the
+    #      acceptance path.
     #   3. ``--ws-disabled``: the runner falls back to the PR-A
     #      bootstrap-only REST path. Documented as NOT the all-market
     #      demon-radar acceptance path.

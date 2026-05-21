@@ -60,26 +60,31 @@ per-symbol REST detail polling. The goal is not to lower discovery
 capability - it is to *raise* discovery throughput while keeping REST
 pressure near zero.
 
-PR-B subscribes to FIVE public Binance WebSocket streams only:
+PR-B subscribes to FIVE public Binance WebSocket streams only,
+routed through the documented public + market USDⓈ-M Futures
+WebSocket endpoints:
 
-  - `!ticker@arr`
-  - `!miniTicker@arr`
-  - `!bookTicker`
-  - `!markPrice@arr`
-  - `!forceOrder@arr`
+  - PUBLIC route (`wss://fstream.binance.com/public/stream`):
+    - `!bookTicker`
+  - MARKET route (`wss://fstream.binance.com/market/stream`):
+    - `!ticker@arr`
+    - `!miniTicker@arr`
+    - `!markPrice@arr`
+    - `!forceOrder@arr`
 
 PR-B does NOT subscribe to `listenKey`, the user data stream, the
-trading WebSocket API, or any private WebSocket. The default WS
-transport refuses to open a real socket (`NotImplementedError`); the
-in-process pump is wired under `--dry-run`; **the real-network
-stdlib WS adapter (`StdlibPublicWSTransport`) ships in this PR
-(originally deferred to a follow-up)**. The runner refuses to
-silently fall back to REST under `--ws-first` without `--dry-run`:
-if the real public WS transport cannot be constructed, the runner
-exits with `rc=2`. Operators who genuinely cannot reach
-`fstream.binance.com` use `--ws-disabled` (PR-A bootstrap-only
-REST), which is documented as **not** the Phase 11C.1B all-market
-demon-radar acceptance path.
+trading WebSocket API, the `/private` routed surface, or any
+other private WebSocket. The default WS transport refuses to open
+a real socket (`NotImplementedError`); the in-process pump is
+wired under `--dry-run`; **the real-network stdlib WS adapter
+(`StdlibPublicWSTransport`) and the routed
+`MultiTransportPublicWSManager` ship in this PR**. The runner
+refuses to silently fall back to REST under `--ws-first` without
+`--dry-run`: if the real public WS pump cannot be constructed,
+the runner exits with `rc=2`. Operators who genuinely cannot
+reach `fstream.binance.com` use `--ws-disabled` (PR-A
+bootstrap-only REST), which is documented as **not** the Phase
+11C.1B all-market demon-radar acceptance path.
 
 ### Phase 11C.1B boundary (must hold for the entire PR-B scope)
 
@@ -97,6 +102,9 @@ demon-radar acceptance path.
 | Signed endpoint                             | refused at allowlist check   |
 | `listenKey` / user data stream              | refused at WS allowlist + URL parser |
 | Private WebSocket / trading WS API          | refused at WS allowlist      |
+| Routed-private endpoint (`/private`)        | refused at path-root allowlist (`FORBIDDEN_WS_PATH_ROOTS`) |
+| Routed acceptance path                      | `/public/{ws,stream}` + `/market/{ws,stream}` (`ALLOWED_PUBLIC_WS_PATH_ROOTS`) |
+| Stream route classification                 | `!bookTicker` -> PUBLIC; `!ticker@arr` / `!miniTicker@arr` / `!markPrice@arr` / `!forceOrder@arr` -> MARKET |
 | `market_data.provider`                      | `binance_public`             |
 | `market_data.read_only`                     | `True`                       |
 | `candidate_pool_size` (default)             | `20`                         |
@@ -110,12 +118,17 @@ demon-radar acceptance path.
 1. `pytest` 全部通过. Currently `2163 passed`.
 2. The new test files
    `tests/unit/test_phase11c_1b_ws_radar.py` (scaffold + radar +
-   pool + chain) and
+   pool + chain),
    `tests/unit/test_phase11c_1b_real_ws_adapter.py` (real public
    WS adapter + runner refusal + reconnect backoff + staleness
-   gate + safety flags + RFC 6455 handshake / frame audit) pin
-   every behaviour the brief calls out (15 brief-mandated +
-   supporting). Full list in
+   gate + safety flags + RFC 6455 handshake / frame audit), and
+   `tests/unit/test_phase11c_1b_routed_public_market_ws.py`
+   (routed `/public/{ws,stream}` + `/market/{ws,stream}`
+   acceptance, `/private` refusal, stream-route classification,
+   `MultiTransportPublicWSManager` merge, runner uses both
+   routed transports, no follow-up wording in source / docs)
+   pin every behaviour the brief calls out (15 brief-mandated +
+   11 routed-endpoint + supporting). Full list in
    `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B.
 3. The four `ExchangeClientBase` write surfaces still raise
    `SafeModeViolation`.
@@ -146,6 +159,13 @@ demon-radar acceptance path.
   - Subscribing to any user data stream / private WebSocket /
     trading WebSocket API / account / margin / position / leverage
     / balance / order private WS variant.
+  - Connecting to the routed-private endpoint
+    `wss://fstream.binance.com/private` (or any
+    `/ws-api` / `/ws-fapi` / `/ws-papi` / `/trading-api` /
+    `/userDataStream` path-root variant).
+  - Treating the unrouted `wss://fstream.binance.com/stream` URL
+    as the WS-first acceptance path (Binance silently drops
+    market-class streams over an unrouted connection).
   - Connecting to DeepSeek.
   - Connecting to the real Telegram outbound HTTP transport.
   - Connecting to Binance Square.
@@ -156,12 +176,15 @@ demon-radar acceptance path.
 
 ### How Phase 11C.1B unblocks the Phase 11C real-data acceptance run
 
-After PR-B merges (which now includes the real
-`StdlibPublicWSTransport`), the Phase 11C real-data 24h acceptance
-run resumes with:
+After PR #32 merges (which ships the routed real-network
+`MultiTransportPublicWSManager` inline), the Phase 11C real-data
+24h acceptance run resumes with:
 
   - bootstrap REST: one `exchangeInfo` + one `ticker/24hr`.
-  - public WS: 5 ALLOWLIST streams covering every USDT-M perpetual.
+  - public routed WS:
+    `wss://fstream.binance.com/public/stream?streams=!bookTicker`.
+  - market routed WS:
+    `wss://fstream.binance.com/market/stream?streams=!ticker@arr/!miniTicker@arr/!markPrice@arr/!forceOrder@arr`.
   - candidate pool: top N (default 20) demon coins, active head 3.
   - per-loop REST detail: ONLY for the active head, gated on the
     PR-A rate-limit governor.
@@ -176,6 +199,12 @@ The acceptance ladder:
 | 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                |
 | 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                |
 | 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               |
+
+The legacy command
+`python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5`
+is **deprecated**. It exercises the pre-PR-A "fetch every detail
+endpoint for every symbol every loop" pattern that triggered HTTP
+418, and it predates routed WS endpoints.
 
 PR-C (priority_score / cluster classifier / same-cluster leader /
 multi-candidate arbitration) remains a separate branch.
@@ -195,11 +224,16 @@ until PR-B lands (which now folds the stdlib WS adapter in).
     ships the WebSocket-first all-market radar +
     multi-candidate priority ranking + `candidate_detail_limit`
     consumption + the real-network `StdlibPublicWSTransport` (RFC
-    6455 over `socket` + `ssl`, stdlib only). The default WS
-    transport still refuses to open a real socket
-    (`NotImplementedError`); the in-process pump covers
-    `--dry-run`; `StdlibPublicWSTransport` is selected by the
-    runner whenever `--ws-first` is set without `--dry-run`.
+    6455 over `socket` + `ssl`, stdlib only) + the routed
+    `MultiTransportPublicWSManager` (one `StdlibPublicWSTransport`
+    per route - PUBLIC at `/public/stream`, MARKET at
+    `/market/stream`). The default WS transport still refuses to
+    open a real socket (`NotImplementedError`); the in-process
+    pump covers `--dry-run`; the
+    `MultiTransportPublicWSManager` is selected by the runner
+    whenever `--ws-first` is set without `--dry-run`. The
+    routed-private endpoint `/private` is on
+    `FORBIDDEN_WS_PATH_ROOTS` and is never opened.
   - **PR-C** (separate branch, NOT in this PR) ships
     priority_score / cluster classifier / same-cluster leader /
     multi-candidate arbitration.

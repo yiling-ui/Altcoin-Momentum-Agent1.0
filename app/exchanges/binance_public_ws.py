@@ -15,11 +15,42 @@ Phase 11C.1B (PR-B) restores the discovery surface by driving an
 five streams below are the only network surfaces this module is
 allowed to subscribe to:
 
-  - ``!ticker@arr``        - 24h rolling stats for every symbol
-  - ``!miniTicker@arr``    - light-weight last/volume push
-  - ``!bookTicker``        - per-symbol best bid/ask updates
-  - ``!markPrice@arr``     - mark price + funding rate per symbol
-  - ``!forceOrder@arr``    - liquidation events
+  - ``!ticker@arr``        - 24h rolling stats for every symbol  (MARKET route)
+  - ``!miniTicker@arr``    - light-weight last/volume push       (MARKET route)
+  - ``!bookTicker``        - per-symbol best bid/ask updates     (PUBLIC route)
+  - ``!markPrice@arr``     - mark price + funding rate per symbol(MARKET route)
+  - ``!forceOrder@arr``    - liquidation events                  (MARKET route)
+
+Routed public / market endpoints
+--------------------------------
+
+The Binance USDⓈ-M Futures public WebSocket reference exposes three
+routed endpoints:
+
+  - ``wss://fstream.binance.com/public``  - Public surface (best bid /
+    ask, public depth).
+  - ``wss://fstream.binance.com/market``  - Market data surface
+    (``!ticker@arr``, ``!miniTicker@arr``, ``!markPrice@arr``,
+    ``!forceOrder@arr``).
+  - ``wss://fstream.binance.com/private`` - PRIVATE: signed user
+    data only. **Forbidden in Phase 11C.1B.**
+
+A connection that does NOT include ``/public`` / ``/market`` /
+``/private`` in the path is "unrouted" and will only surface a
+subset of public-only data; market-class streams such as
+``!markPrice@arr`` are silently NOT pushed. Phase 11C.1B therefore
+treats the routed roots as the acceptance path and routes each
+allowlisted stream to its appropriate transport via
+:func:`classify_stream_route`. The legacy unrouted ``/ws`` /
+``/stream`` paths remain accepted by the URL parser for back-compat
+with the existing in-process tests, but the runner only opens
+routed transports in the production WS-first path.
+
+The :class:`MultiTransportPublicWSManager` below owns one
+:class:`StdlibPublicWSTransport` per route and merges their message
+streams behind a single :class:`WSMessagePump` interface so
+:class:`BinancePublicWSClient` can pump the union without any
+awareness of the underlying topology.
 
 Phase 11C.1B boundary
 ---------------------
@@ -31,19 +62,21 @@ This module enforces, at construction time and on every subscribe:
   * NO ``signature`` / ``timestamp`` / ``recvWindow`` / ``apiKey`` query
   * NO ``listenKey`` / user data stream
   * NO private WebSocket / trading WebSocket API
+  * NO ``/private`` routed endpoint
+  * NO ``ws-api`` / ``trading-api`` / ``ws-fapi`` / ``ws-papi`` path
   * NO ``ws/<listenKey>`` / ``userDataStream`` URL
   * NO third-party HTTP / WebSocket / SDK import (stdlib + loguru only)
   * NO write surface (the four ``ExchangeClientBase`` refusals are
     inherited unchanged through the host :class:`BinancePublicClient`)
 
-The default transport is :class:`_RefusalTransport`, which raises
-:class:`NotImplementedError` on every attempt to actually open a
-socket. Phase 11C.1B does NOT ship a real WS transport; the runner
-and CI exercise the client through the deterministic
-:class:`InProcessWSPump` (see :class:`WSMessagePump`). A real
-WS adapter is a Phase 11C.1B follow-up that lives behind its own
-review (PR-B-followup) and the no-network audit pinning a stdlib-only
-transport will hold throughout.
+The default transport for the in-process / dry-run path is
+:class:`_RefusalTransport`, which raises :class:`NotImplementedError`
+on every attempt to actually open a socket. The real-network
+transport is :class:`StdlibPublicWSTransport`; the runner combines
+two of those (one PUBLIC, one MARKET) inside
+:class:`MultiTransportPublicWSManager` for the WS-first acceptance
+path. The no-network audit pinning a stdlib-only transport
+(``tests.unit.test_phase11c_no_network``) holds throughout.
 
 Threading
 ---------
@@ -162,13 +195,90 @@ ALLOWED_PUBLIC_WS_HOSTS: frozenset[str] = frozenset(
     }
 )
 
-#: Allowed top-level path roots for the Phase 11C.1B public WebSocket
-#: client. The Binance USDⓈ-M Futures public WebSocket reference
-#: defines exactly two public path roots: ``/ws/<stream>`` for a
-#: single-stream subscription and ``/stream?streams=<a>/<b>`` for a
-#: combined-stream subscription. Anything else (``/ws-api`` /
-#: ``/userDataStream`` / ``/ws-fapi`` etc.) is private.
-ALLOWED_PUBLIC_WS_PATH_ROOTS: frozenset[str] = frozenset({"ws", "stream"})
+#: Allowed top-level path roots for the Phase 11C.1B routed public
+#: WebSocket client. The Binance USDⓈ-M Futures public WebSocket
+#: reference exposes routed endpoints:
+#:
+#:   - ``wss://fstream.binance.com/public/ws/<stream>`` (single)
+#:   - ``wss://fstream.binance.com/public/stream?streams=<a>/<b>``
+#:     (combined PUBLIC route - bookTicker / public depth)
+#:   - ``wss://fstream.binance.com/market/ws/<stream>`` (single)
+#:   - ``wss://fstream.binance.com/market/stream?streams=<a>/<b>``
+#:     (combined MARKET route - !ticker@arr / !miniTicker@arr /
+#:     !markPrice@arr / !forceOrder@arr)
+#:   - ``wss://fstream.binance.com/private/...`` - PRIVATE / signed
+#:     user-data only. **Forbidden** in Phase 11C.1B.
+#:
+#: A connection that omits the ``/public`` / ``/market`` / ``/private``
+#: route prefix is "unrouted" and Binance will only surface a subset
+#: of public-only data; market-class streams (``!markPrice@arr`` etc.)
+#: are silently NOT pushed. The Phase 11C.1B acceptance path therefore
+#: routes each allowlisted stream through its proper routed
+#: transport. The legacy unrouted roots ``/ws`` / ``/stream`` are
+#: accepted by the URL parser for back-compat (the in-process pump
+#: still works against them) but the production runner only opens
+#: routed transports.
+ALLOWED_PUBLIC_WS_PATH_ROOTS: frozenset[str] = frozenset(
+    {
+        "public/ws",
+        "public/stream",
+        "market/ws",
+        "market/stream",
+    }
+)
+
+#: Legacy unrouted path roots. Accepted by :func:`assert_public_ws_path_allowed`
+#: for back-compat (test fixtures, dry-run InProcess pump configs);
+#: NOT the Phase 11C.1B WS-first acceptance path.
+LEGACY_UNROUTED_WS_PATH_ROOTS: frozenset[str] = frozenset({"ws", "stream"})
+
+#: Hard-forbidden path roots. The ``private`` route is the
+#: documented user-data / signed surface and is NEVER accepted in
+#: Phase 11C.1B even if a future caller composes the URL by hand.
+#: ``ws-api`` / ``ws-fapi`` / ``ws-papi`` / ``trading-api`` /
+#: ``userDataStream`` are also blocked at the path-root level
+#: in addition to the substring deny-list.
+FORBIDDEN_WS_PATH_ROOTS: frozenset[str] = frozenset(
+    {
+        "private",
+        "ws-api",
+        "ws-fapi",
+        "ws-papi",
+        "trading-api",
+        "userdatastream",
+    }
+)
+
+#: Per-stream route classification. Mirrors the Binance USDⓈ-M
+#: Futures public WebSocket reference. ``!bookTicker`` is a PUBLIC
+#: surface (best bid / ask is exposed under ``/public``); the other
+#: four allowlisted array streams are MARKET surfaces (mark-price,
+#: funding, ticker statistics, liquidations are exposed under
+#: ``/market``).
+STREAM_ROUTE_PUBLIC: frozenset[str] = frozenset(
+    {
+        "!bookTicker",
+    }
+)
+STREAM_ROUTE_MARKET: frozenset[str] = frozenset(
+    {
+        "!ticker@arr",
+        "!miniTicker@arr",
+        "!markPrice@arr",
+        "!forceOrder@arr",
+    }
+)
+#: Per-symbol suffix -> route classification.
+STREAM_SUFFIX_ROUTE_PUBLIC: frozenset[str] = frozenset({"@bookTicker"})
+STREAM_SUFFIX_ROUTE_MARKET: frozenset[str] = frozenset(
+    {
+        "@ticker",
+        "@miniTicker",
+        "@markPrice",
+        "@forceOrder",
+        "@forceOrder@1s",
+    }
+)
 
 #: Default WebSocket base URL for Binance USDT-M perpetual futures
 #: public-market streams.
@@ -269,10 +379,13 @@ def assert_public_ws_url_allowed(url: str) -> str:
 
     Returns the URL on success. Raises :class:`PublicWSStreamForbidden`
     on any refusal. The check covers scheme (``wss`` only), host
-    (Binance public WS hosts only), path (``/ws`` or ``/stream``),
-    embedded private tokens (denylist), and forbidden query parameters
-    (``signature`` / ``timestamp`` / ``recvWindow`` / ``apiKey`` /
-    ``listenKey``).
+    (Binance public WS hosts only), path (routed
+    ``/public/ws`` / ``/public/stream`` / ``/market/ws`` /
+    ``/market/stream`` or legacy ``/ws`` / ``/stream``; ``/private``
+    and friends refused via :func:`assert_public_ws_path_allowed`),
+    embedded private tokens (denylist), and forbidden query
+    parameters (``signature`` / ``timestamp`` / ``recvWindow`` /
+    ``apiKey`` / ``listenKey``).
     """
     if not url:
         raise PublicWSStreamForbidden(
@@ -292,6 +405,11 @@ def assert_public_ws_url_allowed(url: str) -> str:
             f"({sorted(ALLOWED_PUBLIC_WS_HOSTS)})."
         )
     path = parsed.path or ""
+    # Defence-in-depth: refuse the routed-private path even if a
+    # later substring search would also catch it. The path-root
+    # allowlist is authoritative for the WS-first acceptance path.
+    if path:
+        assert_public_ws_path_allowed(path)
     lowered = (path + "?" + (parsed.query or "")).lower()
     for needle in FORBIDDEN_WS_TOKENS:
         if needle in lowered:
@@ -315,28 +433,118 @@ def assert_public_ws_path_allowed(path: str) -> str:
     """Phase 11C.1B path-root allowlist.
 
     Stricter than :func:`assert_public_ws_url_allowed`: the path must
-    begin with ``/ws`` or ``/stream``. The Binance USDⓈ-M Futures
-    public WebSocket reference defines exactly these two public path
-    roots; ``/ws-api`` / ``/ws-fapi`` / ``/userDataStream`` /
-    ``/listenKey/...`` are all private and refused here even before
-    the denylist substring check fires.
+    begin with one of the routed acceptance roots
+    (``/public/ws`` / ``/public/stream`` / ``/market/ws`` /
+    ``/market/stream``) OR one of the legacy unrouted back-compat
+    roots (``/ws`` / ``/stream``). The ``/private`` routed root is
+    EXPLICITLY refused at the path level so a future caller cannot
+    smuggle a user-data / signed connection past the URL parser by
+    hand-composing the URL. ``/ws-api`` / ``/ws-fapi`` / ``/ws-papi`` /
+    ``/trading-api`` / ``/userDataStream`` are likewise refused.
+
+    The Binance USDⓈ-M Futures public WebSocket reference exposes
+    exactly the routed roots above for public-market data; the
+    routed acceptance roots are the production WS-first path. The
+    legacy unrouted ``/ws`` / ``/stream`` are kept as accepted only
+    so the in-process pump and existing fixtures still validate; the
+    runner does NOT open a real network connection against them.
     """
     if not path:
         raise PublicWSStreamForbidden(
             "BinancePublicWS: refused empty WS path"
         )
-    parts = path.lstrip("/").split("/", 1)
-    if not parts or not parts[0]:
+    # Strip a query / fragment if the caller passed a path-with-query
+    # (e.g. ``/public/stream?streams=!bookTicker``). The path-root
+    # allowlist only cares about the path component.
+    path_only = path.split("?", 1)[0].split("#", 1)[0]
+    cleaned = path_only.lstrip("/")
+    if not cleaned:
         raise PublicWSStreamForbidden(
             f"BinancePublicWS: refused WS path {path!r}; empty root"
         )
-    root = parts[0].lower()
-    if root not in ALLOWED_PUBLIC_WS_PATH_ROOTS:
+    parts = cleaned.split("/")
+    head = parts[0].lower() if parts else ""
+    second = parts[1].lower() if len(parts) >= 2 else ""
+    # 1. Routed-private and other forbidden top-level roots are
+    #    refused before anything else, even when a later layer of
+    #    the path name-collides with a legitimate public stream.
+    if head in FORBIDDEN_WS_PATH_ROOTS:
         raise PublicWSStreamForbidden(
-            f"BinancePublicWS: refused WS path {path!r}; only "
-            f"{sorted(ALLOWED_PUBLIC_WS_PATH_ROOTS)} are allowed roots."
+            f"BinancePublicWS: refused WS path {path!r}; the path "
+            f"root {head!r} is on the Phase 11C.1B private / signed "
+            "deny-list (private / ws-api / ws-fapi / ws-papi / "
+            "trading-api / userDataStream)."
         )
-    return path
+    # 2. Routed acceptance roots: ``/<route>/<surface>`` where
+    #    ``<route>`` is ``public`` / ``market`` and ``<surface>`` is
+    #    ``ws`` / ``stream``. The combined value
+    #    ``f"{head}/{second}"`` is matched against
+    #    :data:`ALLOWED_PUBLIC_WS_PATH_ROOTS`.
+    if head in {"public", "market"}:
+        combined = f"{head}/{second}"
+        if combined not in ALLOWED_PUBLIC_WS_PATH_ROOTS:
+            raise PublicWSStreamForbidden(
+                f"BinancePublicWS: refused WS path {path!r}; "
+                f"routed surface {second!r} is not on the routed "
+                "acceptance allowlist (only "
+                f"{sorted(ALLOWED_PUBLIC_WS_PATH_ROOTS)})."
+            )
+        return path
+    # 3. Legacy unrouted back-compat roots.
+    if head in LEGACY_UNROUTED_WS_PATH_ROOTS:
+        return path
+    raise PublicWSStreamForbidden(
+        f"BinancePublicWS: refused WS path {path!r}; only routed "
+        f"{sorted(ALLOWED_PUBLIC_WS_PATH_ROOTS)} or legacy "
+        f"{sorted(LEGACY_UNROUTED_WS_PATH_ROOTS)} are allowed roots."
+    )
+
+
+def classify_stream_route(stream: str) -> str:
+    """Classify ``stream`` as ``"public"`` or ``"market"``.
+
+    Mirrors the Binance USDⓈ-M Futures public WebSocket reference:
+
+      - ``!bookTicker`` (and per-symbol ``btcusdt@bookTicker``) is a
+        PUBLIC surface (best bid / ask).
+      - ``!ticker@arr`` / ``!miniTicker@arr`` / ``!markPrice@arr`` /
+        ``!forceOrder@arr`` (and per-symbol equivalents) are MARKET
+        surfaces.
+
+    Raises :class:`PublicWSStreamForbidden` if ``stream`` is not on
+    the public allowlist; this also covers the deny-list (which
+    :func:`assert_public_ws_stream_allowed` enforces first).
+    """
+    canonical = assert_public_ws_stream_allowed(stream)
+    if canonical in STREAM_ROUTE_PUBLIC:
+        return "public"
+    if canonical in STREAM_ROUTE_MARKET:
+        return "market"
+    for suffix in STREAM_SUFFIX_ROUTE_PUBLIC:
+        if canonical.endswith(suffix):
+            return "public"
+    for suffix in STREAM_SUFFIX_ROUTE_MARKET:
+        if canonical.endswith(suffix):
+            return "market"
+    raise PublicWSStreamForbidden(
+        f"BinancePublicWS: stream {stream!r} cannot be classified "
+        "as PUBLIC or MARKET; refusing."
+    )
+
+
+def split_streams_by_route(
+    streams: Iterable[str],
+) -> dict[str, list[str]]:
+    """Split ``streams`` into ``{"public": [...], "market": [...]}``.
+
+    Raises :class:`PublicWSStreamForbidden` if any stream is not on
+    the public allowlist or cannot be classified.
+    """
+    out: dict[str, list[str]] = {"public": [], "market": []}
+    for stream in streams:
+        route = classify_stream_route(stream)
+        out[route].append(assert_public_ws_stream_allowed(stream))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -529,20 +737,28 @@ class InProcessWSPump(WSMessagePump):
 class _RefusalTransport(WSMessagePump):
     """Default transport used when no pump is supplied.
 
-    Phase 11C.1B refuses to open any real socket; this class makes the
-    refusal explicit instead of silently no-op'ing. The runner injects
-    :class:`InProcessWSPump` for ``--dry-run`` / ``--ws-disabled``;
-    production deployments wait for the follow-up PR that ships a
-    stdlib WS adapter.
+    The :class:`BinancePublicWSClient` constructor falls back to this
+    transport when the caller supplies neither a real network adapter
+    (:class:`StdlibPublicWSTransport` /
+    :class:`MultiTransportPublicWSManager`) nor an in-process pump
+    (:class:`InProcessWSPump`). The refusal is explicit instead of a
+    silent no-op so an accidentally-default-constructed client cannot
+    masquerade as "connected" when no socket has actually been opened.
+
+    The runner injects :class:`InProcessWSPump` for ``--dry-run`` /
+    ``--ws-disabled`` and the real :class:`MultiTransportPublicWSManager`
+    (which owns the routed PUBLIC + MARKET
+    :class:`StdlibPublicWSTransport` adapters) for ``--ws-first``
+    without ``--dry-run``.
     """
 
     def connect(self) -> None:
         raise NotImplementedError(
             "BinancePublicWSClient: the default transport refuses to "
-            "open a real WebSocket. Phase 11C.1B does NOT ship a "
-            "third-party WS library; the runner uses the in-process "
-            "pump for --dry-run and is expected to wire a stdlib WS "
-            "adapter in the follow-up PR."
+            "open a real WebSocket. Pass an explicit pump: "
+            "InProcessWSPump for dry-run / fixtures, "
+            "MultiTransportPublicWSManager (routed public + market "
+            "StdlibPublicWSTransport) for the WS-first acceptance path."
         )
 
     def disconnect(self) -> None:
@@ -1081,6 +1297,7 @@ class StdlibPublicWSTransport(WSMessagePump):
         self,
         *,
         config: WSConfig | None = None,
+        route: str | None = None,
         connect_timeout_seconds: float | None = None,
         recv_chunk_size: int | None = None,
         ssl_context: ssl.SSLContext | None = None,
@@ -1131,14 +1348,38 @@ class StdlibPublicWSTransport(WSMessagePump):
                 f"argument(s): {sorted(forbidden_credentials)}"
             )
 
+        # Resolve and validate the route. ``None`` keeps the legacy
+        # unrouted behaviour (``/stream?streams=...``); the routed
+        # values ``"public"`` and ``"market"`` produce
+        # ``/public/stream?streams=...`` and
+        # ``/market/stream?streams=...`` respectively. The
+        # routed-private surface (``/private``) is never reachable
+        # from this transport: it is on
+        # :data:`FORBIDDEN_WS_PATH_ROOTS` and the path-root
+        # allowlist refuses it before connect even gets a chance.
+        if route is not None:
+            normalised_route = str(route).strip().lower()
+            if normalised_route not in {"public", "market"}:
+                raise PublicWSStreamForbidden(
+                    f"StdlibPublicWSTransport: refused route "
+                    f"{route!r}; only 'public' / 'market' are allowed "
+                    "(the 'private' route is reserved for signed "
+                    "user-data and is forbidden in Phase 11C.1B)."
+                )
+            self._route: str | None = normalised_route
+        else:
+            self._route = None
+
         self._config = config or WSConfig()
         # Validate every stream against the allowlist.
         for stream in self._config.streams:
             assert_public_ws_stream_allowed(stream)
         # Build + validate the subscribe URL. The combined endpoint
-        # ``/stream?streams=<a>/<b>`` lets us subscribe to all five
-        # array streams in a single connection.
-        self._url = self._build_subscribe_url(self._config)
+        # ``/<route>/stream?streams=<a>/<b>`` (or the legacy
+        # ``/stream?streams=...`` when ``route is None``) lets us
+        # subscribe to every allowlisted stream over a single
+        # connection per route.
+        self._url = self._build_subscribe_url(self._config, self._route)
         assert_public_ws_url_allowed(self._url)
         parsed = urllib.parse.urlsplit(self._url)
         host = (parsed.netloc or "").split(":", 1)[0].lower()
@@ -1180,14 +1421,19 @@ class StdlibPublicWSTransport(WSMessagePump):
     # URL construction
     # ------------------------------------------------------------------
     @staticmethod
-    def _build_subscribe_url(config: WSConfig) -> str:
+    def _build_subscribe_url(
+        config: WSConfig, route: str | None = None
+    ) -> str:
         """Build the canonical combined-subscribe URL.
 
-        Returns ``<base_url>/stream?streams=<a>/<b>/...`` where every
-        ``<>`` entry is an allowlisted public stream. The combined
-        endpoint is preferred over per-stream ``/ws/<x>`` because it
-        keeps the connection count to one for the full all-market
-        radar.
+        Returns
+        ``<base_url>/<route>/stream?streams=<a>/<b>/...`` when
+        ``route`` is ``"public"`` or ``"market"``, and
+        ``<base_url>/stream?streams=<a>/<b>/...`` (legacy unrouted)
+        when ``route`` is ``None``. Every ``<>`` entry MUST be on
+        the public stream allowlist; the combined endpoint is
+        preferred over per-stream ``/ws/<x>`` because it keeps the
+        connection count to one per route.
         """
         streams = list(config.streams)
         if not streams:
@@ -1197,6 +1443,8 @@ class StdlibPublicWSTransport(WSMessagePump):
         for stream in streams:
             assert_public_ws_stream_allowed(stream)
         joined = "/".join(streams)
+        if route in {"public", "market"}:
+            return f"{config.base_url}/{route}/stream?streams={joined}"
         return f"{config.base_url}/stream?streams={joined}"
 
     # ------------------------------------------------------------------
@@ -1459,6 +1707,17 @@ class StdlibPublicWSTransport(WSMessagePump):
         return self._url
 
     @property
+    def route(self) -> str | None:
+        """Return the routed-endpoint group this transport targets.
+
+        ``"public"`` and ``"market"`` are the Phase 11C.1B routed
+        acceptance values; ``None`` means the transport is using the
+        legacy unrouted ``/stream`` path (back-compat fixtures only;
+        not the production WS-first acceptance path).
+        """
+        return self._route
+
+    @property
     def subscribed_streams(self) -> tuple[str, ...]:
         return self._subscribed_streams
 
@@ -1615,21 +1874,388 @@ class StdlibPublicWSTransport(WSMessagePump):
         return fallback, decoded
 
 
+# ---------------------------------------------------------------------------
+# Multi-transport routed public/market WS manager
+# ---------------------------------------------------------------------------
+class MultiTransportPublicWSManager(WSMessagePump):
+    """Phase 11C.1B routed public + market WebSocket connection group.
+
+    The Binance USDⓈ-M Futures public WebSocket reference splits the
+    public surface into two routed endpoints:
+
+      - ``wss://fstream.binance.com/public/stream?streams=<a>/<b>``
+        for the ``!bookTicker`` (best bid / ask) family.
+      - ``wss://fstream.binance.com/market/stream?streams=<a>/<b>``
+        for the ``!ticker@arr`` / ``!miniTicker@arr`` /
+        ``!markPrice@arr`` / ``!forceOrder@arr`` (market data
+        statistics + funding + liquidations) family.
+
+    A single unrouted ``wss://fstream.binance.com/stream?streams=...``
+    connection silently drops the market-class streams (Binance only
+    pushes the public-only subset over the unrouted endpoint). The
+    Phase 11C.1B WS-first acceptance path therefore opens TWO routed
+    transports - one per route - and merges their messages behind
+    this single :class:`WSMessagePump` interface so
+    :class:`BinancePublicWSClient` and the runner can pump the union
+    without any awareness of the underlying topology.
+
+    Construction-time refusals match
+    :class:`StdlibPublicWSTransport`:
+
+      - any non-``None`` ``api_key`` / ``api_secret`` /
+        ``listen_key`` raises :class:`PublicWSCredentialForbidden`;
+      - any extra credential-shaped kwarg likewise refuses;
+      - the configured streams MUST split cleanly into the public
+        and market route groups via :func:`split_streams_by_route`;
+      - the routed-private surface (``/private``) is never
+        reachable: it is on :data:`FORBIDDEN_WS_PATH_ROOTS` and
+        the URL parser refuses it before connect runs.
+
+    The manager owns one transport per route. A route with no
+    streams (e.g. an operator who explicitly lists only
+    ``!bookTicker``) is left without a transport - the manager only
+    opens the routes it actually needs.
+    """
+
+    SOURCE_MODULE = "exchanges.binance_public_ws.multi_transport_manager"
+
+    def __init__(
+        self,
+        *,
+        config: WSConfig | None = None,
+        public_transport: WSMessagePump | None = None,
+        market_transport: WSMessagePump | None = None,
+        transport_factory: (
+            Callable[[WSConfig, str], WSMessagePump] | None
+        ) = None,
+        # Refusal sentinels - same pattern as
+        # StdlibPublicWSTransport / BinancePublicWSClient.
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        listen_key: str | None = None,
+        **forbidden_credentials: Any,
+    ) -> None:
+        if (
+            api_key is not None
+            or api_secret is not None
+            or listen_key is not None
+        ):
+            raise PublicWSCredentialForbidden(
+                "MultiTransportPublicWSManager must not be "
+                "instantiated with api_key / api_secret / "
+                "listen_key. Phase 11C.1B is public-market "
+                "read-only; credentials and listenKey are forbidden."
+            )
+        for name in forbidden_credentials:
+            lowered = name.lower()
+            if any(
+                needle in lowered
+                for needle in (
+                    "api_key",
+                    "api_secret",
+                    "apikey",
+                    "secret",
+                    "token",
+                    "signature",
+                    "passphrase",
+                    "listen_key",
+                    "listenkey",
+                )
+            ):
+                raise PublicWSCredentialForbidden(
+                    f"MultiTransportPublicWSManager: refused "
+                    f"credential-shaped keyword argument {name!r}."
+                )
+        if forbidden_credentials:
+            raise TypeError(
+                "MultiTransportPublicWSManager got unexpected "
+                f"keyword argument(s): {sorted(forbidden_credentials)}"
+            )
+
+        self._config = config or WSConfig()
+        # Validate every stream against the allowlist + classify
+        # each into ``public`` / ``market``. This refuses any
+        # private-WS / listenKey / user-data / trading-WS-API surface
+        # before any socket is opened.
+        split = split_streams_by_route(self._config.streams)
+        self._public_streams: tuple[str, ...] = tuple(split["public"])
+        self._market_streams: tuple[str, ...] = tuple(split["market"])
+        if not self._public_streams and not self._market_streams:
+            raise PublicWSStreamForbidden(
+                "MultiTransportPublicWSManager: refused empty stream "
+                "set; configure at least one PUBLIC or MARKET stream."
+            )
+
+        # Build per-route configs. Each routed transport owns a
+        # config whose ``streams`` is the route-restricted subset
+        # AND whose post-init validation runs through the same
+        # allowlist.
+        def _make_route_config(streams: tuple[str, ...]) -> WSConfig:
+            return WSConfig(
+                base_url=self._config.base_url,
+                streams=streams,
+                staleness_threshold_ms=self._config.staleness_threshold_ms,
+                reconnect_backoff_initial_seconds=(
+                    self._config.reconnect_backoff_initial_seconds
+                ),
+                reconnect_backoff_max_seconds=(
+                    self._config.reconnect_backoff_max_seconds
+                ),
+                auto_reconnect=self._config.auto_reconnect,
+                max_subscriptions=self._config.max_subscriptions,
+            )
+
+        # Default factory builds real :class:`StdlibPublicWSTransport`
+        # adapters bound to the routed endpoint. Tests inject a
+        # deterministic factory (or pre-built fakes) instead.
+        def _default_factory(cfg: WSConfig, route: str) -> WSMessagePump:
+            return StdlibPublicWSTransport(config=cfg, route=route)
+
+        factory = transport_factory or _default_factory
+
+        self._transports: dict[str, WSMessagePump] = {}
+        if self._public_streams:
+            if public_transport is not None:
+                self._transports["public"] = public_transport
+            else:
+                self._transports["public"] = factory(
+                    _make_route_config(self._public_streams), "public"
+                )
+        if self._market_streams:
+            if market_transport is not None:
+                self._transports["market"] = market_transport
+            else:
+                self._transports["market"] = factory(
+                    _make_route_config(self._market_streams), "market"
+                )
+
+        self._connected: bool = False
+        self._closed: bool = False
+        self._subscribed_streams: tuple[str, ...] = (
+            self._public_streams + self._market_streams
+        )
+        # Per-route message counters - merged into the metrics
+        # payload the runner picks up for the daily report.
+        self._messages_received_by_route: dict[str, int] = {
+            route: 0 for route in self._transports
+        }
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
+    @property
+    def routes(self) -> tuple[str, ...]:
+        """Return the tuple of routes the manager actually opened.
+
+        ``("public", "market")`` in the canonical Phase 11C.1B
+        five-stream config; subsets are possible if the operator
+        explicitly narrows the stream list.
+        """
+        return tuple(sorted(self._transports.keys()))
+
+    @property
+    def public_streams(self) -> tuple[str, ...]:
+        return self._public_streams
+
+    @property
+    def market_streams(self) -> tuple[str, ...]:
+        return self._market_streams
+
+    @property
+    def transports(self) -> Mapping[str, WSMessagePump]:
+        """Return the read-only ``{route -> transport}`` mapping.
+
+        Tests use this to assert routed URLs / introspect per-route
+        state. Production code SHOULD pump through :meth:`poll` so
+        the manager owns the merge ordering.
+        """
+        return dict(self._transports)
+
+    @property
+    def messages_received_by_route(self) -> Mapping[str, int]:
+        return dict(self._messages_received_by_route)
+
+    @property
+    def subscribed_streams(self) -> tuple[str, ...]:
+        return self._subscribed_streams
+
+    # ------------------------------------------------------------------
+    # WSMessagePump implementation
+    # ------------------------------------------------------------------
+    def connect(self) -> None:
+        """Open every routed transport in turn.
+
+        If any single route fails the manager re-raises the failure
+        AFTER tearing down whichever transports already connected.
+        Phase 11C.1B does NOT silently degrade: a partial-route open
+        would mean missing market-class streams without telling the
+        operator.
+        """
+        opened: list[str] = []
+        try:
+            for route in ("public", "market"):
+                transport = self._transports.get(route)
+                if transport is None:
+                    continue
+                transport.connect()
+                opened.append(route)
+        except Exception:
+            for route in opened:
+                try:
+                    self._transports[route].disconnect()
+                except Exception:  # pragma: no cover - protective
+                    pass
+            self._connected = False
+            self._closed = True
+            raise
+        self._connected = bool(opened)
+        self._closed = not self._connected
+
+    def disconnect(self) -> None:
+        for route, transport in list(self._transports.items()):
+            try:
+                transport.disconnect()
+            except Exception as exc:  # pragma: no cover - protective
+                logger.warning(
+                    "[phase11c.1b] multi-transport route {} "
+                    "disconnect raised: {}",
+                    route,
+                    exc,
+                )
+        self._connected = False
+        self._closed = True
+
+    def subscribe(self, streams: Sequence[str]) -> None:
+        """Route a subscribe call to the matching per-route transport.
+
+        Every stream is run through the allowlist + route classifier
+        BEFORE any frame goes out. A subscribe that mixes public /
+        market streams is split per-route automatically.
+        """
+        if not streams:
+            return
+        for stream in streams:
+            assert_public_ws_stream_allowed(stream)
+        split = split_streams_by_route(streams)
+        for route, route_streams in split.items():
+            if not route_streams:
+                continue
+            transport = self._transports.get(route)
+            if transport is None:
+                raise PublicWSStreamForbidden(
+                    f"MultiTransportPublicWSManager: refused "
+                    f"subscribe for {route!r} route; that route was "
+                    "not opened by this manager. Reconfigure "
+                    "WSConfig.streams to include the route's streams "
+                    "at construction time."
+                )
+            transport.subscribe(route_streams)
+        merged = list(self._subscribed_streams)
+        for stream in streams:
+            if stream not in merged:
+                merged.append(stream)
+        self._subscribed_streams = tuple(merged)
+
+    def poll(self, *, timeout_seconds: float) -> list[WSMessage]:
+        """Drain every routed transport and return the merged list.
+
+        The merge order is deterministic: PUBLIC route first (best
+        bid / ask updates), MARKET route second
+        (ticker / mini-ticker / mark-price / liquidations). The
+        radar buffer is order-insensitive within a single tick so
+        this only matters for snapshot tracing.
+        """
+        # Spread the budget across the routes opened. Each route
+        # receives an equal slice; a fractional split is fine
+        # because the underlying ``select`` honours a 0-second
+        # timeout and the call returns immediately when there are
+        # no buffered bytes left.
+        if not self._transports:
+            return []
+        slice_seconds = max(
+            0.0, float(timeout_seconds) / max(1, len(self._transports))
+        )
+        out: list[WSMessage] = []
+        for route in ("public", "market"):
+            transport = self._transports.get(route)
+            if transport is None:
+                continue
+            try:
+                msgs = transport.poll(timeout_seconds=slice_seconds)
+            except Exception as exc:
+                logger.warning(
+                    "[phase11c.1b] multi-transport route {} "
+                    "poll raised: {}",
+                    route,
+                    exc,
+                )
+                continue
+            if msgs:
+                out.extend(msgs)
+                self._messages_received_by_route[route] = (
+                    self._messages_received_by_route.get(route, 0)
+                    + len(msgs)
+                )
+        return out
+
+    @property
+    def is_connected(self) -> bool:
+        if not self._transports:
+            return False
+        return all(
+            getattr(t, "is_connected", False)
+            for t in self._transports.values()
+        )
+
+    # ------------------------------------------------------------------
+    # Daily-report payload (route-level counters)
+    # ------------------------------------------------------------------
+    def metrics_payload(self) -> dict[str, Any]:
+        """Return the JSON-safe per-route metrics block.
+
+        The :class:`BinancePublicWSClient` already exports
+        connection / staleness counters; this payload exposes the
+        per-route message counts so the daily-report aggregator can
+        cross-check that BOTH public and market routes actually
+        pushed data during the run.
+        """
+        per_route_urls: dict[str, str] = {}
+        for route, transport in self._transports.items():
+            url = getattr(transport, "url", None)
+            if url is not None:
+                per_route_urls[route] = str(url)
+        return {
+            "ws_routes_opened": list(self.routes),
+            "ws_route_urls": per_route_urls,
+            "ws_messages_by_route": dict(self._messages_received_by_route),
+            "ws_public_streams": list(self._public_streams),
+            "ws_market_streams": list(self._market_streams),
+        }
+
+
 def create_real_public_ws_transport(
     *,
     config: WSConfig | None = None,
     **kwargs: Any,
-) -> StdlibPublicWSTransport:
-    """Public factory for the Phase 11C.1B real-network transport.
+) -> WSMessagePump:
+    """Public factory for the Phase 11C.1B real-network WS pump.
+
+    Returns a :class:`MultiTransportPublicWSManager` bound to the
+    supplied configuration. The manager owns one routed
+    :class:`StdlibPublicWSTransport` per route (PUBLIC + MARKET) and
+    presents them behind a single :class:`WSMessagePump` interface
+    so the runner / :class:`BinancePublicWSClient` can pump the
+    union without any awareness of the topology.
 
     The runner calls this when ``--ws-first`` is set without
     ``--dry-run``. Tests can monkey-patch the runner-side reference
-    to inject a fake transport without touching the production
+    to inject a fake pump without touching the production
     constructor. The factory itself refuses every credential-shaped
-    kwarg and never reads ``BINANCE_API_KEY`` / ``BINANCE_API_SECRET``
-    (the implementation does not import ``os.environ``).
+    kwarg (forwarded to the manager) and never reads
+    ``BINANCE_API_KEY`` / ``BINANCE_API_SECRET`` (the implementation
+    does not import ``os.environ``).
     """
-    return StdlibPublicWSTransport(config=config, **kwargs)
+    return MultiTransportPublicWSManager(config=config, **kwargs)
 
 
 __all__ = [
@@ -1637,15 +2263,22 @@ __all__ = [
     "ALLOWED_PUBLIC_WS_PATH_ROOTS",
     "BinancePublicWSClient",
     "DEFAULT_WS_BASE_URL",
+    "FORBIDDEN_WS_PATH_ROOTS",
     "FORBIDDEN_WS_QUERY_TOKENS",
     "FORBIDDEN_WS_TOKENS",
     "InProcessWSPump",
+    "LEGACY_UNROUTED_WS_PATH_ROOTS",
+    "MultiTransportPublicWSManager",
     "PUBLIC_WS_STREAM_ALLOWLIST",
     "PUBLIC_WS_STREAM_PREFIX_ALLOWLIST",
     "PublicWSCredentialForbidden",
     "PublicWSError",
     "PublicWSStreamForbidden",
     "PublicWSTransportError",
+    "STREAM_ROUTE_MARKET",
+    "STREAM_ROUTE_PUBLIC",
+    "STREAM_SUFFIX_ROUTE_MARKET",
+    "STREAM_SUFFIX_ROUTE_PUBLIC",
     "StdlibPublicWSTransport",
     "WSConfig",
     "WSMessage",
@@ -1653,5 +2286,7 @@ __all__ = [
     "assert_public_ws_path_allowed",
     "assert_public_ws_stream_allowed",
     "assert_public_ws_url_allowed",
+    "classify_stream_route",
     "create_real_public_ws_transport",
+    "split_streams_by_route",
 ]

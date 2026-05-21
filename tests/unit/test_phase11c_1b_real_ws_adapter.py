@@ -310,8 +310,31 @@ def test_real_public_ws_adapter_allows_only_public_hosts():
         cfg = WSConfig(base_url=f"wss://{host}")
         transport = StdlibPublicWSTransport(config=cfg)
         assert transport.url.startswith(f"wss://{host}")
-    # Path roots are also allowlisted.
-    assert ALLOWED_PUBLIC_WS_PATH_ROOTS == frozenset({"ws", "stream"})
+    # Routed path roots are the Phase 11C.1B acceptance allowlist.
+    assert ALLOWED_PUBLIC_WS_PATH_ROOTS == frozenset(
+        {"public/ws", "public/stream", "market/ws", "market/stream"}
+    )
+    # Routed path roots accepted.
+    assert (
+        assert_public_ws_path_allowed("/public/ws") == "/public/ws"
+    )
+    assert (
+        assert_public_ws_path_allowed("/public/stream")
+        == "/public/stream"
+    )
+    assert (
+        assert_public_ws_path_allowed("/market/ws") == "/market/ws"
+    )
+    assert (
+        assert_public_ws_path_allowed("/market/stream")
+        == "/market/stream"
+    )
+    assert (
+        assert_public_ws_path_allowed("/public/ws/btcusdt@bookTicker")
+        == "/public/ws/btcusdt@bookTicker"
+    )
+    # Legacy unrouted roots are still accepted (back-compat for
+    # in-process pump fixtures); the runner does NOT use them.
     assert assert_public_ws_path_allowed("/ws") == "/ws"
     assert assert_public_ws_path_allowed("/stream") == "/stream"
     assert assert_public_ws_path_allowed("/ws/btcusdt@bookTicker") == (
