@@ -7,35 +7,37 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
-> **Phase 11C.1C-A = IN_REVIEW / PR_OPEN (PR #36).**
+> **Phase 11C.1C-A = ACCEPTED (closed 2026-05-22; PR #36 merged).**
 > **Phase 11C.1B = ACCEPTED (closed 2026-05-22).**
-> **Phase 11C.1C-B = NOT_STARTED / BLOCKED_UNTIL_11C_1C_A_ACCEPTED.**
+> **Phase 11C.1C-B = NEXT_ALLOWED / NOT_STARTED.**
 > **Phase 11C.1C-C and beyond = NOT_STARTED.**
-> **We are still in paper mode. Phase 12 (real money / live trading)
-> remains FORBIDDEN.**
+> **Phase 12 (real money / live trading) = FORBIDDEN.**
+> **We are still in paper mode.**
 >
-> PR #36 is currently open against `main`. Phase 11C.1C-A is the
+> PR #36 has been merged into `main`. Phase 11C.1C-A is the
 > data-contract first version of the Adaptive Candidate Regime &
 > Strategy Selector; the branch is implemented and exercised by
 > the 30s dry-run + 5min real public WS smoke evidence collected
-> for this PR, but **PR #36 has not been merged**. Phase 11C.1C-A
-> will only be marked **ACCEPTED** after PR #36 is merged and the
-> smoke evidence is accepted. Phase 11C.1C-B cannot open until
-> that gate fires.
+> for this PR. The Phase 11C.1C-A gate is now **ACCEPTED** and
+> Phase 11C.1C-B is **NEXT_ALLOWED / NOT_STARTED** — Phase
+> 11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail
+> Discovery v0) may now begin, in **paper-mode only**.
 
 The Phase 1 safety lock is unchanged across the Phase 11C.1C-A
-in-review evidence runs: `mode=paper`, `live_trading=False`,
+acceptance evidence runs and remains in force as the Phase
+11C.1C-B gate opens: `mode=paper`, `live_trading=False`,
 `right_tail=False`, `llm=False`, `exchange_live_orders=False`,
 `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`.
 No Binance API key, no Binance API secret, no signed endpoint, no
 private WebSocket, no `listenKey`, no DeepSeek trade decision, no
 real Telegram outbound, no Phase 12. Phase 11C.1C-A is **paper /
 virtual** only: the new Strategy Selector is a paper field; the
-Risk Engine remains the single trade-decision gate.
+Risk Engine remains the single trade-decision gate. Phase 11C.1C-B
+inherits the same boundary verbatim.
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2026-05-22 | Phase 11C.1C-A | Adaptive Candidate Regime & Strategy Selector Contracts (paper-only data contracts + scoring + selector + paper-only routing first version) | **IN_REVIEW / PR_OPEN (PR #36)** — 244/244 phase11c tests + 2219/2219 full pytest pass on the PR branch; 30s dry-run produces the six adaptive events per ACTIVE candidate; 5min real public WS smoke produced 32842 real WS messages, 12 chains, 12 each of the six adaptive event types, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban; daily report contains the Phase 11C.1C-A adaptive section; safety flags unchanged. PR #36 has **not** been merged; Phase 11C.1C-A is **NOT** ACCEPTED. After PR #36 is merged and the smoke evidence is accepted, Phase 11C.1C-A may be marked ACCEPTED. | `docs/PHASE_11C_1C_ADAPTIVE_CANDIDATE_REGIME_STRATEGY_SELECTOR.md`; `tests/unit/test_phase11c_1c_a_adaptive_candidate.py`; `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-A (IN_REVIEW / PR_OPEN)" |
+| 2026-05-22 | Phase 11C.1C-A | Adaptive Candidate Regime & Strategy Selector Contracts (paper-only data contracts + scoring + selector + paper-only routing first version) | **ACCEPTED (PR #36 merged)** — 244/244 phase11c tests + 2219/2219 full pytest pass on the PR branch; 30s dry-run produces the six adaptive events per ACTIVE candidate; 5min real public WS smoke produced 32842 real WS messages, 12 chains, 12 each of the six adaptive event types, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban; daily report contains the Phase 11C.1C-A adaptive section; safety flags unchanged. PR #36 merged into `main`. Phase 11C.1C-A is **ACCEPTED**; Phase 11C.1C-B is **NEXT_ALLOWED / NOT_STARTED**. | `docs/PHASE_11C_1C_ADAPTIVE_CANDIDATE_REGIME_STRATEGY_SELECTOR.md`; `tests/unit/test_phase11c_1c_a_adaptive_candidate.py`; `docs/PHASE_GATE.md` §"Closed phase: Phase 11C.1C-A (ACCEPTED)" |
 | 2026-05-22 | Phase 11C.1B | WebSocket-First All-Market Demon Coin Radar (incl. SymbolUniverse exchangeInfo-as-truth, non-ASCII contracts allowed) | **ACCEPTED** — 5min / 10min / 1h real WS smoke PASS (no 429, no 418, no stale, no ingestion errors); export zip generated; events.db readable; PRs #31 / #32 / #33 / #34 merged; safety flags unchanged | `docs/PHASE_GATE.md` §"Phase 11C.1B acceptance summary"; `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B |
 | 2026-05-21 | Phase 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | merged        | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A     |
 | 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | open (parent); Phase 11C.1B (5min / 10min / 1h smoke) ACCEPTED 2026-05-22; longer-window (6h / 24h) acceptance still optional / not yet run | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
@@ -140,37 +142,95 @@ emits the full Phase 11C event chain into `events.db`.
 
 ## Open phase
 
-**Phase 11C.1C-A — Adaptive Candidate Regime & Strategy Selector
-Contracts.** **IN_REVIEW / PR_OPEN on PR #36.** Phase 11C.1C-A is
-the **paper-only first version** of the data contracts + scoring +
-selector + paper-only routing for the Adaptive Candidate Regime &
-Strategy Selector. PR #36 is currently open against `main` and
-has **not** been merged; the branch passes all phase11c unit
-tests and produced clean 30s dry-run + 5min real public WS smoke
-evidence (see `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-A
-(IN_REVIEW / PR_OPEN)" / §"Phase 11C.1C-A IN_REVIEW evidence"
-for the full numerics), but the phase will only be marked
-**ACCEPTED** after PR #36 is merged and a human reviewer accepts
-the smoke evidence. It is **NOT** live trading, **NOT** AI Learning,
-**NOT** complete Strategy Validation, **NOT** the full MFE/MAE
-processor — those are reserved for later PRs (Phase 11C.1C-B /
-11C.1C-C). The Phase 1 safety lock and every Phase 11C.1B
-forbidden item carry over unchanged; Phase 12 (live trading)
-stays `FORBIDDEN`.
+**Phase 11C.1C-B — Adaptive Candidate Runtime Calibration & Early
+Tail Discovery v0.** **NEXT_ALLOWED / NOT_STARTED.** With
+PR #36 (Phase 11C.1C-A) merged and accepted, Phase 11C.1C-B is now
+the next phase to begin. Phase 11C.1C-B builds **on top of** the
+Phase 11C.1C-A contracts (`AdaptiveCandidateContext`,
+`MarketRegimeAssessment`, `CandidateStageAssessment`,
+`OpportunityScore`, `StrategyModeDecision`, `ClusterContext`,
+`LabelQueueContract`, the six adaptive event types) and calibrates
+candidate-state recognition + opportunity scoring against the real
+WS-radar candidate stream so the system discovers demon coins
+(妖币) earlier while refusing to chase late / blowoff tails. Scope:
 
-> After PR #36 is merged and smoke evidence is accepted, Phase
-> 11C.1C-A may be marked ACCEPTED.
+  - **Runtime calibration metrics** attached to every adaptive
+    candidate: `candidate_first_seen_ts`,
+    `candidate_first_seen_price`, `current_price`,
+    `price_change_since_first_seen`,
+    `quote_volume_acceleration_1m`,
+    `quote_volume_acceleration_5m`, `price_acceleration_1m`,
+    `price_acceleration_5m`, `volume_rank`, `volume_rank_jump_5m`,
+    `distance_to_24h_high`, `distance_from_first_seen`,
+    `freshness_score`, `late_chase_risk`, `early_tail_score`.
+  - **Early Tail Discovery v0.** The candidate pool's capacity
+    eviction must NOT discard candidates with high
+    `early_tail_score`. The radar must surface volume-rank jumps,
+    quote-volume accelerations, and price accelerations on
+    EDEN / ALT / NEAR-style demon-coin starts EARLIER than
+    Phase 11C.1B's flat radar score.
+  - **Stage calibration.** ``early`` + high volume expansion +
+    high freshness may enter ``follow`` / ``pullback`` (paper /
+    virtual). ``late`` / ``blowoff`` MUST NEVER upgrade to
+    ``follow``. ``manipulation_risk`` high MUST ``reject`` or
+    ``observe``.
+  - **Daily-report enhancements.** New fields:
+    `top_early_tail_candidates`, `top_late_chase_risk_candidates`,
+    `candidate_stage_counts`, `strategy_mode_counts`,
+    `opportunity_score_distribution`,
+    `early_tail_score_top_symbols`,
+    `symbols_promoted_before_24h_top_move`, plus EDEN / ALT /
+    NEAR style candidate examples when present.
+  - **Event / export compatibility.** Every new field MUST land
+    in `EventRepository`, the Phase 8.5 learning-ready payload,
+    the daily report, and the Phase 8.5 export. Phase 10A replay
+    MUST NOT fail on the new fields.
+
+Phase 11C.1C-B is **paper-mode only**. It is **NOT** live
+trading, **NOT** AI Learning, **NOT** complete Strategy Validation,
+**NOT** the full MFE/MAE processor, **NOT** real Telegram outbound,
+**NOT** real Binance trading API. The Phase 1 safety lock and every
+Phase 11C.1B + 11C.1C-A forbidden item carry over unchanged; Phase
+12 (live trading) stays `FORBIDDEN`.
+
+> Phase 11C.1C-B specifically forbids:
+>
+>   - live trading
+>   - Binance API key / secret
+>   - signed endpoint
+>   - private websocket
+>   - listenKey
+>   - account / order / position / leverage / margin endpoint
+>   - DeepSeek trade decision
+>   - real Telegram outbound
+>   - Phase 12
+>   - AI Learning
+>   - the full MFE/MAE processor (the queue is a contract; the
+>     processor lands in a later PR)
+>   - real orders
+
+See `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-B
+(NEXT_ALLOWED / NOT_STARTED)" for the full kickoff gate.
+
+## Closed phase: Phase 11C.1C-A (acceptance closeout)
+
+**Phase 11C.1C-A — Adaptive Candidate Regime & Strategy Selector
+Contracts (PR #36).** Status: **ACCEPTED (closed 2026-05-22; PR
+#36 merged).** Phase 11C.1C-A shipped the **paper-only first
+version** of the data contracts + scoring + selector + paper-only
+routing for the Adaptive Candidate Regime & Strategy Selector. The
+30s dry-run + 5min real public WS smoke evidence captured under
+`docs/PHASE_GATE.md` §"Phase 11C.1C-A acceptance evidence" was
+accepted; PR #36 has merged into `main`. Every Phase 1 safety flag
+remained `False` end-to-end across the acceptance runs. Phase
+11C.1C-A is **NOT** live trading, **NOT** AI Learning, **NOT**
+complete Strategy Validation, **NOT** the full MFE/MAE processor —
+those are reserved for later PRs (Phase 11C.1C-B / 11C.1C-C). The
+Phase 1 safety lock and every Phase 11C.1B forbidden item carry
+over unchanged; Phase 12 (live trading) stays `FORBIDDEN`.
 
 See `docs/PHASE_11C_1C_ADAPTIVE_CANDIDATE_REGIME_STRATEGY_SELECTOR.md`
 for the full first-version contract.
-
-**Phase 11C.1C-B — Adaptive Candidate Strategy Validation +
-Cluster Exposure Control.** Status:
-**NOT_STARTED / BLOCKED_UNTIL_11C_1C_A_ACCEPTED.** Phase 11C.1C-B
-cannot open until PR #36 is merged AND the Phase 11C.1C-A smoke
-evidence is accepted. Its detailed gate criteria will be drafted
-in `docs/PHASE_GATE.md` when that gate fires; until then it is
-intentionally blank.
 
 ## Phase 11C.1B acceptance evidence (closeout)
 
