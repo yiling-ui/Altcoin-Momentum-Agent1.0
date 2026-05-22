@@ -1659,11 +1659,45 @@ class StdlibPublicWSTransport(WSMessagePump):
         (we already refuse them at subscribe time; this is
         defence-in-depth against a server that pushes an unsolicited
         private-shaped event).
+
+        Phase 11C.1B PR-B fix
+        ---------------------
+
+        The first incarnation of this method gated EVERY ``recv``
+        call behind a ``remaining = deadline - time.monotonic()``
+        check. With ``timeout_seconds=0.0`` (the runner's per-tick
+        non-blocking probe) ``remaining`` was already negative on
+        the first iteration so the loop broke before any bytes were
+        read off the socket. Bytes piled up in the kernel TCP
+        buffer between ticks but Python's ``_recv_buffer`` stayed
+        empty - the routed connections succeeded but
+        ``ws_messages_received`` stuck at 0. The 5-min real-WS
+        smoke test reproduced this exactly. We now ALWAYS attempt
+        one non-blocking drain at the top of the call (regardless
+        of ``timeout_seconds``) so a caller that passes 0.0 still
+        picks up every byte the kernel buffered for us since the
+        previous poll.
         """
         if self._sock is None or self._closed:
             return []
         deadline = time.monotonic() + max(0.0, float(timeout_seconds))
         out: list[WSMessage] = []
+        # Pass 1: drain whatever bytes the kernel has already
+        # buffered, regardless of ``timeout_seconds``. This is the
+        # load-bearing change for the Phase 11C.1B PR-B real-WS
+        # smoke test - the runner calls ``pump_messages
+        # (timeout_seconds=0.0)`` on every loop tick and then
+        # sleeps; without this drain the socket's recv path was
+        # never entered.
+        if not self._drain_recv_buffer_nonblocking():
+            # Socket closed during the non-blocking drain. Surface
+            # whatever frames were already in ``_recv_buffer``.
+            while True:
+                msg = self._try_extract_message()
+                if msg is None:
+                    break
+                out.append(msg)
+            return out
         while True:
             msg = self._try_extract_message()
             if msg is not None:
@@ -1673,7 +1707,10 @@ class StdlibPublicWSTransport(WSMessagePump):
                 break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                # No more time; return what we have.
+                # No more time; return what we have. The pre-loop
+                # non-blocking drain above guarantees we have
+                # already surfaced every kernel-buffered byte even
+                # when ``timeout_seconds=0.0``.
                 break
             try:
                 ready, _, _ = select.select(
@@ -1684,19 +1721,44 @@ class StdlibPublicWSTransport(WSMessagePump):
                 break
             if not ready:
                 break
+            if not self._drain_recv_buffer_nonblocking():
+                break
+        return out
+
+    def _drain_recv_buffer_nonblocking(self) -> bool:
+        """Read everything the socket has currently buffered into
+        ``_recv_buffer`` without blocking.
+
+        Returns ``True`` if the socket is still healthy after the
+        drain (whether or not bytes were read), ``False`` if the
+        socket closed or errored. The socket is set to non-blocking
+        mode at the end of :meth:`connect` so ``recv`` raises
+        :class:`BlockingIOError` / :class:`ssl.SSLWantReadError`
+        when no bytes are available - we treat that as "drain
+        complete" and return ``True``.
+
+        This helper is the single point where the WS adapter pulls
+        bytes off the socket. Centralising it makes the
+        Phase 11C.1B PR-B fix (drain on every poll regardless of
+        ``timeout_seconds``) observable in one place; any future
+        reconnect / framing change only has to touch this method.
+        """
+        sock = self._sock
+        if sock is None:
+            return False
+        while True:
             try:
-                chunk = self._sock.recv(self._recv_chunk_size)
+                chunk = sock.recv(self._recv_chunk_size)
             except (BlockingIOError, ssl.SSLWantReadError):
-                continue
+                return True  # no more data right now; socket healthy
             except (OSError, ssl.SSLError):
                 self._connected = False
-                break
+                return False
             if not chunk:
-                # Server closed.
+                # Server closed the connection cleanly.
                 self._connected = False
-                break
+                return False
             self._recv_buffer.extend(chunk)
-        return out
 
     @property
     def is_connected(self) -> bool:

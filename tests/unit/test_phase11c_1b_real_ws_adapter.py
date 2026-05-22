@@ -1094,3 +1094,148 @@ def test_real_ws_transport_drops_private_shaped_messages(
     )
     msgs = transport.poll(timeout_seconds=0.05)
     assert msgs == []
+
+
+
+def test_real_ws_transport_drains_buffered_bytes_with_zero_timeout(
+    real_transport_with_fake_socket,
+):
+    """Regression for the Phase 11C.1B PR-B 5-min real-WS smoke
+    test: ``poll(timeout_seconds=0.0)`` MUST surface every frame
+    the kernel has already buffered for the connection.
+
+    Before the fix, the read loop computed
+    ``deadline = time.monotonic() + 0.0`` and then broke out on
+    ``remaining = deadline - time.monotonic() <= 0`` BEFORE any
+    ``recv`` ever ran. The runner calls
+    ``ws_client.pump_messages(timeout_seconds=0.0)`` once per
+    tick and then sleeps; with the bug present, bytes piled up in
+    the kernel TCP receive buffer between ticks but Python's
+    ``_recv_buffer`` stayed empty - the routed connections
+    succeeded, ``PUBLIC_WS_CONNECTED`` fired, but
+    ``ws_messages_received`` stuck at 0 for the full 300s smoke
+    window. The fix drains the socket non-blockingly at the top
+    of every ``poll`` call, regardless of ``timeout_seconds``.
+    """
+    import json as _json
+
+    transport, conn = real_transport_with_fake_socket
+    _seed_handshake(conn)
+    transport.connect()
+    # Pre-load THREE fully-buffered frames before the poll. The
+    # zero-timeout call must surface all of them.
+    conn.feed_text_frame(
+        _json.dumps(
+            {
+                "stream": "!bookTicker",
+                "data": {
+                    "s": "BTCUSDT",
+                    "b": "100.0",
+                    "a": "100.1",
+                    "B": "1.0",
+                    "A": "1.0",
+                },
+            }
+        ).encode("utf-8")
+    )
+    conn.feed_text_frame(
+        _json.dumps(
+            {
+                "stream": "!ticker@arr",
+                "data": [{"s": "BTCUSDT", "c": "100.0", "q": "1000.0"}],
+            }
+        ).encode("utf-8")
+    )
+    conn.feed_text_frame(
+        _json.dumps(
+            {
+                "stream": "!markPrice@arr",
+                "data": [{"s": "BTCUSDT", "p": "100.05", "r": "0.0001"}],
+            }
+        ).encode("utf-8")
+    )
+    msgs = transport.poll(timeout_seconds=0.0)
+    streams = sorted(m.stream for m in msgs)
+    assert streams == ["!bookTicker", "!markPrice@arr", "!ticker@arr"]
+
+
+def test_real_ws_transport_zero_timeout_returns_empty_when_no_data(
+    real_transport_with_fake_socket,
+):
+    """``poll(timeout_seconds=0.0)`` must NOT block waiting for
+    bytes. With no data buffered the call returns ``[]``
+    immediately. Pairs with the
+    ``test_real_ws_transport_drains_buffered_bytes_with_zero_timeout``
+    case above: together they pin the contract that the
+    non-blocking drain runs every call, but never blocks."""
+    transport, conn = real_transport_with_fake_socket
+    _seed_handshake(conn)
+    transport.connect()
+    msgs = transport.poll(timeout_seconds=0.0)
+    assert msgs == []
+    # The transport must still be connected after a no-data call.
+    assert transport.is_connected is True
+
+
+
+def test_real_ws_runner_loop_pattern_drains_messages_with_zero_timeout(
+    real_transport_with_fake_socket,
+):
+    """End-to-end pattern test: the runner's per-tick code path
+    calls ``BinancePublicWSClient.pump_messages(timeout_seconds=0.0)``
+    and then sleeps. Before the Phase 11C.1B PR-B fix the stdlib
+    transport never entered ``recv`` on that path so the smoke test
+    reported 0 messages. This test simulates the exact sequence -
+    feed bytes between two zero-timeout polls - and asserts every
+    queued frame surfaces on the next non-blocking call.
+    """
+    import json as _json
+
+    transport, conn = real_transport_with_fake_socket
+    _seed_handshake(conn)
+
+    # Mirror the runner: build a host BinancePublicWSClient that
+    # owns this stdlib transport, then call pump_messages with
+    # timeout_seconds=0.0 across multiple ticks.
+    client = BinancePublicWSClient(
+        config=WSConfig(),
+        pump=transport,
+    )
+    client.connect()
+
+    # Tick 1: nothing buffered. Zero-timeout pump returns [].
+    msgs = client.pump_messages(timeout_seconds=0.0)
+    assert msgs == []
+    assert client.messages_received == 0
+
+    # Between tick 1 and tick 2, Binance pushes two frames into
+    # the kernel TCP buffer.
+    conn.feed_text_frame(
+        _json.dumps(
+            {
+                "stream": "!ticker@arr",
+                "data": [{"s": "BTCUSDT", "c": "100.0", "q": "1000.0"}],
+            }
+        ).encode("utf-8")
+    )
+    conn.feed_text_frame(
+        _json.dumps(
+            {
+                "stream": "!bookTicker",
+                "data": {
+                    "s": "BTCUSDT",
+                    "b": "100.0",
+                    "a": "100.1",
+                    "B": "1.0",
+                    "A": "1.0",
+                },
+            }
+        ).encode("utf-8")
+    )
+
+    # Tick 2: zero-timeout pump must surface BOTH buffered frames.
+    msgs = client.pump_messages(timeout_seconds=0.0)
+    surfaced = sorted(m.stream for m in msgs)
+    assert surfaced == ["!bookTicker", "!ticker@arr"]
+    assert client.messages_received == 2
+    assert client.is_stale is False
