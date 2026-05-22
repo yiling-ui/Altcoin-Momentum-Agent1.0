@@ -54,6 +54,7 @@ from app.core.clock import now_ms  # noqa: E402
 from app.core.errors import ExchangeError, SafeModeViolation, SafetyViolation  # noqa: E402
 from app.database.connection import DatabaseSet, PHASE2_DATABASES  # noqa: E402
 from app.database.migrations import migrate_database_set  # noqa: E402
+from app import __version__  # noqa: E402
 from app.database.repositories import EventRepository  # noqa: E402
 from app.exchanges.binance_public import (  # noqa: E402
     BinancePublicClient,
@@ -537,6 +538,10 @@ class _Phase11CRunStats:
     ws_first_enabled: bool = False
     ws_metrics: dict[str, Any] = field(default_factory=dict)
     candidate_pool_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector
+    # metrics. Populated from ``WSRadarChainDriver.adaptive_metrics_payload``
+    # on every loop tick that drives a chain.
+    adaptive_metrics: dict[str, Any] = field(default_factory=dict)
     ws_chains_emitted: int = 0
     ws_risk_rejected: int = 0
     ws_learning_ready_attached: int = 0
@@ -1389,6 +1394,10 @@ def main(argv: list[str] | None = None) -> int:
                         "candidate_pool_top_symbols", []
                     )
                 )
+            # Phase 11C.1C-A - copy adaptive metrics from the WS-radar
+            # chain driver so the daily report has the latest figures.
+            if ws_chain is not None:
+                stats.adaptive_metrics = ws_chain.adaptive_metrics_payload()
             if radar_buffer is not None:
                 stats.liquidation_events_seen = (
                     radar_buffer.liquidation_events_seen
@@ -1490,6 +1499,9 @@ def main(argv: list[str] | None = None) -> int:
                     "candidate_pool_top_symbols", []
                 )
             )
+        # Phase 11C.1C-A - capture adaptive metrics on shutdown.
+        if ws_chain is not None:
+            stats.adaptive_metrics = ws_chain.adaptive_metrics_payload()
         if radar_buffer is not None:
             stats.liquidation_events_seen = (
                 radar_buffer.liquidation_events_seen
@@ -1555,6 +1567,7 @@ def main(argv: list[str] | None = None) -> int:
                 ingestion_errors=int(stats.ingestion_errors),
                 ws_metrics=dict(stats.ws_metrics),
                 candidate_pool_metrics=dict(stats.candidate_pool_metrics),
+                adaptive_metrics=dict(stats.adaptive_metrics),
             )
             daily_report_path = (
                 daily_dir / f"{snapshot.date}-phase11c-public-market.md"
@@ -1616,8 +1629,9 @@ def _print_banner(
             f"retry_after_default={cfg.retry_after_default_seconds}s)"
         )
     print(
-        "[AMA-RT] Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar "
-        f"v1.4.0a11c.1b "
+        "[AMA-RT] Phase 11C.1C-A - Adaptive Candidate Regime "
+        "& Strategy Selector "
+        f"v{__version__} "
         f"mode={settings.trading_mode} "
         f"live_trading={settings.live_trading_enabled} "
         f"right_tail={settings.right_tail_enabled} "
@@ -1655,7 +1669,7 @@ def _print_exit_banner(
     metrics = stats.governor_metrics or {}
     ws_metrics = stats.ws_metrics or {}
     print(
-        "[AMA-RT] Phase 11C.1B run finished "
+        "[AMA-RT] Phase 11C.1C-A run finished "
         f"duration_seconds={duration_s} "
         f"iterations={stats.iterations} "
         f"chains_emitted={stats.chains_emitted} "

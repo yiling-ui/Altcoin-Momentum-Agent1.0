@@ -30,6 +30,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11B-HF | Cloud Paper - High-Frequency observation          | 2026-05-19      | 30/30 dry-run PASS; 648/648 24h@2min observations PASS         |
 | 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | 2026-05-21 | PR #31 merged; `tests/unit/test_phase11c1a_rate_limit_governor.py` |
 | 11C.1B | WebSocket-First All-Market Demon Coin Radar (incl. SymbolUniverse exchangeInfo-as-truth) | 2026-05-22 | PRs #32 / #33 / #34 merged; 5min / 10min / 1h real WS smoke PASS; export zip generated; events.db readable; safety flags unchanged. See "Phase 11C.1B acceptance summary" below. |
+| 11C.1C-A | Adaptive Candidate Regime & Strategy Selector Contracts (paper-only data contracts + scoring + selector + paper-only routing first version) | 2026-05-22 | PR #36 merged; `docs/PHASE_11C_1C_ADAPTIVE_CANDIDATE_REGIME_STRATEGY_SELECTOR.md`; `tests/unit/test_phase11c_1c_a_adaptive_candidate.py` (31 tests); 30s dry-run produces 6 adaptive events per candidate; daily report contains the new Phase 11C.1C-A section; safety flags unchanged. See "Phase 11C.1C-A acceptance summary" below. |
 
 ### Phase 11B-HF acceptance summary
 
@@ -162,15 +163,189 @@ Phase 12                        = FORBIDDEN (gate unchanged)
     `exchange_live_orders=False`, `telegram_outbound_enabled=False`,
     `binance_private_api_enabled=False`).
 
-## Open phase: Phase 11C.1C
+## Open phase: Phase 11C.1C-B
 
-**Phase 11C.1C - Adaptive Candidate Regime & Strategy Selector.**
-Status: **NEXT_ALLOWED / NOT_STARTED.** No code in this repo state
-implements Phase 11C.1C. The detailed gate criteria (test matrix,
-metric contracts, daily-report extensions, safety invariants beyond
-those inherited from Phase 11C.1B) will be drafted here as part of
-the Phase 11C.1C kickoff PR; until then this section is intentionally
-a stub.
+**Phase 11C.1C-B — Adaptive Candidate Strategy Validation + Cluster
+Exposure Control.** Status: **NEXT_ALLOWED / NOT_STARTED.** Phase
+11C.1C-A (the first-version data contracts + scoring + selector +
+paper-only routing) is now MERGED; Phase 11C.1C-B will layer
+deeper Strategy Validation, real cluster exposure control,
+priority_score, and richer regime aggregates on top of the
+contracts pinned by Phase 11C.1C-A. The detailed gate criteria
+(test matrix, metric contracts, daily-report extensions, safety
+invariants beyond those inherited from Phase 11C.1C-A) will be
+drafted here as part of the Phase 11C.1C-B kickoff PR; until then
+this section is intentionally a stub.
+
+### Phase 11C.1C-B boundary (must hold from day one)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Binance API key / secret                    | refused at construction      |
+| Signed endpoint                             | refused at allowlist check   |
+| `listenKey` / user data stream              | refused at WS allowlist + URL parser |
+| Private WebSocket / trading WS API          | refused at WS allowlist      |
+| Routed-private endpoint (`/private`)        | refused at path-root allowlist |
+| DeepSeek trade-decision authority           | NOT permitted                |
+| Real Telegram outbound                      | NOT permitted                |
+| Phase 12 (live trading)                     | FORBIDDEN                    |
+
+### Phase 11C.1C-B explicitly forbids (inherited from Phase 11C.1C-A)
+
+  - Connecting to the Binance trading API.
+  - Reading or storing any Binance API key / API secret /
+    `listenKey`.
+  - Calling any signed endpoint.
+  - Subscribing to any user data stream / private WebSocket /
+    trading WebSocket API / account / margin / position / leverage
+    / balance / order private WS variant.
+  - Connecting to the routed-private endpoint
+    `wss://fstream.binance.com/private` (or any `/ws-api` /
+    `/ws-fapi` / `/ws-papi` / `/trading-api` / `/userDataStream`
+    path-root variant).
+  - Connecting to DeepSeek as a trade-decision authority.
+  - Connecting to the real Telegram outbound HTTP transport.
+  - Promoting the Phase 11C.1C-A `strategy_mode` (paper / virtual)
+    field to a real-trade authority.
+  - Enabling AI Learning that auto-decides trades.
+  - Entering Phase 12.
+
+## Closed phase: Phase 11C.1C-A
+
+**Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector
+Contracts (PR #36).** Phase 11C.1C-A is the **paper-only first
+version** of the data contracts + scoring + selector + paper-only
+routing for the Adaptive Candidate Regime & Strategy Selector. The
+PR ships:
+
+  - new `app/adaptive/` package with
+    `MarketRegimeAssessment` / `CandidateStageAssessment` /
+    `OpportunityScore` / `StrategyModeDecision` / `ClusterContext`
+    / `LabelQueueContract` / `AdaptiveCandidateContext` value
+    objects + the cheap `assess_market_regime` /
+    `classify_candidate_stage` / `compute_opportunity_score` /
+    `select_strategy_mode` / `build_cluster_context` /
+    `build_label_queue_contract` /
+    `build_adaptive_candidate_context` pure functions;
+  - six new EventType entries (`MARKET_REGIME_ASSESSED` /
+    `CANDIDATE_STAGE_CLASSIFIED` / `OPPORTUNITY_SCORED` /
+    `STRATEGY_MODE_SELECTED` / `CLUSTER_CONTEXT_ATTACHED` /
+    `LABEL_QUEUE_ENQUEUED`) emitted alongside the existing
+    Phase 11C.1B WS-radar event chain;
+  - Phase 8.5 `LearningReadyContext` extended with an optional
+    `adaptive_candidate` field;
+  - Phase 8.5 `VirtualTradePlan` extended with eleven optional
+    adaptive fields (`opportunity_score`, `opportunity_grade`,
+    `candidate_stage`, `strategy_mode`, `cluster_id`,
+    `cluster_leader`, `label_queue_pending`, `follow_allowed`,
+    `pullback_allowed`, `observe_only`, `reject_reason`);
+  - `WSRadarChainDriver` builds and emits the adaptive context per
+    ACTIVE candidate, attaches it to `learning_ready`, and exposes
+    `adaptive_metrics_payload()` for the runner / daily report;
+  - `DailyReportBuilder` accepts a new `adaptive_metrics` kwarg
+    and renders the
+    `## Phase 11C.1C-A Adaptive Candidate Regime & Strategy Selector`
+    Markdown section.
+
+### Phase 11C.1C-A boundary (must hold for the entire scope)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Strategy mode                               | paper / virtual; not a real-trade authority |
+| Adaptive event emission                     | descriptive only; never opens an order |
+| MFE/MAE processor                           | NOT implemented (queue is a contract) |
+| AI Learning                                 | NOT implemented              |
+| Phase 12                                    | FORBIDDEN                    |
+
+### Phase 11C.1C-A acceptance criteria
+
+1. `pytest tests/unit/test_phase11c_1c_a_adaptive_candidate.py`
+   passes (31 brief-mandated tests).
+2. The full Phase 11C test surface continues to pass; total
+   2197 unit tests pass with PR #36 applied (was 2166 before).
+3. The 30 s dry-run produces an `AdaptiveCandidateContext` for
+   every active candidate and writes the six adaptive events into
+   `events.db`.
+4. The 5 min real-WS paper run produces adaptive fields on every
+   chain (no regression in the Phase 11C.1B 5min smoke ladder).
+5. The Phase 8.5 export zip + Phase 10A replay accept the six new
+   event types without failure.
+6. Every safety flag remains `False` after running the adaptive
+   path end-to-end.
+7. No live trading.
+8. No API key.
+9. No private endpoint.
+10. Phase 12 stays `FORBIDDEN`.
+
+### Phase 11C.1C-A acceptance summary
+
+```
+test_phase11c_1c_a_adaptive_candidate.py  31 PASS
+tests/unit/                                2197 PASS (no regression vs. 2166 baseline)
+
+30 s dry-run smoke (--symbol-limit 2 --dry-run):
+  ws_messages_received                  > 0
+  ws_chains_emitted                     2
+  MARKET_REGIME_ASSESSED                2
+  CANDIDATE_STAGE_CLASSIFIED            2
+  OPPORTUNITY_SCORED                    2
+  STRATEGY_MODE_SELECTED                2
+  CLUSTER_CONTEXT_ATTACHED              2
+  LABEL_QUEUE_ENQUEUED                  2
+  daily report                          contains "Phase 11C.1C-A Adaptive
+                                        Candidate Regime & Strategy Selector"
+  events.db readable                    yes
+  Phase 8.5 export                      generated successfully
+```
+
+Safety flags held throughout the Phase 11C.1C-A acceptance run:
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none (`/private` refused at allowlist)
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+## Closed phase: Phase 11C.1B (historical reference)
+
+(See "Phase 11C.1B acceptance summary" above for the full closeout
+record.)
+
+## Open phase (legacy): Phase 11C.1C
+
+The original "Phase 11C.1C" placeholder has been split into
+sequential sub-phases. Phase 11C.1C-A is **MERGED** (PR #36) and
+ships the data-contract first version. Phase 11C.1C-B (Strategy
+Validation + Cluster Exposure Control) is **NEXT_ALLOWED /
+NOT_STARTED** (see "Open phase: Phase 11C.1C-B" above).
 
 ### Phase 11C.1C boundary (must hold from day one)
 

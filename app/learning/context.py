@@ -59,6 +59,18 @@ LEARNING_READY_KEY = "learning_ready"
 # Issue contract: the 11 event types that may carry a learning_ready
 # enrichment. The set is exposed as a frozenset so callers can `in`-
 # test cheaply, and as a tuple so the order is reproducible.
+#
+# Phase 11C.1C-A note: the six adaptive event types
+# (``MARKET_REGIME_ASSESSED`` / ``CANDIDATE_STAGE_CLASSIFIED`` /
+# ``OPPORTUNITY_SCORED`` / ``STRATEGY_MODE_SELECTED`` /
+# ``CLUSTER_CONTEXT_ATTACHED`` / ``LABEL_QUEUE_ENQUEUED``) deliberately
+# stay OUT of this tuple. The existing 11-type Issue contract is
+# load-bearing for Phase 8.5; the adaptive events ride into the
+# Phase 8.5 ``events.jsonl`` stream via the generic ``_serialise_events``
+# path and onto the existing ``learning_ready`` block (with the
+# ``adaptive_candidate`` sub-key) of the eleven canonical events
+# below. See :data:`ADAPTIVE_LEARNING_READY_EVENT_TYPES` for the
+# Phase 11C.1C-A list.
 LEARNING_READY_EVENT_TYPES: tuple[EventType, ...] = (
     EventType.PRE_ANOMALY_DETECTED,
     EventType.ANOMALY_DETECTED,
@@ -71,6 +83,19 @@ LEARNING_READY_EVENT_TYPES: tuple[EventType, ...] = (
     EventType.STATE_TRANSITION,
     EventType.CAPITAL_REBASE,
     EventType.RISK_BUDGET_RECALCULATED,
+)
+
+#: Phase 11C.1C-A - the six adaptive event types that may carry a
+#: learning-ready ``adaptive_candidate`` block. They are emitted
+#: alongside (NOT replacing) the existing eleven Phase 8.5
+#: learning-ready event types.
+ADAPTIVE_LEARNING_READY_EVENT_TYPES: tuple[EventType, ...] = (
+    EventType.MARKET_REGIME_ASSESSED,
+    EventType.CANDIDATE_STAGE_CLASSIFIED,
+    EventType.OPPORTUNITY_SCORED,
+    EventType.STRATEGY_MODE_SELECTED,
+    EventType.CLUSTER_CONTEXT_ATTACHED,
+    EventType.LABEL_QUEUE_ENQUEUED,
 )
 
 
@@ -90,6 +115,14 @@ class LearningReadyContext(BaseModel):
     virtual_trade_plan: VirtualTradePlan | None = None
     config_versions: ConfigVersions | None = None
     risk_decision: RiskRejectedLearningPayload | None = None
+    # Phase 11C.1C-A - optional adaptive candidate / regime / strategy
+    # context. Stored as :class:`Any` to avoid a hard import cycle
+    # (the :class:`AdaptiveCandidateContext` model lives in
+    # :mod:`app.adaptive`, which already depends on Phase 8.5
+    # value objects). When present, the bundle's
+    # ``to_event_payload`` calls ``adaptive_candidate.to_payload()``
+    # so the JSON shape is byte-stable.
+    adaptive_candidate: Any | None = None
     source_phase: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
@@ -106,6 +139,12 @@ class LearningReadyContext(BaseModel):
             out["config_versions"] = self.config_versions.to_payload()
         if self.risk_decision is not None:
             out["risk_decision"] = self.risk_decision.to_payload()
+        if self.adaptive_candidate is not None:
+            # ``adaptive_candidate`` is an
+            # :class:`app.adaptive.AdaptiveCandidateContext` value
+            # object. Its :meth:`to_payload` is the canonical
+            # JSON-safe rendering.
+            out["adaptive_candidate"] = self.adaptive_candidate.to_payload()
         if self.source_phase is not None:
             out["source_phase"] = str(self.source_phase)
         if self.extra:

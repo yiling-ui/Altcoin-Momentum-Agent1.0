@@ -66,10 +66,11 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     # the Phase 10D scaffolding (paper trade + reconciliation +
     # reflection + LLM + Telegram outbound self-checks). Phase 11C
     # ships a dedicated runner under ``scripts/run_public_market_paper``.
-    # Phase 11C.1B bumped the banner to "WebSocket-First All-Market
-    # Demon Coin Radar".
+    # Phase 11C.1C-A bumped the banner to "Adaptive Candidate Regime &
+    # Strategy Selector Contracts" (paper-mode only - no real-trade
+    # authority on the adaptive path).
     assert "Phase 11C" in captured
-    assert "WebSocket-First All-Market Demon Coin Radar" in captured
+    assert "Adaptive Candidate Regime" in captured
     assert "v1.4.0a11c" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured

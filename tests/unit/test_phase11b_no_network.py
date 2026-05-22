@@ -391,6 +391,20 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "PUBLIC_WS_CONNECTED",
         "PUBLIC_WS_DISCONNECTED",
         "PUBLIC_WS_STALE",
+        # Phase 11C.1C-A - adaptive candidate regime / strategy
+        # selector read-only references in the daily report
+        # aggregator. The aggregator counts these event types as a
+        # cross-check against the WSRadarChainDriver's runner-side
+        # ``adaptive_metrics_payload``; emission lives in
+        # app/market_data_public/ws_radar_chain.py which is NOT a
+        # paper_run file. None of these events authorise a real
+        # trade; the strategy_mode field is paper / virtual only.
+        "MARKET_REGIME_ASSESSED",
+        "CANDIDATE_STAGE_CLASSIFIED",
+        "OPPORTUNITY_SCORED",
+        "STRATEGY_MODE_SELECTED",
+        "CLUSTER_CONTEXT_ATTACHED",
+        "LABEL_QUEUE_ENQUEUED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (
