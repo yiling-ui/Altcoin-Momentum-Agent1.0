@@ -44,9 +44,11 @@ from app.adaptive.models import (
     LabelQueueContract,
     MarketRegimeAssessment,
     OpportunityScore,
+    RuntimeCalibrationMetrics,
     StrategyModeDecision,
 )
 from app.adaptive.regime import assess_market_regime
+from app.adaptive.runtime import compute_runtime_calibration
 from app.adaptive.scoring import (
     OpportunityScoreInputs,
     OpportunityScoreWeights,
@@ -106,6 +108,14 @@ def build_adaptive_candidate_context(
     # Label-queue inputs.
     tracking_windows: tuple[str, ...] | None = None,
     label_queue_notes: tuple[str, ...] = (),
+    # Phase 11C.1C-B - runtime calibration inputs.
+    price_history: list[tuple[int, float]] | tuple[tuple[int, float], ...] | None = None,
+    quote_volume_history: (
+        list[tuple[int, float]] | tuple[tuple[int, float], ...] | None
+    ) = None,
+    volume_rank: int = 0,
+    volume_rank_5m_ago: int | None = None,
+    runtime_calibration: RuntimeCalibrationMetrics | None = None,
     # Versioning + provenance.
     strategy_version: str | None = None,
     scoring_version: str | None = None,
@@ -120,6 +130,12 @@ def build_adaptive_candidate_context(
     ``scan_batch_id`` / ``symbol`` / ``timestamp_ms``) are optional;
     each cheap classifier returns a conservative default when its
     inputs are missing.
+
+    Phase 11C.1C-B: ``runtime_calibration`` may be supplied
+    explicitly, in which case it is attached verbatim. Otherwise the
+    function builds a :class:`RuntimeCalibrationMetrics` from the
+    supplied price / quote-volume history and the candidate-stage
+    bucket.
     """
     market_regime: MarketRegimeAssessment = assess_market_regime(
         avg_price_acceleration_60s=avg_price_acceleration_60s,
@@ -190,6 +206,25 @@ def build_adaptive_candidate_context(
         notes=label_queue_notes,
     )
 
+    # Phase 11C.1C-B - runtime calibration metrics. Built from the
+    # supplied price / quote-volume history (oldest -> newest) when
+    # the caller did not pass an explicit value; the function never
+    # raises on missing inputs.
+    if runtime_calibration is None:
+        runtime_calibration = compute_runtime_calibration(
+            first_seen_ts_ms=int(first_seen_ts_ms),
+            first_seen_price=float(first_seen_price or 0.0),
+            current_ts_ms=int(timestamp_ms),
+            current_price=float(current_price or 0.0),
+            price_24h_high=price_24h_high,
+            price_history=tuple(price_history or ()),
+            quote_volume_history=tuple(quote_volume_history or ()),
+            volume_rank=int(volume_rank or 0),
+            volume_rank_5m_ago=volume_rank_5m_ago,
+            candidate_stage=str(candidate_stage.stage),
+            blowoff_risk=float(candidate_stage.blowoff_risk),
+        )
+
     return AdaptiveCandidateContext(
         opportunity_id=str(opportunity_id),
         scan_batch_id=str(scan_batch_id),
@@ -201,6 +236,7 @@ def build_adaptive_candidate_context(
         strategy_mode=strategy_mode,
         cluster=cluster,
         label_queue=label_queue,
+        runtime_calibration=runtime_calibration,
         strategy_version=str(
             strategy_version or AdaptiveStrategyVersion
         ),

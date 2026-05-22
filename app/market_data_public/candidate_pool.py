@@ -25,6 +25,31 @@ Phase 11C.1B contract:
   - upgrade / downgrade / expire transitions are recorded as state
     changes on the pool but DO NOT bypass the Risk Engine.
 
+Phase 11C.1C-B extension (Adaptive Candidate Runtime Calibration &
+Early Tail Discovery v0):
+
+  - every :class:`Candidate` now preserves its
+    ``first_seen_price`` + ``quote_volume_first_seen`` +
+    ``volume_rank_first_seen`` from admission. They never get
+    overwritten on subsequent ``offer()`` calls so the runtime
+    calibration block can compute ``price_change_since_first_seen``
+    / ``volume_rank_jump_5m`` against a stable baseline.
+  - candidates carry rolling per-symbol price + quote-volume
+    history (oldest -> newest, capped) so the runtime layer can
+    compute 1m / 5m accelerations without re-querying the radar
+    buffer.
+  - candidates carry an ``early_tail_score`` and a
+    ``late_chase_risk_score`` (both 0..100) that the WS-radar chain
+    driver writes back via :meth:`CandidatePool.update_runtime_metrics`
+    after each chain pass.
+  - the pool's capacity-eviction logic (in
+    :meth:`_enforce_capacity`) refuses to evict a candidate whose
+    ``early_tail_score`` is at or above
+    ``CandidatePoolConfig.early_tail_protect_threshold`` unless the
+    pool is *full of* such candidates, in which case the lowest
+    early-tail score among them is evicted last. This is the
+    "do not lose the demon coin to capacity pressure" invariant.
+
 The pool is single-threaded by construction.
 """
 
@@ -35,6 +60,7 @@ from typing import Any, Iterable
 
 from loguru import logger
 
+from app.adaptive.runtime import DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD
 from app.core.clock import now_ms
 from app.learning.identity import OpportunityIdentity
 from app.market_data_public.radar import (
@@ -68,6 +94,19 @@ class CandidatePoolConfig:
     volume_rank_jump_threshold: int = 3
     price_acceleration_threshold: float = 0.005
     liquidation_promotes: bool = True
+    # Phase 11C.1C-B - early-tail-discovery knobs.
+    #
+    # ``early_tail_protect_threshold`` is the early-tail-score at or
+    # above which a candidate is *protected* from capacity eviction.
+    # The default mirrors :data:`DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD`.
+    #
+    # ``per_symbol_history_max_samples`` caps the per-candidate
+    # price + quote-volume rolling history used for 1m / 5m
+    # acceleration computations. Holds ~5 minutes at 5 s cadence
+    # plus headroom; bounded so long-running deployments do not
+    # grow the pool unbounded.
+    early_tail_protect_threshold: float = DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD
+    per_symbol_history_max_samples: int = 200
 
     def __post_init__(self) -> None:
         if self.candidate_pool_size <= 0:
@@ -91,6 +130,16 @@ class CandidatePoolConfig:
             raise ValueError(
                 "CandidatePoolConfig.radar_score_threshold must be >= 0"
             )
+        if not (0.0 <= float(self.early_tail_protect_threshold) <= 100.0):
+            raise ValueError(
+                "CandidatePoolConfig.early_tail_protect_threshold must "
+                "be in [0.0, 100.0]"
+            )
+        if int(self.per_symbol_history_max_samples) <= 0:
+            raise ValueError(
+                "CandidatePoolConfig.per_symbol_history_max_samples "
+                "must be > 0"
+            )
 
 
 # Internal candidate state machine. ``ACTIVE`` candidates are picked
@@ -110,6 +159,31 @@ class Candidate:
     Carries the full Phase 8.5 identity (``opportunity_id`` /
     ``scan_batch_id``) so the audit trail can match this candidate
     against later RISK_REJECTED / STATE_TRANSITION events.
+
+    Phase 11C.1C-B additions:
+
+      - ``first_seen_price`` / ``quote_volume_first_seen`` /
+        ``volume_rank_first_seen`` are recorded ONCE at admission
+        and never overwritten on subsequent ``offer()`` updates.
+        They are the stable baseline the runtime calibration block
+        diffs the current snapshot against.
+      - ``price_history`` / ``quote_volume_history`` /
+        ``volume_rank_history`` are rolling per-symbol histories
+        (oldest -> newest, capped at
+        ``CandidatePoolConfig.per_symbol_history_max_samples``)
+        used for 1m / 5m accelerations and the 5-min volume-rank
+        jump.
+      - ``early_tail_score`` / ``late_chase_risk_score`` /
+        ``freshness_score`` are paper / virtual signals updated by
+        :meth:`CandidatePool.update_runtime_metrics` after the
+        WS-radar chain has built the runtime calibration block.
+        They are read by :meth:`_enforce_capacity` so a candidate
+        with high ``early_tail_score`` is protected from eviction.
+      - ``promoted_before_24h_top_move`` is True iff the candidate
+        was admitted before its 24h top printed (i.e. the radar
+        caught the move early). This mirrors the brief's
+        ``symbols_promoted_before_24h_top_move`` daily-report
+        metric.
     """
 
     symbol: str
@@ -124,6 +198,26 @@ class Candidate:
     upgrade_count: int = 0
     downgrade_count: int = 0
     extra: dict[str, object] = field(default_factory=dict)
+    # Phase 11C.1C-B: stable baselines (set once at admission).
+    first_seen_price: float = 0.0
+    quote_volume_first_seen: float = 0.0
+    volume_rank_first_seen: int = 0
+    # Phase 11C.1C-B: rolling per-candidate histories (oldest ->
+    # newest). Stored as tuples of (ts_ms, value); the pool trims
+    # them on every offer.
+    price_history: list[tuple[int, float]] = field(default_factory=list)
+    quote_volume_history: list[tuple[int, float]] = field(default_factory=list)
+    volume_rank_history: list[tuple[int, int]] = field(default_factory=list)
+    # Phase 11C.1C-B: runtime-layer scores written back by the
+    # WS-radar chain driver after each pass. 0.0 until the chain
+    # has run at least once for this candidate.
+    early_tail_score: float = 0.0
+    late_chase_risk_score: float = 0.0
+    freshness_score: float = 1.0
+    # Phase 11C.1C-B: True when admission preceded the 24h top
+    # print (positive evidence that the radar caught the move
+    # early). Updated by the WS-radar chain.
+    promoted_before_24h_top_move: bool = False
 
     @property
     def opportunity_id(self) -> str:
@@ -148,6 +242,16 @@ class Candidate:
             "upgrade_count": int(self.upgrade_count),
             "downgrade_count": int(self.downgrade_count),
             "snapshot": self.snapshot.to_payload(),
+            # Phase 11C.1C-B runtime calibration baselines + scores.
+            "first_seen_price": float(self.first_seen_price),
+            "quote_volume_first_seen": float(self.quote_volume_first_seen),
+            "volume_rank_first_seen": int(self.volume_rank_first_seen),
+            "early_tail_score": float(self.early_tail_score),
+            "late_chase_risk_score": float(self.late_chase_risk_score),
+            "freshness_score": float(self.freshness_score),
+            "promoted_before_24h_top_move": bool(
+                self.promoted_before_24h_top_move
+            ),
         }
 
 
@@ -354,6 +458,18 @@ class CandidatePool:
         # is well-formed.
         scan_batch_id = self._scan_batch_id or self.begin_scan_batch()
         ts = int(self._clock_fn())
+        # Phase 11C.1C-B - capture the snapshot's pricing / volume /
+        # rank baselines once at admission. These never get
+        # overwritten on subsequent ``offer()`` updates.
+        snap_last_price = float(snapshot.last_price or 0.0)
+        if snap_last_price <= 0.0 and snapshot.mark_price is not None:
+            snap_last_price = float(snapshot.mark_price)
+        snap_quote_volume = float(snapshot.quote_volume or 0.0)
+        snap_volume_rank = (
+            int(snapshot.volume_rank)
+            if snapshot.volume_rank is not None
+            else 0
+        )
         if existing is None:
             identity = OpportunityIdentity.create(
                 symbol=symbol,
@@ -376,7 +492,12 @@ class CandidatePool:
                 identity=identity,
                 first_seen_ms=ts,
                 last_seen_ms=ts,
+                # Phase 11C.1C-B: stable admission baselines.
+                first_seen_price=snap_last_price,
+                quote_volume_first_seen=snap_quote_volume,
+                volume_rank_first_seen=snap_volume_rank,
             )
+            self._append_history(candidate, snapshot=snapshot, ts=ts)
             self._candidates[symbol] = candidate
             self._candidates_admitted += 1
             if new_state == CANDIDATE_STATE_ACTIVE:
@@ -393,6 +514,16 @@ class CandidatePool:
         existing.reason_tags = tuple(score.reason_tags)
         existing.source_streams = tuple(score.source_streams)
         existing.last_seen_ms = ts
+        # Phase 11C.1C-B: never overwrite the stable admission
+        # baselines; only top them up if they were missing on
+        # admission (e.g. dry-run fixtures with last_price=0).
+        if existing.first_seen_price <= 0.0 and snap_last_price > 0.0:
+            existing.first_seen_price = snap_last_price
+        if existing.quote_volume_first_seen <= 0.0 and snap_quote_volume > 0.0:
+            existing.quote_volume_first_seen = snap_quote_volume
+        if existing.volume_rank_first_seen <= 0 and snap_volume_rank > 0:
+            existing.volume_rank_first_seen = snap_volume_rank
+        self._append_history(existing, snapshot=snapshot, ts=ts)
         if score.radar_score >= self._config.radar_score_threshold:
             new_state = CANDIDATE_STATE_ACTIVE
         else:
@@ -445,21 +576,155 @@ class CandidatePool:
         excess = len(self._candidates) - self._config.candidate_pool_size
         if excess <= 0:
             return
-        # Evict the lowest-score (and oldest) candidates first.
-        ordered = sorted(
-            self._candidates.values(),
-            key=lambda c: (c.radar_score, c.last_seen_ms),
-        )
+        # Phase 11C.1C-B Early Tail Discovery v0:
+        #
+        # Eviction order is now a tiered sort:
+        #
+        #   1. UNPROTECTED candidates (early_tail_score below
+        #      ``early_tail_protect_threshold``) get evicted first,
+        #      ranked by lowest radar_score / oldest last_seen.
+        #   2. PROTECTED candidates (early_tail_score >=
+        #      ``early_tail_protect_threshold``) get evicted only if
+        #      every unprotected candidate has already been removed,
+        #      and even then the lowest early-tail-score / lowest
+        #      radar_score / oldest last_seen go first.
+        #
+        # The brief calls this out: "不因为候选池 capacity evict 而
+        # 丢失高 early_tail_score 候选". A demon-coin candidate with a
+        # high early-tail score must NOT be silently dropped to make
+        # room for a slow USDT major.
+        threshold = float(self._config.early_tail_protect_threshold)
+
+        def evict_key(c: Candidate) -> tuple[int, float, float, int]:
+            protected = 1 if float(c.early_tail_score) >= threshold else 0
+            return (
+                protected,
+                float(c.early_tail_score),
+                float(c.radar_score),
+                int(c.last_seen_ms),
+            )
+
+        ordered = sorted(self._candidates.values(), key=evict_key)
         to_evict = ordered[:excess]
         for cand in to_evict:
             self._candidates.pop(cand.symbol, None)
             self._candidates_evicted += 1
             logger.debug(
-                "[phase11c.1b] candidate evicted (capacity) symbol={} "
-                "score={:.2f}",
+                "[phase11c.1c-b] candidate evicted (capacity) symbol={} "
+                "score={:.2f} early_tail={:.2f}",
                 cand.symbol,
                 cand.radar_score,
+                float(cand.early_tail_score),
             )
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-B - per-candidate rolling history + runtime metrics
+    # ------------------------------------------------------------------
+    def _append_history(
+        self,
+        candidate: Candidate,
+        *,
+        snapshot: AllMarketRadarSnapshot,
+        ts: int,
+    ) -> None:
+        """Append the latest snapshot to the candidate's rolling state.
+
+        ``price_history`` and ``quote_volume_history`` are
+        ``(ts_ms, value)`` tuples ordered oldest -> newest;
+        ``volume_rank_history`` is ``(ts_ms, rank_int)``. Each list is
+        capped at
+        :attr:`CandidatePoolConfig.per_symbol_history_max_samples`.
+        Stale samples (older than 10 minutes) are also dropped so the
+        accelerator helpers stay close to the documented windows.
+        """
+        max_samples = int(self._config.per_symbol_history_max_samples)
+        history_window_ms = 10 * 60_000  # 10 minutes
+        cutoff = int(ts) - history_window_ms
+
+        last_price = float(snapshot.last_price or 0.0)
+        if last_price <= 0.0 and snapshot.mark_price is not None:
+            last_price = float(snapshot.mark_price)
+        if last_price > 0.0:
+            candidate.price_history.append((int(ts), float(last_price)))
+        qv = snapshot.quote_volume
+        if qv is not None and float(qv) > 0:
+            candidate.quote_volume_history.append((int(ts), float(qv)))
+        rk = snapshot.volume_rank
+        if rk is not None and int(rk) > 0:
+            candidate.volume_rank_history.append((int(ts), int(rk)))
+
+        # Trim by age then by length.
+        candidate.price_history = [
+            row for row in candidate.price_history if row[0] >= cutoff
+        ][-max_samples:]
+        candidate.quote_volume_history = [
+            row for row in candidate.quote_volume_history if row[0] >= cutoff
+        ][-max_samples:]
+        candidate.volume_rank_history = [
+            row for row in candidate.volume_rank_history if row[0] >= cutoff
+        ][-max_samples:]
+
+    def volume_rank_5m_ago(self, candidate: Candidate, *, now_ms_value: int) -> int | None:
+        """Return the candidate's volume rank ~5 min before ``now_ms_value``.
+
+        Returns the most recent rank at-or-before ``now_ms_value - 5min``
+        if any, else the oldest sample's rank if it is at least 2.5
+        min old (so a short-burst run still produces a usable
+        baseline), else ``None``.
+        """
+        history = candidate.volume_rank_history
+        if not history:
+            return None
+        target_ts = int(now_ms_value) - 5 * 60_000
+        baseline: int | None = None
+        for sample_ts, rank in history:
+            if int(sample_ts) <= target_ts:
+                baseline = int(rank)
+            else:
+                break
+        if baseline is None:
+            oldest_ts, oldest_rank = history[0]
+            if int(now_ms_value) - int(oldest_ts) >= 2 * 60_000 + 30_000:
+                baseline = int(oldest_rank)
+        return baseline
+
+    def update_runtime_metrics(
+        self,
+        symbol: str,
+        *,
+        early_tail_score: float | None = None,
+        late_chase_risk_score: float | None = None,
+        freshness_score: float | None = None,
+        promoted_before_24h_top_move: bool | None = None,
+    ) -> Candidate | None:
+        """Write back runtime calibration scores onto the candidate.
+
+        Called by :class:`WSRadarChainDriver` after each chain pass
+        so the next ``offer()`` can consult the up-to-date
+        ``early_tail_score`` for capacity protection.
+
+        Returns the updated candidate if found, else ``None``.
+        """
+        cand = self._candidates.get(str(symbol or "").strip())
+        if cand is None:
+            return None
+        if early_tail_score is not None:
+            cand.early_tail_score = max(
+                0.0, min(100.0, float(early_tail_score))
+            )
+        if late_chase_risk_score is not None:
+            cand.late_chase_risk_score = max(
+                0.0, min(100.0, float(late_chase_risk_score))
+            )
+        if freshness_score is not None:
+            cand.freshness_score = max(
+                0.0, min(1.0, float(freshness_score))
+            )
+        if promoted_before_24h_top_move is not None:
+            cand.promoted_before_24h_top_move = bool(
+                promoted_before_24h_top_move
+            )
+        return cand
 
     # ------------------------------------------------------------------
     # Expiry
@@ -538,8 +803,39 @@ class CandidatePool:
         """Return the JSON-safe metrics block.
 
         Field names match the Phase 11C.1B daily-report spec verbatim.
+
+        Phase 11C.1C-B additions:
+
+          - ``candidate_pool_top_early_tail`` - top candidates by
+            ``early_tail_score`` (desc, capped at 10).
+          - ``candidate_pool_top_late_chase_risk`` - top candidates by
+            ``late_chase_risk_score`` (desc, capped at 10).
+          - ``candidate_pool_promoted_before_24h_top_move`` - count
+            of admitted candidates whose admission preceded the 24h
+            top move marker (set by the WS-radar chain driver).
+          - ``early_tail_protect_threshold`` - the early-tail
+            protection threshold in effect.
         """
         active_top = self.active_head(self._config.active_detail_limit)
+        all_cands = self.all_candidates()
+        # Phase 11C.1C-B - early-tail / late-chase aggregates.
+        top_early_tail = sorted(
+            all_cands,
+            key=lambda c: (
+                -float(c.early_tail_score),
+                -int(c.last_seen_ms),
+            ),
+        )[:10]
+        top_late_chase = sorted(
+            all_cands,
+            key=lambda c: (
+                -float(c.late_chase_risk_score),
+                -int(c.last_seen_ms),
+            ),
+        )[:10]
+        promoted_before_top = sum(
+            1 for c in all_cands if c.promoted_before_24h_top_move
+        )
         return {
             "radar_candidates_seen": int(self._candidates_seen),
             "candidate_pool_size": int(self.size),
@@ -557,8 +853,10 @@ class CandidatePool:
                     "symbol": c.symbol,
                     "radar_score": float(c.radar_score),
                     "state": c.state,
+                    "early_tail_score": float(c.early_tail_score),
+                    "late_chase_risk_score": float(c.late_chase_risk_score),
                 }
-                for c in self.all_candidates()[: self._config.candidate_pool_size]
+                for c in all_cands[: self._config.candidate_pool_size]
             ],
             "candidate_pool_size_limit": int(
                 self._config.candidate_pool_size
@@ -567,6 +865,33 @@ class CandidatePool:
             "candidate_ttl_seconds": int(self._config.candidate_ttl_seconds),
             "radar_score_threshold": float(
                 self._config.radar_score_threshold
+            ),
+            # Phase 11C.1C-B - early-tail / late-chase aggregates.
+            "candidate_pool_top_early_tail": [
+                {
+                    "symbol": c.symbol,
+                    "early_tail_score": float(c.early_tail_score),
+                    "radar_score": float(c.radar_score),
+                    "state": c.state,
+                }
+                for c in top_early_tail
+                if float(c.early_tail_score) > 0.0
+            ],
+            "candidate_pool_top_late_chase_risk": [
+                {
+                    "symbol": c.symbol,
+                    "late_chase_risk_score": float(c.late_chase_risk_score),
+                    "radar_score": float(c.radar_score),
+                    "state": c.state,
+                }
+                for c in top_late_chase
+                if float(c.late_chase_risk_score) > 0.0
+            ],
+            "candidate_pool_promoted_before_24h_top_move": int(
+                promoted_before_top
+            ),
+            "early_tail_protect_threshold": float(
+                self._config.early_tail_protect_threshold
             ),
             # Phase 11C.1B SymbolUniverse gate metrics. ``rejected_by_universe``
             # is non-zero only when the runner bootstrapped a real

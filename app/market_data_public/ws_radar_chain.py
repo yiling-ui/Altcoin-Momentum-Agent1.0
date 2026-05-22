@@ -61,6 +61,7 @@ from app.adaptive import (
     AdaptiveCandidateContext,
     OpportunityScoreInputs,
     build_adaptive_candidate_context,
+    compute_runtime_calibration,
 )
 from app.core.clock import now_ms
 from app.core.enums import (
@@ -125,6 +126,11 @@ class WSRadarChainDriver:
     # Distinct from :attr:`SOURCE_PHASE` so Reflection can split the
     # adaptive vs. non-adaptive parts of the chain.
     ADAPTIVE_SOURCE_PHASE = "phase_11c_1c_a_adaptive_candidate"
+    # Phase 11C.1C-B - source-phase tag for the runtime calibration
+    # sub-block. Distinct from :attr:`ADAPTIVE_SOURCE_PHASE` so
+    # Reflection can group runtime calibration / early-tail-discovery
+    # decisions independently of the underlying adaptive contract.
+    RUNTIME_CALIBRATION_SOURCE_PHASE = "phase_11c_1c_b_runtime_calibration"
 
     def __init__(
         self,
@@ -132,10 +138,18 @@ class WSRadarChainDriver:
         risk_engine: RiskEngine,
         event_repo: EventRepository,
         config_versions: ConfigVersions | None = None,
+        candidate_pool=None,
     ) -> None:
         self._risk = risk_engine
         self._event_repo = event_repo
         self._config_versions = config_versions or ConfigVersions.defaults()
+        # Phase 11C.1C-B - optional candidate pool handle so the
+        # driver can write the runtime metrics
+        # (early_tail_score / late_chase_risk_score / freshness)
+        # back onto the candidate after each pass. Falling back to
+        # ``None`` keeps the existing 11C.1C-A unit tests working
+        # without a pool.
+        self._candidate_pool = candidate_pool
         self._chain_count = 0
         self._risk_approved_count = 0
         self._risk_rejected_count = 0
@@ -164,6 +178,19 @@ class WSRadarChainDriver:
         self._pullback_count = 0
         self._late_chase_rejected_count = 0
         self._blowoff_observed_count = 0
+        # Phase 11C.1C-B runtime-calibration counters + per-symbol
+        # rolling top lists. Capped at 50 entries each so a long
+        # run does not grow the in-process state unbounded.
+        self._top_early_tail_scores: list[
+            tuple[str, str, float, float]
+        ] = []  # (symbol, opp_id, early_tail_score, freshness)
+        self._top_late_chase_risk_scores: list[
+            tuple[str, str, float, str]
+        ] = []  # (symbol, opp_id, late_chase_risk_score, stage)
+        self._opportunity_score_distribution: dict[str, int] = {}
+        self._symbols_promoted_before_24h_top_move: list[
+            tuple[str, str, int]
+        ] = []  # (symbol, opp_id, ts_ms)
 
     # ------------------------------------------------------------------
     @property
@@ -212,12 +239,43 @@ class WSRadarChainDriver:
 
         Used by the runner / daily-report builder to surface the
         adaptive counters without re-querying events.db.
+
+        Phase 11C.1C-B additions:
+
+          - ``top_early_tail_candidates`` - top symbols by
+            ``early_tail_score`` (desc, capped at 10).
+          - ``top_late_chase_risk_candidates`` - top symbols by
+            ``late_chase_risk`` (desc, capped at 10).
+          - ``early_tail_score_top_symbols`` - alias kept for the
+            brief-mandated daily-report field name.
+          - ``opportunity_score_distribution`` - bucketed
+            distribution of opportunity scores (10-point bins).
+          - ``symbols_promoted_before_24h_top_move`` - candidates
+            whose admission preceded the 24h top print.
+          - ``eden_alt_near_examples`` - canonical EDEN / ALT /
+            NEAR-style demon-coin examples observed in the run
+            (so the brief's "EDEN/ALT/NEAR style candidate examples
+            if present" surfaces in the daily report).
         """
         # Top opportunity scores ordered desc by score, capped at 10.
         top = sorted(
             self._top_opportunity_scores,
             key=lambda r: -r[2],
         )[:10]
+        # Phase 11C.1C-B - early-tail / late-chase aggregates.
+        top_early_tail = sorted(
+            (row for row in self._top_early_tail_scores if row[2] > 0.0),
+            key=lambda r: -r[2],
+        )[:10]
+        top_late_chase = sorted(
+            (
+                row
+                for row in self._top_late_chase_risk_scores
+                if row[2] > 0.0
+            ),
+            key=lambda r: -r[2],
+        )[:10]
+        eden_alt_near = self._eden_alt_near_examples()
         return {
             "market_regime_assessed_count": int(
                 self._market_regime_assessed_count
@@ -255,7 +313,88 @@ class WSRadarChainDriver:
                 for sym, opp_id, score, grade in top
             ],
             "label_queue_enqueued": int(self._label_queue_enqueued_count),
+            # Phase 11C.1C-B - runtime calibration aggregates.
+            "top_early_tail_candidates": [
+                {
+                    "symbol": sym,
+                    "opportunity_id": opp_id,
+                    "early_tail_score": float(score),
+                    "freshness_score": float(fresh),
+                }
+                for sym, opp_id, score, fresh in top_early_tail
+            ],
+            "top_late_chase_risk_candidates": [
+                {
+                    "symbol": sym,
+                    "opportunity_id": opp_id,
+                    "late_chase_risk": float(score),
+                    "candidate_stage": stage,
+                }
+                for sym, opp_id, score, stage in top_late_chase
+            ],
+            "early_tail_score_top_symbols": [
+                {"symbol": sym, "early_tail_score": float(score)}
+                for sym, _opp_id, score, _fresh in top_early_tail
+            ],
+            "opportunity_score_distribution": dict(
+                self._opportunity_score_distribution
+            ),
+            "symbols_promoted_before_24h_top_move": [
+                {
+                    "symbol": sym,
+                    "opportunity_id": opp_id,
+                    "timestamp_ms": int(ts),
+                }
+                for sym, opp_id, ts in self._symbols_promoted_before_24h_top_move
+            ],
+            "eden_alt_near_examples": eden_alt_near,
         }
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-B - EDEN / ALT / NEAR-style canonical examples
+    # ------------------------------------------------------------------
+    # Static-ish allowlist of canonical demon-coin symbol stems used
+    # to surface "EDEN / ALT / NEAR style candidate examples" in the
+    # daily report. The matcher is exact-prefix on the upper-cased
+    # symbol so non-ASCII contracts and unrelated symbols do not
+    # accidentally match.
+    _EDEN_ALT_NEAR_STEMS: tuple[str, ...] = (
+        "EDEN",
+        "ALT",
+        "NEAR",
+    )
+
+    def _eden_alt_near_examples(self) -> list[dict[str, Any]]:
+        """Return up to five EDEN / ALT / NEAR-style examples observed.
+
+        The list is built from the in-process top-early-tail tracker
+        so a candidate that was admitted but never received a
+        meaningful early-tail score is excluded.
+        """
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for sym, opp_id, score, fresh in sorted(
+            self._top_early_tail_scores, key=lambda r: -r[2]
+        ):
+            symbol_upper = str(sym).upper()
+            for stem in self._EDEN_ALT_NEAR_STEMS:
+                if (
+                    symbol_upper.startswith(stem)
+                    and symbol_upper not in seen
+                ):
+                    seen.add(symbol_upper)
+                    out.append(
+                        {
+                            "symbol": sym,
+                            "opportunity_id": opp_id,
+                            "early_tail_score": float(score),
+                            "freshness_score": float(fresh),
+                        }
+                    )
+                    break
+            if len(out) >= 5:
+                break
+        return out
 
     # ------------------------------------------------------------------
     def drive(self, candidate: Candidate) -> WSRadarChainResult:
@@ -421,6 +560,16 @@ class WSRadarChainDriver:
         if learning_attached:
             self._learning_ready_attached_count += 1
 
+        # 5. Phase 11C.1C-B - write the runtime calibration scores
+        #    back onto the candidate so the next CandidatePool
+        #    capacity-eviction pass can consult an up-to-date
+        #    ``early_tail_score``. Also accumulate the top
+        #    early-tail / late-chase aggregates the daily report
+        #    consumes.
+        self._write_runtime_metrics_to_candidate(
+            candidate=candidate, adaptive=adaptive
+        )
+
         return WSRadarChainResult(
             symbol=symbol,
             timestamp=timestamp,
@@ -432,6 +581,108 @@ class WSRadarChainDriver:
             learning_ready_attached=learning_attached,
             notes=tuple(notes),
             adaptive_context=adaptive,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-B - runtime metric write-back + aggregates
+    # ------------------------------------------------------------------
+    def _write_runtime_metrics_to_candidate(
+        self,
+        *,
+        candidate: Candidate,
+        adaptive: AdaptiveCandidateContext,
+    ) -> None:
+        """Push the runtime calibration scores back onto the
+        candidate + accumulate top-N aggregates for the daily report.
+
+        Pure I/O on in-process state; no external calls.
+        """
+        runtime = adaptive.runtime_calibration
+        if runtime is None:
+            return
+        # Update mutable candidate fields directly (the candidate
+        # dataclass is mutable).
+        candidate.early_tail_score = float(runtime.early_tail_score)
+        candidate.late_chase_risk_score = float(runtime.late_chase_risk)
+        candidate.freshness_score = float(runtime.freshness_score)
+        # ``promoted_before_24h_top_move``: we mark the candidate as
+        # caught-before-top when its admission timestamp is at least
+        # 5 minutes BEFORE the latest snapshot AND the snapshot's
+        # 24h price-change percentage is positive (the high happened
+        # after admission). The check is conservative; a candidate
+        # only flips True once and never flips back.
+        if not candidate.promoted_before_24h_top_move:
+            elapsed_ms = int(adaptive.timestamp_ms) - int(
+                candidate.first_seen_ms
+            )
+            change_pct_24h = (
+                float(candidate.snapshot.price_change_pct_24h)
+                if candidate.snapshot.price_change_pct_24h is not None
+                else 0.0
+            )
+            if elapsed_ms >= 5 * 60 * 1000 and change_pct_24h > 0.0:
+                candidate.promoted_before_24h_top_move = True
+                self._symbols_promoted_before_24h_top_move.append(
+                    (
+                        candidate.symbol,
+                        candidate.identity.opportunity_id,
+                        int(adaptive.timestamp_ms),
+                    )
+                )
+        # Mirror onto the optional candidate pool so an early-tail
+        # candidate is protected from capacity eviction.
+        if self._candidate_pool is not None:
+            try:
+                self._candidate_pool.update_runtime_metrics(
+                    candidate.symbol,
+                    early_tail_score=float(runtime.early_tail_score),
+                    late_chase_risk_score=float(runtime.late_chase_risk),
+                    freshness_score=float(runtime.freshness_score),
+                    promoted_before_24h_top_move=bool(
+                        candidate.promoted_before_24h_top_move
+                    ),
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "[phase11c.1c-b] update_runtime_metrics failed "
+                    "symbol={} exc={}",
+                    candidate.symbol,
+                    exc,
+                )
+
+        # Accumulate aggregates.
+        self._top_early_tail_scores.append(
+            (
+                candidate.symbol,
+                candidate.identity.opportunity_id,
+                float(runtime.early_tail_score),
+                float(runtime.freshness_score),
+            )
+        )
+        if len(self._top_early_tail_scores) > 50:
+            self._top_early_tail_scores.sort(key=lambda r: -r[2])
+            self._top_early_tail_scores = self._top_early_tail_scores[:50]
+        self._top_late_chase_risk_scores.append(
+            (
+                candidate.symbol,
+                candidate.identity.opportunity_id,
+                float(runtime.late_chase_risk),
+                str(adaptive.candidate_stage.stage),
+            )
+        )
+        if len(self._top_late_chase_risk_scores) > 50:
+            self._top_late_chase_risk_scores.sort(key=lambda r: -r[2])
+            self._top_late_chase_risk_scores = (
+                self._top_late_chase_risk_scores[:50]
+            )
+
+        # Phase 11C.1C-B - opportunity-score distribution buckets.
+        # Buckets are 10-point wide: 0..10, 10..20, ..., 90..100.
+        score_value = float(adaptive.opportunity_score.score)
+        bucket_lo = int(min(90, max(0, int(score_value // 10) * 10)))
+        bucket = f"{bucket_lo}-{bucket_lo + 10}"
+        self._opportunity_score_distribution[bucket] = (
+            self._opportunity_score_distribution.get(bucket, 0) + 1
         )
 
     # ------------------------------------------------------------------
@@ -583,26 +834,33 @@ class WSRadarChainDriver:
     ) -> AdaptiveCandidateContext:
         """Build the Phase 11C.1C-A adaptive context for one candidate.
 
+        Phase 11C.1C-B refinement: the function now reads the
+        candidate's stable ``first_seen_price`` baseline (recorded
+        once at admission) and threads the candidate's rolling
+        ``price_history`` / ``quote_volume_history`` /
+        ``volume_rank_history`` through ``compute_runtime_calibration``
+        so the runtime-calibration block on the
+        :class:`AdaptiveCandidateContext` carries real 1m / 5m
+        accelerations + a meaningful 5-min volume-rank jump.
+
         The function reads ONLY information already on the candidate /
-        snapshot (no REST call, no LLM, no Telegram outbound). The
-        ``avg_price_acceleration_60s`` / ``positive_acceleration_ratio``
-        / ``liquidation_event_rate`` aggregate inputs are derived from
-        the per-symbol snapshot - a future PR may upgrade these to
-        real cross-batch aggregates once the runner threads them
-        through.
+        snapshot (no REST call, no LLM, no Telegram outbound).
         """
         snap = candidate.snapshot
         symbol = candidate.symbol
         identity = candidate.identity
-        first_seen_price = (
-            float(snap.last_price)
-            if snap.last_price
-            else float(getattr(snap, "mark_price", 0.0) or 0.0)
-        )
-        # ``first_seen_ms`` is on the candidate; it was captured at
-        # admission. The radar snapshot's ``last_price`` is the
-        # current price; first_seen_price is approximated as the
-        # candidate's reference snapshot.
+        # Phase 11C.1C-B: prefer the stable admission baseline when
+        # we have one. Falls back to the latest snapshot's
+        # last_price / mark_price only if the baseline is missing
+        # (very unusual; happens on dry-run fixtures with
+        # last_price=0).
+        first_seen_price = float(candidate.first_seen_price or 0.0)
+        if first_seen_price <= 0.0:
+            first_seen_price = (
+                float(snap.last_price)
+                if snap.last_price
+                else float(getattr(snap, "mark_price", 0.0) or 0.0)
+            )
         first_seen_ts_ms = int(candidate.first_seen_ms or timestamp)
         current_price = float(snap.last_price or 0.0)
         if current_price <= 0.0:
@@ -635,25 +893,24 @@ class WSRadarChainDriver:
             avg_accel = float(accel_60)
             pos_ratio = 1.0 if accel_60 > 0.0 else 0.0
         liq_rate = 1.0 if bool(snap.liquidation_event) else 0.0
-        # Score inputs derived from the candidate state. These are
-        # conservative; richer inputs land in a future PR via
-        # explicit kwargs.
         radar_score = float(candidate.radar_score)
-        score_inputs = OpportunityScoreInputs(
-            momentum_strength=max(0.0, min(100.0, radar_score)),
-            volume_expansion=max(0.0, min(100.0, radar_score * 0.6)),
-            liquidity_quality=50.0,
-            regime_fit=0.0,  # filled in by the orchestrator
-            freshness=0.0,   # filled in by the orchestrator
-            manipulation_risk=0.0,
-            late_chase_risk=0.0,
+
+        # Phase 11C.1C-B: thread the candidate's rolling history
+        # into the runtime calibration block.
+        price_history = tuple(candidate.price_history)
+        qv_history = tuple(candidate.quote_volume_history)
+        volume_rank_now = (
+            int(snap.volume_rank) if snap.volume_rank is not None else 0
         )
-        # The orchestrator will recompute regime_fit / freshness /
-        # late_chase_risk / manipulation_risk from the cheap
-        # classifiers; passing ``None`` for ``score_inputs`` makes it
-        # use the derived defaults. We pass our radar-score-based
-        # inputs explicitly only when the caller wants them; for
-        # Phase 11C.1C-A, the derived defaults are the simpler path.
+        rank_5m_ago = None
+        if self._candidate_pool is not None:
+            try:
+                rank_5m_ago = self._candidate_pool.volume_rank_5m_ago(
+                    candidate, now_ms_value=int(timestamp)
+                )
+            except Exception:  # pragma: no cover - defensive
+                rank_5m_ago = None
+
         return build_adaptive_candidate_context(
             opportunity_id=identity.opportunity_id,
             scan_batch_id=identity.scan_batch_id,
@@ -672,6 +929,11 @@ class WSRadarChainDriver:
             radar_score=radar_score,
             cluster_reason=("ws_radar_chain",),
             label_queue_notes=(self.SOURCE_PHASE,),
+            # Phase 11C.1C-B - runtime calibration inputs.
+            price_history=price_history,
+            quote_volume_history=qv_history,
+            volume_rank=volume_rank_now,
+            volume_rank_5m_ago=rank_5m_ago,
         )
 
     @staticmethod

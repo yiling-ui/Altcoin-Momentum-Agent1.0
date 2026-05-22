@@ -1178,6 +1178,7 @@ def main(argv: list[str] | None = None) -> int:
         ws_chain = WSRadarChainDriver(
             risk_engine=risk,
             event_repo=event_repo,
+            candidate_pool=candidate_pool,
         )
 
     # 9. Set up signal handling for graceful shutdown.
