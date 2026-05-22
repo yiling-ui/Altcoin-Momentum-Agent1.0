@@ -148,6 +148,32 @@ class DailyReportSnapshot:
     strategy_mode_selected_count: int = 0
     cluster_context_attached_count: int = 0
     adaptive_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-B - Adaptive Candidate Runtime Calibration & Early
+    # Tail Discovery v0 metrics. The runner passes the
+    # ``adaptive_metrics`` (chain) + ``candidate_pool_metrics``
+    # (pool) blocks; the builder unifies the two so the daily
+    # report surfaces both the chain-side aggregates (top early
+    # tail scored on driven candidates) and the pool-side
+    # protection state (early-tail-protect threshold, count of
+    # candidates promoted before the 24h top print).
+    top_early_tail_candidates: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    top_late_chase_risk_candidates: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    early_tail_score_top_symbols: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    opportunity_score_distribution: dict[str, int] = field(
+        default_factory=dict
+    )
+    symbols_promoted_before_24h_top_move: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    eden_alt_near_examples: list[dict[str, Any]] = field(default_factory=list)
+    early_tail_protect_threshold: float = 0.0
+    candidate_pool_promoted_before_24h_top_move: int = 0
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -280,6 +306,29 @@ class DailyReportSnapshot:
                 self.cluster_context_attached_count
             ),
             "adaptive_metrics": dict(self.adaptive_metrics),
+            # Phase 11C.1C-B runtime calibration aggregates.
+            "top_early_tail_candidates": list(
+                self.top_early_tail_candidates
+            ),
+            "top_late_chase_risk_candidates": list(
+                self.top_late_chase_risk_candidates
+            ),
+            "early_tail_score_top_symbols": list(
+                self.early_tail_score_top_symbols
+            ),
+            "opportunity_score_distribution": dict(
+                self.opportunity_score_distribution
+            ),
+            "symbols_promoted_before_24h_top_move": list(
+                self.symbols_promoted_before_24h_top_move
+            ),
+            "eden_alt_near_examples": list(self.eden_alt_near_examples),
+            "early_tail_protect_threshold": float(
+                self.early_tail_protect_threshold
+            ),
+            "candidate_pool_promoted_before_24h_top_move": int(
+                self.candidate_pool_promoted_before_24h_top_move
+            ),
         }
 
 
@@ -853,6 +902,59 @@ class DailyReportBuilder:
                 )
             ),
             adaptive_metrics=dict(adaptive_metrics or {}),
+            # Phase 11C.1C-B runtime calibration aggregates. Values
+            # come from the chain's ``adaptive_metrics_payload`` first
+            # (per-driven-candidate accuracy); the candidate-pool
+            # metrics fill in pool-wide aggregates (protected count,
+            # threshold).
+            top_early_tail_candidates=list(
+                (adaptive_metrics or {}).get(
+                    "top_early_tail_candidates", []
+                )
+                or []
+            ),
+            top_late_chase_risk_candidates=list(
+                (adaptive_metrics or {}).get(
+                    "top_late_chase_risk_candidates", []
+                )
+                or []
+            ),
+            early_tail_score_top_symbols=list(
+                (adaptive_metrics or {}).get(
+                    "early_tail_score_top_symbols", []
+                )
+                or []
+            ),
+            opportunity_score_distribution=dict(
+                (adaptive_metrics or {}).get(
+                    "opportunity_score_distribution", {}
+                )
+                or {}
+            ),
+            symbols_promoted_before_24h_top_move=list(
+                (adaptive_metrics or {}).get(
+                    "symbols_promoted_before_24h_top_move", []
+                )
+                or []
+            ),
+            eden_alt_near_examples=list(
+                (adaptive_metrics or {}).get(
+                    "eden_alt_near_examples", []
+                )
+                or []
+            ),
+            early_tail_protect_threshold=float(
+                (candidate_pool_metrics or {}).get(
+                    "early_tail_protect_threshold", 0.0
+                )
+                or 0.0
+            ),
+            candidate_pool_promoted_before_24h_top_move=int(
+                (candidate_pool_metrics or {}).get(
+                    "candidate_pool_promoted_before_24h_top_move", 0
+                )
+                or 0
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -1015,6 +1117,75 @@ class DailyReportBuilder:
             f"**{snapshot.blowoff_observed_count}**\n"
         )
 
+        # Phase 11C.1C-B - Adaptive Candidate Runtime Calibration &
+        # Early Tail Discovery v0 Markdown block. Every value is read
+        # straight off the snapshot. The block is paper / virtual
+        # only; nothing here authorises a real trade.
+        if snapshot.top_early_tail_candidates:
+            top_early_tail_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"early_tail_score="
+                f"{float(row.get('early_tail_score', 0.0)):.2f} "
+                f"freshness="
+                f"{float(row.get('freshness_score', 0.0)):.2f} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.top_early_tail_candidates[:10]
+            )
+        else:
+            top_early_tail_lines = (
+                "- (no early-tail candidates in this window)"
+            )
+        if snapshot.top_late_chase_risk_candidates:
+            top_late_chase_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"late_chase_risk="
+                f"{float(row.get('late_chase_risk', 0.0)):.2f} "
+                f"stage={row.get('candidate_stage', '?')} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.top_late_chase_risk_candidates[:10]
+            )
+        else:
+            top_late_chase_lines = (
+                "- (no late-chase candidates in this window)"
+            )
+        if snapshot.opportunity_score_distribution:
+            distribution_lines = "\n".join(
+                f"- `{bucket}` x {count}"
+                for bucket, count in sorted(
+                    snapshot.opportunity_score_distribution.items()
+                )
+            )
+        else:
+            distribution_lines = (
+                "- (no opportunity scores in this window)"
+            )
+        if snapshot.eden_alt_near_examples:
+            eden_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"early_tail_score="
+                f"{float(row.get('early_tail_score', 0.0)):.2f} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.eden_alt_near_examples[:5]
+            )
+        else:
+            eden_lines = (
+                "- (no EDEN / ALT / NEAR-style demon-coin candidates "
+                "observed)"
+            )
+
+        runtime_calibration_block = (
+            f"- Top early-tail candidates: "
+            f"**{len(snapshot.top_early_tail_candidates)}**\n"
+            f"- Top late-chase-risk candidates: "
+            f"**{len(snapshot.top_late_chase_risk_candidates)}**\n"
+            f"- Symbols promoted before 24h top move (chain): "
+            f"**{len(snapshot.symbols_promoted_before_24h_top_move)}**\n"
+            f"- Symbols promoted before 24h top move (pool): "
+            f"**{snapshot.candidate_pool_promoted_before_24h_top_move}**\n"
+            f"- Early-tail protect threshold: "
+            f"**{snapshot.early_tail_protect_threshold:.2f}**\n"
+        )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -1078,6 +1249,22 @@ class DailyReportBuilder:
             f"### Strategy mode counts\n{strategy_mode_lines}\n\n"
             f"### Opportunity grade counts\n{opportunity_grade_lines}\n\n"
             f"### Top opportunity scores\n{top_score_lines}\n\n"
+            f"## Phase 11C.1C-B Adaptive Candidate Runtime "
+            f"Calibration & Early Tail Discovery v0\n"
+            f"_Runtime calibration sub-blocks are paper / virtual "
+            f"only. ``early_tail_score`` is a discovery signal that "
+            f"protects high-tail candidates from candidate-pool "
+            f"capacity eviction; it does NOT authorise opening a "
+            f"real position. Late / blowoff candidates remain "
+            f"observe-only regardless of any early-tail score._\n\n"
+            f"{runtime_calibration_block}\n"
+            f"### Top early-tail candidates\n{top_early_tail_lines}\n\n"
+            f"### Top late-chase-risk candidates\n"
+            f"{top_late_chase_lines}\n\n"
+            f"### Opportunity score distribution\n"
+            f"{distribution_lines}\n\n"
+            f"### EDEN / ALT / NEAR-style examples\n"
+            f"{eden_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

@@ -30,7 +30,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11B-HF | Cloud Paper - High-Frequency observation          | 2026-05-19      | 30/30 dry-run PASS; 648/648 24h@2min observations PASS         |
 | 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | 2026-05-21 | PR #31 merged; `tests/unit/test_phase11c1a_rate_limit_governor.py` |
 | 11C.1B | WebSocket-First All-Market Demon Coin Radar (incl. SymbolUniverse exchangeInfo-as-truth) | 2026-05-22 | PRs #32 / #33 / #34 merged; 5min / 10min / 1h real WS smoke PASS; export zip generated; events.db readable; safety flags unchanged. See "Phase 11C.1B acceptance summary" below. |
-| 11C.1C-A | Adaptive Candidate Regime & Strategy Selector Contracts (paper-only) | 2026-05-22 | PR #36 merged; 244/244 phase11c tests + 2219/2219 full pytest pass; 30s dry-run + 5min real public WS smoke PASS (32842 real WS messages, 12 chains, 12 each of the six adaptive event types, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban); daily report contains the Phase 11C.1C-A adaptive section; safety flags unchanged. See "Phase 11C.1C-A acceptance evidence" below. |
+| 11C.1C-A | Adaptive Candidate Regime & Strategy Selector Contracts (paper-only) | 2026-05-22 | PR #36 merged; PR #37 docs closeout; 244/244 phase11c tests + 2219/2219 full pytest pass; 30s dry-run + 5min real public WS smoke PASS (32842 real WS messages, 12 chains, 12 each of the six adaptive event types, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban); daily report contains the Phase 11C.1C-A adaptive section; safety flags unchanged. See "Closed phase: Phase 11C.1C-A (ACCEPTED)" below. |
 
 
 ### Phase 11B-HF acceptance summary
@@ -168,25 +168,26 @@ Phase 12                        = FORBIDDEN (gate unchanged)
 
 **Phase 11C.1C-A — Adaptive Candidate Regime & Strategy Selector
 Contracts (PR #36).** Status: **ACCEPTED (closed 2026-05-22; PR
-#36 merged).** PR #36 was merged into `main` and the smoke
-evidence below was accepted. Phase 11C.1C-A shipped the
+#36 merged; PR #37 docs closeout).** PR #36 was merged into
+`main` and PR #37 closed out the Phase 11C.1C-A docs gate; the
+smoke evidence below was accepted. Phase 11C.1C-A shipped the
 **paper-only first version** of the data contracts + scoring +
 selector + paper-only routing for the Adaptive Candidate Regime &
-Strategy Selector. Phase 11C.1C-B is now **NEXT_ALLOWED /
-NOT_STARTED** (see "Open phase: Phase 11C.1C-B (NEXT_ALLOWED /
-NOT_STARTED)" below); Phase 12 (live trading) remains
-**FORBIDDEN**.
+Strategy Selector. Phase 11C.1C-B is now **IN_REVIEW / PR_OPEN**
+on PR #38 (see "Open phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)"
+below); Phase 12 (live trading) remains **FORBIDDEN**.
 
-## Open phase: Phase 11C.1C-B (NEXT_ALLOWED / NOT_STARTED)
+## Open phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)
 
 **Phase 11C.1C-B — Adaptive Candidate Runtime Calibration & Early
-Tail Discovery v0.** Status: **NEXT_ALLOWED / NOT_STARTED.** With
-PR #36 merged and the Phase 11C.1C-A smoke evidence accepted, the
-gate to Phase 11C.1C-B is now open. Phase 11C.1C-B builds on top
-of the Phase 11C.1C-A contracts and calibrates candidate-state
-recognition + opportunity scoring against the real WS-radar
-candidate stream so the system discovers demon coins (妖币)
-earlier while refusing to chase late / blowoff tails.
+Tail Discovery v0 (PR #38).** Status: **IN_REVIEW / PR_OPEN.** PR
+#38 is currently open against `main` (post-PR-#37 baseline); the
+runtime-calibration first version is implemented on the branch
+but **NOT YET MERGED**. Phase 11C.1C-B will only be marked
+**ACCEPTED** after PR #38 is merged AND the smoke evidence in
+this section is accepted by a human reviewer. Until that gate
+fires, Phase 11C.1C-B is **NOT** closed; Phase 11C.1C-C remains
+**NOT_STARTED**; Phase 12 (live trading) remains **FORBIDDEN**.
 
 > Phase 11C.1C-B is **paper-mode only**. It is **NOT** live
 > trading, **NOT** AI Learning, **NOT** complete Strategy
@@ -194,7 +195,11 @@ earlier while refusing to chase late / blowoff tails.
 > Telegram outbound, **NOT** real Binance trading API. Phase
 > 12 (live trading) stays `FORBIDDEN`.
 
-### Phase 11C.1C-B scope (must implement)
+> After PR #38 is merged AND the smoke evidence below is
+> accepted, Phase 11C.1C-B may be marked ACCEPTED. Until then it
+> is **NOT** ACCEPTED, **NOT** MERGED, **IN_REVIEW / PR_OPEN**.
+
+### Phase 11C.1C-B scope (shipped on the PR #38 branch)
 
   1. **Runtime calibration metrics** attached to every adaptive
      candidate context (Phase 8.5 ``learning_ready`` +
@@ -214,20 +219,17 @@ earlier while refusing to chase late / blowoff tails.
      - ``freshness_score``
      - ``late_chase_risk``
      - ``early_tail_score``
-
   2. **Early Tail Discovery v0.** The candidate pool's capacity
-     eviction MUST NOT discard candidates with high
-     ``early_tail_score``. The radar MUST surface volume-rank
+     eviction does NOT discard candidates with high
+     ``early_tail_score``. The radar surfaces volume-rank
      jumps, quote-volume accelerations, and price accelerations
      on EDEN / ALT / NEAR-style demon-coin starts EARLIER than
      Phase 11C.1B's flat radar score.
-
   3. **Stage calibration.** ``early`` + high volume expansion +
      high freshness MAY enter ``follow`` / ``pullback`` (paper /
      virtual). ``late`` / ``blowoff`` MUST NEVER upgrade to
      ``follow``. ``manipulation_risk`` high MUST ``reject`` or
      ``observe``.
-
   4. **Daily-report enhancements.** New fields:
      - ``top_early_tail_candidates``
      - ``top_late_chase_risk_candidates``
@@ -239,11 +241,10 @@ earlier while refusing to chase late / blowoff tails.
      - ``early_tail_score_top_symbols``
      - ``symbols_promoted_before_24h_top_move``
      - EDEN / ALT / NEAR style candidate examples when present
-
-  5. **Event / export compatibility.** Every new field MUST land
-     in ``EventRepository``, the Phase 8.5 learning-ready payload,
-     the daily report, and the Phase 8.5 export. Phase 10A replay
-     MUST NOT fail on the new fields.
+  5. **Event / export compatibility.** Every new field lands in
+     ``EventRepository``, the Phase 8.5 learning-ready payload,
+     the daily report, and the Phase 8.5 export. Phase 10A
+     replay accepts the new fields without failure.
 
 ### Phase 11C.1C-B boundary (must hold from day one)
 
@@ -265,6 +266,7 @@ earlier while refusing to chase late / blowoff tails.
 | DeepSeek trade-decision authority           | NOT permitted                |
 | Real Telegram outbound                      | NOT permitted                |
 | Strategy mode (incl. follow / pullback)     | paper / virtual; no real-trade authority |
+| `early_tail_score`                          | descriptive only; protects from capacity eviction; NOT a real-trade authority |
 | AI Learning                                 | NOT implemented              |
 | Full MFE/MAE processor                      | NOT implemented (queue is a contract) |
 | Phase 12 (live trading)                     | FORBIDDEN                    |
@@ -284,59 +286,258 @@ earlier while refusing to chase late / blowoff tails.
     path-root variant).
   - Connecting to DeepSeek as a trade-decision authority.
   - Connecting to the real Telegram outbound HTTP transport.
-  - Promoting the Phase 11C.1C-A `strategy_mode` (paper / virtual)
-    field to a real-trade authority.
+  - Promoting `early_tail_score` / `strategy_mode` (paper /
+    virtual) to a real-trade authority.
   - Enabling AI Learning that auto-decides trades.
-  - Issuing any real order.
-  - Implementing the full MFE/MAE processor (the queue is a
+  - Implementing the full MFE/MAE processor (the queue stays a
     descriptive contract; the processor is reserved for a later
     PR).
+  - Issuing any real order.
   - Entering Phase 12.
 
-### Phase 11C.1C-B acceptance gate (kickoff PR will pin numerics)
+### Phase 11C.1C-B acceptance criteria (must all hold for ACCEPT)
 
-  1. The Phase 1 safety lock unchanged (every flag in the
-     boundary table above).
-  2. The new test file
-     ``tests/unit/test_phase11c_1c_b_runtime_calibration.py`` (or
-     equivalent) pins, at minimum:
-     - ``test_early_tail_score_detects_volume_rank_jump``
-     - ``test_freshness_penalizes_late_chase``
-     - ``test_late_blowoff_never_follow``
-     - ``test_top_early_tail_candidates_reported``
-     - ``test_candidate_first_seen_price_preserved``
-     - ``test_volume_rank_jump_calculated``
-     - ``test_adaptive_runtime_fields_exportable``
-     - ``test_no_live_trading_flags_unchanged``
-  3. The full Phase 11C test surface continues to pass with no
-     regression vs. PR #36.
-  4. A 30 s dry-run produces an ``early_tail_score`` for every
-     active candidate in the daily report and in the
-     ``learning_ready`` block.
-  5. A 5 min real public WS paper run produces
-     ``top_early_tail_candidates`` in the daily report.
-  6. The 5 min real WS run records zero HTTP 429 / 418 / ban /
-     stale across the window.
-  7. Every safety flag remains `False` after running the runtime
-     calibration end-to-end.
-  8. No live trading.
-  9. No API key.
-  10. No private endpoint.
-  11. Phase 12 stays `FORBIDDEN`.
+1. `pytest tests/unit/test_phase11c_1c_b_runtime_calibration.py`
+   passes (12 brief-mandated tests).
+2. `pytest tests/unit -k phase11c_` passes with no regression vs.
+   the post-PR-#37 main baseline.
+3. The full `tests/` surface continues to pass with no regression
+   vs. the post-PR-#37 main baseline.
+4. A 30 s dry-run produces a `runtime_calibration` block (15
+   fields) on every adaptive event and an `early_tail_score` per
+   ACTIVE candidate; the daily report includes the
+   `## Phase 11C.1C-B` section.
+5. A 5 min real public WS paper run records:
+   - `dry_run=false`
+   - `ws_real_transport=true`
+   - `ws_messages_received > 0`
+   - `ws_chains_emitted > 0`
+   - `runtime_calibration` block present on every adaptive event
+   - `early_tail_score` generated
+   - `top_early_tail_candidates` present in daily report
+   - `top_late_chase_risk_candidates` present in daily report
+   - `early_tail_score_top_symbols` present in daily report
+   - `opportunity_score_distribution` present in daily report
+   - `label_queue` remains contract-only
+   - `rate_limit_429_count=0`
+   - `rate_limit_418_count=0`
+   - `rate_limit_ban=False`
+   - `ws_stale_count=0` or explainable
+   - `ingestion_errors=0` or explainable
+6. Every safety flag remains `False` after running the
+   runtime-calibration path end-to-end.
+7. No live trading.
+8. No API key.
+9. No private endpoint.
+10. Phase 12 stays `FORBIDDEN`.
 
-## Phase 11C.1C-A acceptance evidence (closed; PR #36 merged 2026-05-22)
+## Phase 11C.1C-B IN_REVIEW evidence (pre-merge / PR #38)
 
-> Phase 11C.1C-A is **ACCEPTED**. The evidence below was produced
-> from PR #36 prior to merge and was accepted by a human reviewer
-> on 2026-05-22 (UTC); PR #36 has merged into `main`. Phase
-> 11C.1C-B is now **NEXT_ALLOWED / NOT_STARTED**; Phase 12 (live
-> trading) remains **FORBIDDEN**.
+> Phase 11C.1C-B is **IN_REVIEW / PR_OPEN** on PR #38. The
+> evidence below was produced from the PR #38 branch prior to
+> merge and must be accepted by a human reviewer before Phase
+> 11C.1C-B may be marked **ACCEPTED**. Until that gate fires,
+> Phase 11C.1C-B is **NOT** closed and Phase 11C.1C-C remains
+> **NOT_STARTED**.
+
+```
+test_phase11c_1c_b_runtime_calibration.py  12 passed   (brief-mandated cases)
+tests/unit/ -k phase11c_                  257 passed   (no regression vs. post-PR-#37 main)
+tests/                                    2231 passed   (no regression vs. post-PR-#37 main)
+
+30 s dry-run smoke
+  command:                              python -m scripts.run_public_market_paper \
+                                          --duration 30s --symbol-limit 3 --dry-run \
+                                          --poll-interval-seconds 1
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
+                                        (banner now reflects the
+                                        post-bump label
+                                        `Phase 11C.1C-B-IN_REVIEW
+                                        v1.4.0a11c.1c.b`; the
+                                        underlying smoke numerics
+                                        are unchanged because the
+                                        bump is a code-label-only
+                                        change.)
+  dry_run                               True
+  ws_real_transport                     False (in-process pump as expected
+                                                under --dry-run)
+  duration_seconds                      30
+  iterations                            30
+  chains_emitted                        3
+  ws_chains_emitted                     60
+  ws_messages_received                  122 (in-process pump)
+  ws_risk_rejected                      60
+  learning_ready_attached               3
+  ws_learning_ready_attached            60
+  snapshots_emitted                     3
+  radar_candidates_seen                 60
+  candidate_pool_size_max               2
+  MARKET_REGIME_ASSESSED                fired per ACTIVE candidate
+  CANDIDATE_STAGE_CLASSIFIED            fired per ACTIVE candidate
+  OPPORTUNITY_SCORED                    fired per ACTIVE candidate
+  STRATEGY_MODE_SELECTED                fired per ACTIVE candidate
+  CLUSTER_CONTEXT_ATTACHED              fired per ACTIVE candidate
+  LABEL_QUEUE_ENQUEUED                  fired per ACTIVE candidate
+  runtime_calibration block             present on every adaptive event
+                                        (15 fields verified)
+  early_tail_score                      computed per ACTIVE candidate
+  daily report                          contains "## Phase 11C.1C-B Adaptive
+                                        Candidate Runtime Calibration &
+                                        Early Tail Discovery v0"
+  top_early_tail_candidates             present
+  top_late_chase_risk_candidates        present (10 entries)
+  early_tail_score_top_symbols          present (EDEN/ALT/NEAR slot)
+  opportunity_score_distribution        present (50-60 x30, 70-80 x30)
+  label_queue                           contract-only (no MFE/MAE processor)
+  events.db readable                    yes
+  ingestion_errors                      57  (REST budget-exhaustion refusals
+                                              from the in-process governor;
+                                              NOT a 429, NOT a 418, NOT a
+                                              ban; expected under --dry-run
+                                              once the bootstrap weight is
+                                              consumed)
+  rate_limit_429_count                  0
+  rate_limit_418_count                  0
+  rate_limit_ban                        False
+  rate_limit_protection_triggered       False
+  ws_stale_count                        0
+  ws_reconnect_count                    0
+  ws_data_degraded_ticks                0
+  used_weight_1m_max                    0
+
+5 min real public WS smoke (--ws-first, no --dry-run)
+  command:                              python -m scripts.run_public_market_paper \
+                                          --duration 5min --symbol-limit 5 --ws-first \
+                                          --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
+                                        (banner now reflects the
+                                        post-bump label; the
+                                        underlying smoke numerics
+                                        are unchanged because the
+                                        bump is a code-label-only
+                                        change.)
+  dry_run                               False
+  ws_real_transport                     True (real RFC 6455 stdlib transport;
+                                              wss://fstream.binance.com routed
+                                              PUBLIC + MARKET endpoints)
+  duration_seconds                      302
+  iterations                            5
+  chains_emitted                        12
+  ws_chains_emitted                     12
+  ws_messages_received                  30526
+  ws_risk_rejected                      12
+  ws_learning_ready_attached            12
+  snapshots_emitted                     12
+  radar_candidates_seen                 3029
+  candidate_pool_size_max               20
+  liquidation_events_seen               133
+  MARKET_REGIME_ASSESSED count          72 (events.db)
+  CANDIDATE_STAGE_CLASSIFIED count      72 (events.db)
+  OPPORTUNITY_SCORED count              72 (events.db)
+  STRATEGY_MODE_SELECTED count          72 (events.db)
+  CLUSTER_CONTEXT_ATTACHED count        72 (events.db)
+  LABEL_QUEUE_ENQUEUED count            72 (events.db)
+  PRE_ANOMALY_DETECTED                  87
+  ANOMALY_DETECTED                      87
+  STATE_TRANSITION                      87
+  RISK_REJECTED                         87 (`stop_unconfirmed` x24 + others)
+  PUBLIC_WS_CONNECTED                   2
+  PUBLIC_WS_DISCONNECTED                2
+  runtime_calibration block             present on every adaptive event
+                                        (15 fields verified)
+  early_tail_score                      generated per ACTIVE candidate
+  top_early_tail_candidates             present in daily report
+                                        (3 entries: BEATUSDT 13.98, BEATUSDT
+                                         4.09, NEARUSDT 0.06)
+  top_late_chase_risk_candidates        present in daily report
+                                        (8 entries: SOPHUSDT 17.71, PLAYUSDT
+                                         16.72, WIFUSDT 14.76, SYRUPUSDT
+                                         14.33, BEATUSDT 13.86 / 12.80,
+                                         PROMPTUSDT 9.39, NEARUSDT 1.68)
+  early_tail_score_top_symbols          present in daily report
+                                        (EDEN/ALT/NEAR slot: NEARUSDT 0.06)
+  opportunity_score_distribution        present in daily report
+                                        (40-50 x7, 50-60 x3, 60-70 x2)
+  symbols_promoted_before_24h_top_move  0 (chain), 0 (pool)
+  early_tail_protect_threshold          60.00 (DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD)
+  label_queue                           contract-only (LABEL_QUEUE_ENQUEUED
+                                        emitted; no MFE/MAE processor)
+  rate_limit_429_count                  0
+  rate_limit_418_count                  0
+  rate_limit_ban                        False
+  rate_limit_protection_triggered       False
+  ws_stale_count                        0
+  ws_reconnect_count                    0
+  ws_currently_stale                    False
+  ws_data_degraded_ticks                0
+  used_weight_1m_max                    0
+  public_endpoint_calls                 0  (REST fully geo-blocked at the
+                                            sandbox edge; see ingestion_errors
+                                            note below)
+  ingestion_errors                      12  (explainable: sandbox-region
+                                              geo-block on Binance REST
+                                              `fapi.binance.com` returned
+                                              HTTP 451 for the active-head
+                                              detail REST ladder
+                                              (`/fapi/v1/exchangeInfo`,
+                                              `/fapi/v1/aggTrades`,
+                                              `/fapi/v1/depth`,
+                                              `/fapi/v1/fundingRate`,
+                                              `/fapi/v1/openInterest`,
+                                              `/fapi/v1/premiumIndex`,
+                                              `/fapi/v1/ticker/bookTicker`).
+                                              SymbolUniverse fell back to the
+                                              admit-all empty universe per
+                                              the documented fallback path.
+                                              All 146 transport-level 451s
+                                              are HTTP 451 (region geoblock),
+                                              NOT a 429, NOT a 418, NOT a
+                                              Binance ban, NOT a TLS / WS
+                                              issue. The real WS pump
+                                              (`wss://fstream.binance.com/public/stream`
+                                              + `/market/stream`) ran cleanly
+                                              throughout: 30526 frames, 0
+                                              stales, 0 reconnects.)
+  events.db readable                    yes (855 events; all six Phase
+                                              11C.1C-A adaptive event types
+                                              present at 72 each)
+  Phase 8.5 export                      generated successfully
+                                        (`ama_rt_test_data_..._export_e.zip`,
+                                         438711 bytes, 855 events, 750
+                                         opportunities, 87 rejections, 87
+                                         state transitions, redaction
+                                         applied)
+```
+
+Safety flags held throughout the Phase 11C.1C-B pre-merge smoke
+runs (30s dry-run + 5min real WS):
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none (`/private` refused at allowlist)
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+## Phase 11C.1C-A acceptance evidence (closeout)
 
 **Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector
-Contracts (PR #36, ACCEPTED).** Phase 11C.1C-A is the **paper-only
-first version** of the data contracts + scoring + selector +
-paper-only routing for the Adaptive Candidate Regime & Strategy
-Selector. PR #36 is merged into `main`. The PR ships:
+Contracts (PR #36, ACCEPTED).** Phase 11C.1C-A is the
+**paper-only first version** of the data contracts + scoring +
+selector + paper-only routing for the Adaptive Candidate Regime &
+Strategy Selector. PR #36 has merged into `main` and PR #37
+closed the docs gate. The PR shipped:
 
   - new `app/adaptive/` package with
     `MarketRegimeAssessment` / `CandidateStageAssessment` /
@@ -367,7 +568,7 @@ Selector. PR #36 is merged into `main`. The PR ships:
     `## Phase 11C.1C-A Adaptive Candidate Regime & Strategy Selector`
     Markdown section.
 
-### Phase 11C.1C-A boundary (must hold for the entire scope)
+### Phase 11C.1C-A boundary (held throughout the entire scope)
 
 | Invariant                                   | Required value               |
 | ------------------------------------------- | ---------------------------- |
@@ -385,28 +586,27 @@ Selector. PR #36 is merged into `main`. The PR ships:
 | AI Learning                                 | NOT implemented              |
 | Phase 12                                    | FORBIDDEN                    |
 
-### Phase 11C.1C-A acceptance criteria
+### Phase 11C.1C-A acceptance criteria (all met)
 
 1. `pytest tests/unit/test_phase11c_1c_a_adaptive_candidate.py`
-   passes (31 brief-mandated tests).
-2. The full Phase 11C test surface continues to pass; total
-   `tests/unit/` test count after PR #36 must remain ALL PASS
-   (latest pre-merge run on PR #36: **2219 passed**).
-3. The 30 s dry-run produces an `AdaptiveCandidateContext` for
-   every active candidate and writes the six adaptive events into
+   passed (31 brief-mandated tests).
+2. The full Phase 11C test surface continued to pass; total
+   `tests/unit/` test count after PR #36: **2219 passed**.
+3. The 30 s dry-run produced an `AdaptiveCandidateContext` for
+   every active candidate and wrote the six adaptive events into
    `events.db`.
-4. The 5 min real-WS paper run produces adaptive fields on every
+4. The 5 min real-WS paper run produced adaptive fields on every
    chain (no regression in the Phase 11C.1B 5min smoke ladder).
-5. The Phase 8.5 export zip + Phase 10A replay accept the six new
-   event types without failure.
-6. Every safety flag remains `False` after running the adaptive
+5. The Phase 8.5 export zip + Phase 10A replay accepted the six
+   new event types without failure.
+6. Every safety flag remained `False` after running the adaptive
    path end-to-end.
 7. No live trading.
 8. No API key.
 9. No private endpoint.
-10. Phase 12 stays `FORBIDDEN`.
+10. Phase 12 stayed `FORBIDDEN`.
 
-### Phase 11C.1C-A pre-merge smoke evidence (accepted on merge)
+### Phase 11C.1C-A acceptance smoke evidence (closeout)
 
 ```
 test_phase11c_1c_a_adaptive_candidate.py  31 PASS
@@ -415,7 +615,7 @@ tests/unit/                               2219 PASS  (no regression; PR #36 bran
 30 s dry-run smoke
   command:                              python -m scripts.run_public_market_paper \
                                           --duration 30s --symbol-limit 3 --dry-run
-  banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
   dry_run                               True
   adaptive_candidate context generated  yes (per ACTIVE candidate)
   ws_messages_received                  6 (in-process pump)
@@ -439,7 +639,7 @@ tests/unit/                               2219 PASS  (no regression; PR #36 bran
   command:                              python -m scripts.run_public_market_paper \
                                           --duration 5min --symbol-limit 5 --ws-first \
                                           --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT
-  banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
   dry_run                               False
   ws_real_transport                     True (real RFC 6455 stdlib transport;
                                               wss://fstream.binance.com routed
@@ -511,12 +711,14 @@ record.)
 ## Open phase (legacy): Phase 11C.1C
 
 The original "Phase 11C.1C" placeholder has been split into
-sequential sub-phases. Phase 11C.1C-A is **ACCEPTED** (PR #36
-merged 2026-05-22; data-contract first version + scoring +
-selector + paper-only routing). Phase 11C.1C-B (Adaptive Candidate
-Runtime Calibration & Early Tail Discovery v0) is **NEXT_ALLOWED /
-NOT_STARTED** (see "Open phase: Phase 11C.1C-B (NEXT_ALLOWED /
-NOT_STARTED)" above). The Phase 11C.1C-B kickoff PR may now begin.
+sequential sub-phases. Phase 11C.1C-A is **ACCEPTED (closed
+2026-05-22; PR #36 merged; PR #37 docs closeout)**. Phase
+11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail
+Discovery v0) is **IN_REVIEW / PR_OPEN** on PR #38 (see "Open
+phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)" above). After PR
+#38 is merged AND the smoke evidence is accepted, Phase
+11C.1C-B may be marked ACCEPTED. Phase 11C.1C-C remains
+**NOT_STARTED**.
 
 ### Phase 11C.1C boundary (must hold from day one)
 
@@ -1032,19 +1234,19 @@ GET /fapi/v1/premiumIndex
 
 | Candidate          | Gate                                                                                   |
 | ------------------ | -------------------------------------------------------------------------------------- |
-| Phase 11C.1C-A (Adaptive Candidate Regime & Strategy Selector Contracts) | **ACCEPTED (PR #36 merged 2026-05-22).** Paper-mode only. See "Closed phase: Phase 11C.1C-A (ACCEPTED)" / "Phase 11C.1C-A acceptance evidence" above. |
-| Phase 11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail Discovery v0) | **NEXT_ALLOWED / NOT_STARTED.** Paper-mode only. The kickoff PR may now begin. See "Open phase: Phase 11C.1C-B (NEXT_ALLOWED / NOT_STARTED)" above. |
-| Phase 11C.1C (parent, legacy) | **OPEN.** Split into 11C.1C-A (ACCEPTED) and 11C.1C-B (NEXT_ALLOWED / NOT_STARTED). Paper-mode only. |
+| Phase 11C.1C-A (Adaptive Candidate Regime & Strategy Selector Contracts) | **ACCEPTED (closed 2026-05-22; PR #36 merged; PR #37 docs closeout).** Paper-mode only. See "Closed phase: Phase 11C.1C-A (ACCEPTED)" above for the closeout record. |
+| Phase 11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail Discovery v0) | **IN_REVIEW / PR_OPEN (PR #38).** Paper-mode only. PR #38 is currently open; **NOT** MERGED, **NOT** ACCEPTED. See "Open phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)" above for the in-review smoke evidence. After PR #38 is merged AND the smoke evidence is accepted, Phase 11C.1C-B may be marked ACCEPTED. |
+| Phase 11C.1C-C (deeper Strategy Validation + Cluster Exposure Control + MFE/MAE processor) | **NOT_STARTED.** Paper-mode only. Cannot open until Phase 11C.1C-B is ACCEPTED. |
+| Phase 11C.1C (parent, legacy) | **OPEN.** Split into 11C.1C-A (ACCEPTED), 11C.1C-B (IN_REVIEW / PR_OPEN on PR #38), and 11C.1C-C (NOT_STARTED). Paper-mode only. |
 | Phase 11C+ (longer paper window, e.g. 7d / 14d) | Phase 11C parent 24h acceptance closed (still optional after the 11C.1B 1h PASS).      |
 | Phase 11D (DeepSeek READ-ONLY narrative interpreter) | Phase 11C closed; Phase 11C dataset reviewed.                                    |
-| Phase 12 (Limited live trading) | **FORBIDDEN.** NOT permitted from Phase 11C.1B alone, NOT permitted from Phase 11C.1C-A alone, NOT permitted from Phase 11C.1C-B alone, NOT permitted from Phase 11C.1C alone. Requires Spec §41 Go/No-Go. |
+| Phase 12 (Limited live trading) | **FORBIDDEN.** NOT permitted from Phase 11C.1B alone, NOT permitted from Phase 11C.1C alone. Requires Spec §41 Go/No-Go. |
 
-**Phase 11C.1C-A closing does NOT authorise Phase 12. Phase 11C.1C-B
-opening does NOT authorise Phase 12.** Phase 12 is gated
+**Phase 11C.1B closing does NOT authorise Phase 12.** Phase 12 is gated
 by:
 
   - Spec §41 Go/No-Go checklist
-  - Phase 11C.1C closed (every sub-phase, including 11C.1C-B and any future 11C.1C-C)
+  - Phase 11C.1C closed
   - Phase 11D (or another Phase 11C+ window) closed
   - Multi-week paper-mode dataset reviewed
   - Operational evidence the four write surfaces, the No-Trade Gate,

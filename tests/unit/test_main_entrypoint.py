@@ -66,11 +66,13 @@ def test_main_runs_and_emits_events(temp_data_dir, capsys):
     # the Phase 10D scaffolding (paper trade + reconciliation +
     # reflection + LLM + Telegram outbound self-checks). Phase 11C
     # ships a dedicated runner under ``scripts/run_public_market_paper``.
-    # Phase 11C.1C-A bumped the banner to "Adaptive Candidate Regime &
-    # Strategy Selector Contracts" (paper-mode only - no real-trade
-    # authority on the adaptive path).
+    # Phase 11C.1C-B-IN_REVIEW bumped the banner to "Adaptive Candidate
+    # Runtime Calibration & Early Tail Discovery v0" (paper-mode only -
+    # no real-trade authority on the runtime calibration / early tail
+    # discovery path; the Phase 11C.1C-A "Adaptive Candidate Regime &
+    # Strategy Selector Contracts" layer remains in force underneath).
     assert "Phase 11C" in captured
-    assert "Adaptive Candidate Regime" in captured
+    assert "Adaptive Candidate Runtime Calibration" in captured
     assert "v1.4.0a11c" in captured
     assert "mode=paper" in captured
     assert "live_trading=False" in captured

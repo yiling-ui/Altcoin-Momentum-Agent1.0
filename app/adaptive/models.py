@@ -494,6 +494,123 @@ def label_queue_contract_to_payload(
 
 
 # ---------------------------------------------------------------------------
+# Runtime calibration metrics (Phase 11C.1C-B)
+# ---------------------------------------------------------------------------
+class RuntimeCalibrationMetrics(BaseModel):
+    """Phase 11C.1C-B - per-candidate runtime calibration snapshot.
+
+    These are the *runtime* metrics the Phase 11C.1C-B brief calls
+    out for the Adaptive Candidate Runtime Calibration & Early Tail
+    Discovery layer. They sit alongside :class:`CandidateStageAssessment`
+    and :class:`OpportunityScore` on every
+    :class:`AdaptiveCandidateContext`, ride into the Phase 8.5
+    ``learning_ready.adaptive_candidate`` block on every event the
+    chain emits, and feed the daily-report aggregates that surface
+    early-tail / late-chase candidates.
+
+    The block is **descriptive**:
+
+      - ``early_tail_score`` is a paper / virtual signal the
+        :class:`CandidatePool` consults to *protect* high-tail
+        candidates from capacity eviction. It does NOT authorise
+        opening a real position. The Risk Engine remains the single
+        trade-decision gate.
+      - ``late_chase_risk`` is a paper / virtual risk score the
+        Strategy Selector reads alongside the existing
+        ``CandidateStageAssessment.late_chase_risk`` to decide
+        whether ``late`` / ``blowoff`` candidates should remain
+        observe-only.
+      - ``freshness_score`` is in ``[0.0, 1.0]``: 1.0 = first seen
+        this batch; decays with elapsed wall time.
+      - All ``acceleration_*`` fields are returns over the named
+        window (positive = price / volume going up).
+      - ``volume_rank`` / ``volume_rank_jump_5m`` mirror the
+        Phase 11C.1B WS-radar's per-batch ranking; jump is the
+        positive integer improvement vs. ~5 min ago
+        (old_rank - new_rank).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    candidate_first_seen_ts: int = 0
+    candidate_first_seen_price: float = 0.0
+    current_price: float = 0.0
+    price_change_since_first_seen: float = 0.0
+    quote_volume_acceleration_1m: float = 0.0
+    quote_volume_acceleration_5m: float = 0.0
+    price_acceleration_1m: float = 0.0
+    price_acceleration_5m: float = 0.0
+    volume_rank: int = 0
+    volume_rank_jump_5m: int = 0
+    distance_to_24h_high: float = 0.0
+    distance_from_first_seen: float = 0.0
+    freshness_score: float = 0.0
+    late_chase_risk: float = 0.0
+    early_tail_score: float = 0.0
+
+    @field_validator("freshness_score")
+    @classmethod
+    def _check_unit_range_freshness(cls, value: float) -> float:
+        v = float(value)
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(
+                f"freshness_score must be in [0.0, 1.0]; got {value}"
+            )
+        return v
+
+    @field_validator("late_chase_risk", "early_tail_score")
+    @classmethod
+    def _check_pct_range(cls, value: float) -> float:
+        v = float(value)
+        if not (0.0 <= v <= 100.0):
+            raise ValueError(
+                f"score must be in [0.0, 100.0]; got {value}"
+            )
+        return v
+
+    @field_validator("volume_rank", "volume_rank_jump_5m")
+    @classmethod
+    def _check_rank_int(cls, value: int) -> int:
+        v = int(value)
+        # rank is >= 0 (0 = unknown / unranked); jump may be negative
+        # if the candidate's rank slipped vs. 5 min ago.
+        if value is None:
+            return 0
+        return v
+
+    def to_payload(self) -> dict[str, Any]:
+        return runtime_calibration_metrics_to_payload(self)
+
+
+def runtime_calibration_metrics_to_payload(
+    metrics: RuntimeCalibrationMetrics,
+) -> dict[str, Any]:
+    return {
+        "candidate_first_seen_ts": int(metrics.candidate_first_seen_ts),
+        "candidate_first_seen_price": float(metrics.candidate_first_seen_price),
+        "current_price": float(metrics.current_price),
+        "price_change_since_first_seen": float(
+            metrics.price_change_since_first_seen
+        ),
+        "quote_volume_acceleration_1m": float(
+            metrics.quote_volume_acceleration_1m
+        ),
+        "quote_volume_acceleration_5m": float(
+            metrics.quote_volume_acceleration_5m
+        ),
+        "price_acceleration_1m": float(metrics.price_acceleration_1m),
+        "price_acceleration_5m": float(metrics.price_acceleration_5m),
+        "volume_rank": int(metrics.volume_rank),
+        "volume_rank_jump_5m": int(metrics.volume_rank_jump_5m),
+        "distance_to_24h_high": float(metrics.distance_to_24h_high),
+        "distance_from_first_seen": float(metrics.distance_from_first_seen),
+        "freshness_score": float(metrics.freshness_score),
+        "late_chase_risk": float(metrics.late_chase_risk),
+        "early_tail_score": float(metrics.early_tail_score),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Aggregator
 # ---------------------------------------------------------------------------
 class AdaptiveCandidateContext(BaseModel):
@@ -525,6 +642,7 @@ class AdaptiveCandidateContext(BaseModel):
     strategy_mode: StrategyModeDecision
     cluster: ClusterContext
     label_queue: LabelQueueContract
+    runtime_calibration: RuntimeCalibrationMetrics | None = None
     strategy_version: str
     scoring_version: str
     risk_config_version: str
@@ -544,6 +662,11 @@ class AdaptiveCandidateContext(BaseModel):
             "strategy_mode": self.strategy_mode.to_payload(),
             "cluster": self.cluster.to_payload(),
             "label_queue": self.label_queue.to_payload(),
+            "runtime_calibration": (
+                self.runtime_calibration.to_payload()
+                if self.runtime_calibration is not None
+                else None
+            ),
             "strategy_version": str(self.strategy_version),
             "scoring_version": str(self.scoring_version),
             "risk_config_version": str(self.risk_config_version),
@@ -565,11 +688,13 @@ __all__ = [
     "StrategyModeDecision",
     "ClusterContext",
     "LabelQueueContract",
+    "RuntimeCalibrationMetrics",
     "AdaptiveCandidateContext",
     "candidate_stage_assessment_to_payload",
     "cluster_context_to_payload",
     "label_queue_contract_to_payload",
     "market_regime_assessment_to_payload",
     "opportunity_score_to_payload",
+    "runtime_calibration_metrics_to_payload",
     "strategy_mode_decision_to_payload",
 ]

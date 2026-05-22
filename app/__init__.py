@@ -55,5 +55,5 @@ Phase 11C does NOT implement:
   - Phase 12. Passing Phase 11C does NOT authorise Phase 12.
 """
 
-__version__ = "1.4.0a11c.1c.a"
-__phase__ = "Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector Contracts"
+__version__ = "1.4.0a11c.1c.b"
+__phase__ = "Phase 11C.1C-B-IN_REVIEW - Adaptive Candidate Runtime Calibration & Early Tail Discovery v0"

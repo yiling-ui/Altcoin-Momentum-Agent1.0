@@ -88,6 +88,7 @@ from app.adaptive.models import (
     OPPORTUNITY_GRADE_BOUNDARIES,
     OpportunityScore,
     REGIME_BUCKETS,
+    RuntimeCalibrationMetrics,
     STRATEGY_MODES,
     StrategyModeDecision,
     candidate_stage_assessment_to_payload,
@@ -95,9 +96,19 @@ from app.adaptive.models import (
     label_queue_contract_to_payload,
     market_regime_assessment_to_payload,
     opportunity_score_to_payload,
+    runtime_calibration_metrics_to_payload,
     strategy_mode_decision_to_payload,
 )
 from app.adaptive.regime import assess_market_regime
+from app.adaptive.runtime import (
+    DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD,
+    DEFAULT_FRESHNESS_HALF_LIFE_MS,
+    compute_early_tail_score,
+    compute_freshness_score,
+    compute_late_chase_risk_score,
+    compute_relative_acceleration,
+    compute_runtime_calibration,
+)
 from app.adaptive.scoring import (
     DEFAULT_OPPORTUNITY_SCORE_WEIGHTS,
     OpportunityScoreInputs,
@@ -116,10 +127,13 @@ __all__ = [
     "StrategyModeDecision",
     "ClusterContext",
     "LabelQueueContract",
+    "RuntimeCalibrationMetrics",
     "AdaptiveCandidateContext",
     # Constants
     "ADAPTIVE_LEARNING_READY_KEY",
     "CANDIDATE_STAGES",
+    "DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD",
+    "DEFAULT_FRESHNESS_HALF_LIFE_MS",
     "DEFAULT_TRACKING_WINDOWS",
     "OPPORTUNITY_GRADES",
     "OPPORTUNITY_GRADE_BOUNDARIES",
@@ -133,6 +147,11 @@ __all__ = [
     "assess_market_regime",
     "classify_candidate_stage",
     "compute_opportunity_score",
+    "compute_early_tail_score",
+    "compute_freshness_score",
+    "compute_late_chase_risk_score",
+    "compute_relative_acceleration",
+    "compute_runtime_calibration",
     "grade_for_score",
     "select_strategy_mode",
     "build_cluster_context",
@@ -144,6 +163,7 @@ __all__ = [
     "label_queue_contract_to_payload",
     "market_regime_assessment_to_payload",
     "opportunity_score_to_payload",
+    "runtime_calibration_metrics_to_payload",
     "strategy_mode_decision_to_payload",
     # Scoring helpers
     "OpportunityScoreInputs",
