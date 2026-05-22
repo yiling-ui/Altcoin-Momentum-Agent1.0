@@ -468,3 +468,228 @@ def test_empty_universe_is_admit_all_back_compat():
     # on malformed payloads.
     assert universe.is_valid("") is False
     assert universe.is_valid("   ") is False
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 11C.1B (PR #34) - SymbolUniverse / CandidatePool case-preservation
+# contract pin (BUGFIX_BRIEF). The four tests below complement the three
+# existing SymbolUniverse integration tests above by pinning the
+# CandidatePool internal-key contract:
+#
+#   * the pool MUST preserve the exact canonical symbol string
+#     SymbolUniverse admitted - no ``.upper()`` / ``.lower()`` may
+#     be applied at offer() / get() / remove();
+#   * only surrounding whitespace may be stripped;
+#   * a non-ASCII symbol that IS in exchangeInfo must round-trip
+#     verbatim through the pool;
+#   * an ASCII-only character-class regex on the candidate_pool.py
+#     symbol-handling path is forbidden (audit pin).
+#
+# These tests target the BUG described in docs/BUGFIX_BRIEF.md: even
+# with SymbolUniverse in place, CandidatePool was still case-folding
+# symbols at offer() / get() / remove(), which silently broke
+# exact-match canonical-string equivalence for any canonical string
+# that is not all-uppercase ASCII.
+# ---------------------------------------------------------------------------
+
+
+def _case_preservation_snapshot(symbol: str) -> AllMarketRadarSnapshot:
+    """Build a minimal radar snapshot with the supplied canonical
+    symbol. Strong enough to clear the default ``radar_score_threshold``
+    when paired with :func:`_case_preservation_score`.
+    """
+    return AllMarketRadarSnapshot(
+        symbol=symbol,
+        timestamp=1,
+        last_price=10.0,
+        ws_source_flags=("ticker_arr",),
+    )
+
+
+def _case_preservation_score() -> RadarScoreResult:
+    """Score above the default ``radar_score_threshold`` (30.0) so the
+    candidate is admitted as ACTIVE."""
+    return RadarScoreResult(
+        radar_score=80.0,
+        reason_tags=("radar_score",),
+        source_streams=("ticker_arr",),
+    )
+
+
+def test_candidate_pool_does_not_uppercase_exchange_info_symbol() -> None:
+    """A snapshot whose canonical exchangeInfo symbol is NOT all
+    uppercase MUST be admitted under the EXACT canonical key. The
+    pool may not silently apply ``.upper()`` along the offer path.
+    """
+    canonical = "btcusdt"  # canonical exchangeInfo string, lowercase
+    universe = SymbolUniverse.from_exchange_info([canonical])
+    pool = CandidatePool(
+        config=CandidatePoolConfig(
+            candidate_pool_size=5,
+            active_detail_limit=2,
+            radar_score_threshold=30.0,
+        ),
+        symbol_universe=universe,
+    )
+    pool.begin_scan_batch()
+
+    cand = pool.offer(
+        _case_preservation_snapshot(canonical),
+        _case_preservation_score(),
+    )
+    assert cand is not None, "candidate refused even though symbol is in universe"
+    assert cand.symbol == canonical, (
+        f"CandidatePool case-folded the symbol: stored={cand.symbol!r}, "
+        f"expected={canonical!r}"
+    )
+    # The pool must have stored the candidate under the EXACT canonical
+    # key, NOT the case-folded variant.
+    assert pool.get(canonical) is cand
+    assert pool.get(canonical.upper()) is None, (
+        "CandidatePool returned a hit for the uppercased variant - "
+        "case-folding is still happening on the offer / get path"
+    )
+
+
+def test_candidate_pool_get_preserves_exchange_info_canonical_string() -> None:
+    """``CandidatePool.get()`` must look the symbol up by the EXACT
+    canonical string SymbolUniverse admitted. Whitespace is allowed
+    to be stripped; case must be preserved.
+    """
+    canonical = "ETHUSDT"
+    universe = SymbolUniverse.from_exchange_info([canonical])
+    pool = CandidatePool(
+        config=CandidatePoolConfig(
+            candidate_pool_size=5,
+            active_detail_limit=2,
+            radar_score_threshold=30.0,
+        ),
+        symbol_universe=universe,
+    )
+    pool.begin_scan_batch()
+    pool.offer(
+        _case_preservation_snapshot(canonical),
+        _case_preservation_score(),
+    )
+
+    # Exact-match lookup wins.
+    assert pool.get(canonical) is not None
+    # Surrounding whitespace must be ignored (allowed transformation).
+    assert pool.get(f"  {canonical}  ") is not None
+    # Case-folded lookup must MISS - case-folding is forbidden.
+    assert pool.get(canonical.lower()) is None
+    # Empty / None are handled safely.
+    assert pool.get("") is None
+    assert pool.get(None) is None  # type: ignore[arg-type]
+
+
+def test_candidate_pool_remove_preserves_exchange_info_canonical_string() -> None:
+    """``CandidatePool.remove()`` must pop by the EXACT canonical
+    string SymbolUniverse admitted. The case-folded variant must
+    NOT remove the entry.
+    """
+    canonical = "SOLUSDT"
+    universe = SymbolUniverse.from_exchange_info([canonical])
+    pool = CandidatePool(
+        config=CandidatePoolConfig(
+            candidate_pool_size=5,
+            active_detail_limit=2,
+            radar_score_threshold=30.0,
+        ),
+        symbol_universe=universe,
+    )
+    pool.begin_scan_batch()
+    pool.offer(
+        _case_preservation_snapshot(canonical),
+        _case_preservation_score(),
+    )
+    assert pool.size == 1
+
+    # Wrong-case removal must miss - the pool is keyed on the exact
+    # canonical string, not the case-folded variant.
+    assert pool.remove(canonical.lower()) is None
+    assert pool.size == 1, (
+        "CandidatePool.remove() popped a case-folded key - case-folding "
+        "is still happening on the remove path"
+    )
+
+    # Whitespace-padded but exact-case removal succeeds.
+    removed = pool.remove(f" {canonical} ")
+    assert removed is not None
+    assert removed.symbol == canonical
+    assert pool.size == 0
+
+
+def test_symbol_validation_preserves_exchange_info_canonical_string() -> None:
+    """End-to-end SymbolUniverse / CandidatePool contract pin.
+
+    Two halves:
+
+    1. A non-ASCII canonical exchangeInfo symbol MUST round-trip
+       verbatim through the pool. The same string the universe
+       admitted is the same string the pool stores, returns from
+       :meth:`active_head`, and yields back via :meth:`get`.
+
+    2. ``app/market_data_public/candidate_pool.py`` MUST contain no
+       ``.upper()`` / ``.lower()`` call on the symbol-handling path
+       (audit on the executable code, ignoring docstrings and
+       comments). The ASCII-only character-class regex audit
+       performed in
+       :func:`test_symbol_validation_uses_exchange_info_not_ascii_regex`
+       above already covers character-class filters; this test
+       additionally pins the case-folding ban.
+    """
+    # --- (1) non-ASCII canonical symbol round-trips intact --------------
+    non_ascii = "我踏马来了USDT"
+    universe = SymbolUniverse.from_exchange_info([non_ascii, "BTCUSDT"])
+    assert universe.is_valid(non_ascii) is True
+
+    pool = CandidatePool(
+        config=CandidatePoolConfig(
+            candidate_pool_size=5,
+            active_detail_limit=2,
+            radar_score_threshold=30.0,
+        ),
+        symbol_universe=universe,
+    )
+    pool.begin_scan_batch()
+    cand = pool.offer(
+        _case_preservation_snapshot(non_ascii),
+        _case_preservation_score(),
+    )
+    assert cand is not None
+    assert cand.symbol == non_ascii
+    assert pool.get(non_ascii) is cand
+    assert pool.size == 1
+
+    head = pool.active_head()
+    assert len(head) == 1
+    assert head[0].symbol == non_ascii
+
+    # --- (2) static audit on candidate_pool.py executable code ----------
+    src_path = (
+        Path(__file__).resolve().parents[2]
+        / "app"
+        / "market_data_public"
+        / "candidate_pool.py"
+    )
+    source = src_path.read_text(encoding="utf-8")
+    # Strip triple-quoted docstrings and ``#`` comments so the audit
+    # only inspects executable code. Docstrings may legitimately
+    # describe the SymbolUniverse contract using the words ``.upper()``
+    # / ``.lower()`` while the code itself contains no such call.
+    code_only = re.sub(r'"""[\s\S]*?"""', "", source)
+    code_only = re.sub(r"'''[\s\S]*?'''", "", code_only)
+    code_only = re.sub(r"#[^\n]*", "", code_only)
+
+    assert ".upper(" not in code_only, (
+        "candidate_pool.py contains a .upper() call on the symbol-"
+        "handling path - case-folding is forbidden by the "
+        "SymbolUniverse exact-match canonical-string contract"
+    )
+    assert ".lower(" not in code_only, (
+        "candidate_pool.py contains a .lower() call on the symbol-"
+        "handling path - case-folding is forbidden by the "
+        "SymbolUniverse exact-match canonical-string contract"
+    )

@@ -303,7 +303,14 @@ class CandidatePool:
           4. ``liquidation_event=True`` (only when
              ``liquidation_promotes`` is True)
         """
-        symbol = (snapshot.symbol or "").upper().strip()
+        # Phase 11C.1B (PR #34) SymbolUniverse contract: preserve the
+        # exact Binance exchangeInfo canonical symbol string. Membership
+        # is exact-match on the canonical string (no .upper() / .lower(),
+        # no ASCII-only filter); only surrounding whitespace may be
+        # stripped. Case-folding here would silently break the
+        # exact-match invariant for any non-uppercase canonical string
+        # exchangeInfo returns.
+        symbol = str(snapshot.symbol or "").strip()
         if not symbol:
             return None
         # Phase 11C.1B SymbolUniverse gate (exchangeInfo-as-truth).
@@ -506,13 +513,20 @@ class CandidatePool:
         return actives[: int(top)]
 
     def get(self, symbol: str) -> Candidate | None:
-        return self._candidates.get((symbol or "").upper().strip())
+        # Phase 11C.1B (PR #34) SymbolUniverse contract: look up by the
+        # exact canonical symbol string; only strip surrounding
+        # whitespace. Case-folding here would miss any non-uppercase
+        # canonical key admitted via offer().
+        return self._candidates.get(str(symbol or "").strip())
 
     def remove(self, symbol: str) -> Candidate | None:
         """Remove one candidate (e.g. after the runner finishes its
         per-loop detail call). Returns the removed candidate if any.
         """
-        return self._candidates.pop((symbol or "").upper().strip(), None)
+        # Phase 11C.1B (PR #34) SymbolUniverse contract: pop by the
+        # exact canonical symbol string; only strip surrounding
+        # whitespace.
+        return self._candidates.pop(str(symbol or "").strip(), None)
 
     def clear(self) -> None:
         self._candidates.clear()
