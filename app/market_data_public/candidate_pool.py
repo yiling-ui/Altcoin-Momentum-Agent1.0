@@ -31,7 +31,7 @@ The pool is single-threaded by construction.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable
 
 from loguru import logger
 
@@ -40,6 +40,11 @@ from app.learning.identity import OpportunityIdentity
 from app.market_data_public.radar import (
     AllMarketRadarSnapshot,
     RadarScoreResult,
+)
+from app.market_data_public.symbol_universe import (
+    REASON_NOT_IN_EXCHANGE_INFO,
+    SymbolUniverse,
+    emit_symbol_rejected,
 )
 
 
@@ -169,10 +174,29 @@ class CandidatePool:
         *,
         config: CandidatePoolConfig | None = None,
         clock_fn=now_ms,
+        symbol_universe: SymbolUniverse | None = None,
+        event_repo: Any = None,
     ) -> None:
         self._config = config or CandidatePoolConfig()
         self._clock_fn = clock_fn
         self._candidates: dict[str, Candidate] = {}
+        # Phase 11C.1B SymbolUniverse gate: when ``symbol_universe`` is
+        # bootstrapped (built from /fapi/v1/exchangeInfo at runner
+        # startup), :meth:`offer` rejects any symbol that is NOT in
+        # the set and emits a typed WS_SYMBOL_REJECTED event via
+        # ``event_repo``. Symbol identity is exact-match on the
+        # canonical Binance string - non-ASCII contracts (e.g. the
+        # documented Chinese-named USDT contracts ``我踏马来了USDT`` /
+        # ``币安人生USDT``) flow through unchanged when they ARE in
+        # the bootstrap snapshot. The empty universe (default) is
+        # the back-compat "admit everything" fallback used by
+        # in-process / dry-run / fixture tests.
+        self._symbol_universe: SymbolUniverse = (
+            symbol_universe
+            if symbol_universe is not None
+            else SymbolUniverse.empty()
+        )
+        self._event_repo = event_repo
         # Counters for the daily report / runner banner.
         self._candidates_seen: int = 0
         self._candidates_admitted: int = 0
@@ -180,6 +204,7 @@ class CandidatePool:
         self._candidates_demoted: int = 0
         self._candidates_expired: int = 0
         self._candidates_evicted: int = 0
+        self._candidates_rejected_by_universe: int = 0
         self._max_size_observed: int = 0
         self._scan_batch_id: str | None = None
 
@@ -215,6 +240,21 @@ class CandidatePool:
     @property
     def candidates_evicted(self) -> int:
         return self._candidates_evicted
+
+    @property
+    def candidates_rejected_by_universe(self) -> int:
+        """Phase 11C.1B - count of WS-radar offers refused because the
+        symbol was missing from the bootstrapped exchangeInfo set.
+
+        Always 0 when the universe is the empty fallback (default for
+        dry-run / fixtures); load-bearing only when the runner has
+        bootstrapped a real exchangeInfo snapshot.
+        """
+        return self._candidates_rejected_by_universe
+
+    @property
+    def symbol_universe(self) -> SymbolUniverse:
+        return self._symbol_universe
 
     @property
     def max_size_observed(self) -> int:
@@ -263,8 +303,47 @@ class CandidatePool:
           4. ``liquidation_event=True`` (only when
              ``liquidation_promotes`` is True)
         """
-        symbol = (snapshot.symbol or "").upper().strip()
+        # Phase 11C.1B (PR #34) SymbolUniverse contract: preserve the
+        # exact Binance exchangeInfo canonical symbol string. Membership
+        # is exact-match on the canonical string (no .upper() / .lower(),
+        # no ASCII-only filter); only surrounding whitespace may be
+        # stripped. Case-folding here would silently break the
+        # exact-match invariant for any non-uppercase canonical string
+        # exchangeInfo returns.
+        symbol = str(snapshot.symbol or "").strip()
         if not symbol:
+            return None
+        # Phase 11C.1B SymbolUniverse gate (exchangeInfo-as-truth).
+        # Binance lists non-ASCII contract symbols (e.g. ``我踏马来了USDT``,
+        # ``币安人生USDT``); we explicitly REFUSE to filter symbols by
+        # ASCII-only regex - the only authoritative set is the
+        # /fapi/v1/exchangeInfo snapshot the runner bootstrapped at
+        # startup. The empty universe (default for dry-run / fixtures)
+        # admits every non-empty symbol so existing tests keep working;
+        # a bootstrapped universe rejects any symbol missing from the
+        # set and emits WS_SYMBOL_REJECTED. The check runs BEFORE the
+        # ``candidates_seen`` counter to mirror the brief: a rejected
+        # symbol never enters the candidate pool's accounting.
+        if not self._symbol_universe.is_valid(symbol):
+            self._candidates_rejected_by_universe += 1
+            emit_symbol_rejected(
+                self._event_repo,
+                symbol=symbol,
+                reason=REASON_NOT_IN_EXCHANGE_INFO,
+                extra_payload={
+                    "radar_score": float(score.radar_score),
+                    "reason_tags": list(score.reason_tags),
+                    "source_streams": list(score.source_streams),
+                    "universe_size": int(len(self._symbol_universe)),
+                    "universe_source": str(self._symbol_universe.source),
+                },
+                clock_fn=self._clock_fn,
+            )
+            logger.debug(
+                "[phase11c.1b] candidate refused by SymbolUniverse "
+                "(not in exchangeInfo) symbol={}",
+                symbol,
+            )
             return None
         self._candidates_seen += 1
         admit_reasons = self._admission_reasons(snapshot=snapshot, score=score)
@@ -434,13 +513,20 @@ class CandidatePool:
         return actives[: int(top)]
 
     def get(self, symbol: str) -> Candidate | None:
-        return self._candidates.get((symbol or "").upper().strip())
+        # Phase 11C.1B (PR #34) SymbolUniverse contract: look up by the
+        # exact canonical symbol string; only strip surrounding
+        # whitespace. Case-folding here would miss any non-uppercase
+        # canonical key admitted via offer().
+        return self._candidates.get(str(symbol or "").strip())
 
     def remove(self, symbol: str) -> Candidate | None:
         """Remove one candidate (e.g. after the runner finishes its
         per-loop detail call). Returns the removed candidate if any.
         """
-        return self._candidates.pop((symbol or "").upper().strip(), None)
+        # Phase 11C.1B (PR #34) SymbolUniverse contract: pop by the
+        # exact canonical symbol string; only strip surrounding
+        # whitespace.
+        return self._candidates.pop(str(symbol or "").strip(), None)
 
     def clear(self) -> None:
         self._candidates.clear()
@@ -482,6 +568,17 @@ class CandidatePool:
             "radar_score_threshold": float(
                 self._config.radar_score_threshold
             ),
+            # Phase 11C.1B SymbolUniverse gate metrics. ``rejected_by_universe``
+            # is non-zero only when the runner bootstrapped a real
+            # exchangeInfo snapshot AND a WS push delivered a symbol
+            # outside that snapshot - typical causes are: a brand-new
+            # listing that came online mid-run, or a contract delisting
+            # whose WS pushes arrived between the bootstrap REST call
+            # and the WS subscribe.
+            "candidate_pool_rejected_by_universe": int(
+                self._candidates_rejected_by_universe
+            ),
+            **self._symbol_universe.metrics_payload(),
         }
 
 

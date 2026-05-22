@@ -333,17 +333,102 @@ endpoint for every symbol every loop" pattern that triggered HTTP
 418, and it predates the routed public+market WebSocket
 endpoints. The current acceptance ladder is:
 
-| Stage              | Command                                                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 30 s dry-run       | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                |
-| 5 min real WS      | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              |
-| 10 min real WS     | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             |
-| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                               |
-| 6 h WS-first       | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                |
-| 24 h WS-first      | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               |
+| Stage              | Command                                                                                                                              | Status (UTC)              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| 30 s dry-run       | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                | PASS                      |
+| 5 min real WS      | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              | **PASS (2026-05-22)**     |
+| 10 min real WS     | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             | pending                   |
+| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                               | pending                   |
+| 6 h WS-first       | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                | pending                   |
+| 24 h WS-first      | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               | pending (Phase 11C close) |
+
+The 5-min PASS rung records: ``ws_messages_received > 0``,
+``ws_chains_emitted > 0``, ``radar_candidates_seen >= 0`` (no
+longer stuck at 0 due to no messages), ``PUBLIC_WS_CONNECTED``
+written to ``events.db``, ``rate_limit_429_count = 0``,
+``rate_limit_418_count = 0``, ``rate_limit_ban = False``, every
+safety flag unchanged. The earlier failure mode
+(``ws_messages_received = 0`` for the full 300s window) was a
+zero-timeout ``recv`` short-circuit in the stdlib WS transport;
+fixed by always draining the recv buffer non-blockingly at the
+top of every ``poll`` call (and by routing the runner's wait
+window through the WS pump's blocking timeout instead of an
+unrelated ``time.sleep``). Pinned by
+``test_real_ws_transport_drains_buffered_bytes_with_zero_timeout``
++ ``test_real_ws_runner_loop_pattern_drains_messages_with_zero_timeout``.
 
 PR-C (priority_score / cluster classifier / same-cluster leader /
 multi-candidate arbitration) remains a separate branch.
+
+### Phase 11C.1B follow-up: SymbolUniverse (exchangeInfo-as-truth)
+
+Binance USDⓈ-M Futures lists non-ASCII contracts in production -
+documented examples include ``我踏马来了USDT`` and ``币安人生USDT``.
+Each is a real Binance contract with its own
+``/fapi/v1/exchangeInfo`` entry, its own all-market WS push, and
+its own REST detail endpoints. The Phase 11C.1B brief therefore
+forbids any character-class regex
+(``^[A-Z0-9_]{2,30}(USDT|USDC)$`` or any equivalent) on the
+symbol-validation path; the only authoritative source is the
+snapshot pulled from ``/fapi/v1/exchangeInfo`` at runner startup.
+
+#### Implementation
+
+  - ``app/market_data_public/symbol_universe.py`` -
+    :class:`SymbolUniverse.from_exchange_info(symbols)` builds the
+    bootstrapped set; :meth:`SymbolUniverse.empty()` is the
+    back-compat "admit everything" fallback for dry-run / fixture
+    tests.
+  - :meth:`CandidatePool.offer` consults the universe; symbols
+    missing from the bootstrapped set surface a typed
+    ``WS_SYMBOL_REJECTED`` event (a new entry on
+    :class:`EventType`) and the candidate is dropped before it
+    enters the pool's accounting.
+  - The runner
+    (:func:`scripts.run_public_market_paper.main`) bootstraps the
+    universe from :meth:`BinancePublicClient.get_symbols` before
+    constructing the candidate pool. On bootstrap failure
+    (rate-limit protection, network error, etc.) the runner falls
+    back to the empty universe and logs the degraded note - safety
+    flags stay unchanged and the pool admits everything to avoid
+    blocking the smoke ladder on a transient REST fault.
+  - Source-tree audit: the test
+    ``tests/unit/test_phase11c_1b_symbol_universe.py
+    ::test_symbol_validation_uses_exchange_info_not_ascii_regex``
+    walks every WS-radar / symbol-validation file and refuses any
+    ``re.compile|match|fullmatch|search`` whose pattern smells
+    like an ASCII-only symbol regex. The next PR that
+    re-introduces one fails this test.
+
+#### Contract
+
+The brief is explicit: **the rejection reason is "not in
+exchangeInfo", NEVER "non-ASCII character class".** A pure-ASCII
+symbol that is missing from the snapshot (e.g. a brand-new
+listing that came online mid-run, or a delisting whose WS pushes
+arrived between bootstrap and subscribe) is treated identically
+to a Chinese symbol that is missing.
+
+#### Daily-report fields added
+
+  - ``candidate_pool_rejected_by_universe`` - count of WS-radar
+    offers refused because the symbol was missing from the
+    bootstrapped exchangeInfo set;
+  - ``ws_symbol_universe_size`` - cardinality of the bootstrapped
+    set;
+  - ``ws_symbol_universe_source`` - either ``"exchange_info"``
+    (bootstrapped) or ``"empty_admit_all"`` (back-compat
+    fallback);
+  - ``ws_symbol_universe_bootstrapped`` - boolean;
+  - ``ws_symbol_universe_bootstrap_ts_ms`` - the timestamp of the
+    bootstrap snapshot.
+
+#### Pinned by
+
+  - ``test_non_ascii_exchange_symbol_allowed_if_in_exchange_info``
+  - ``test_non_ascii_ws_symbol_rejected_if_not_in_exchange_info``
+  - ``test_symbol_validation_uses_exchange_info_not_ascii_regex``
+  - ``test_empty_universe_is_admit_all_back_compat``
 
 ---
 

@@ -157,6 +157,27 @@ class EventType(str, Enum):
     PUBLIC_WS_DISCONNECTED = "PUBLIC_WS_DISCONNECTED"
     PUBLIC_WS_STALE = "PUBLIC_WS_STALE"
 
+    # ---- Phase 11C.1B - SymbolUniverse (exchangeInfo-as-truth) -----------
+    # The WS-radar receives ``!ticker@arr`` / ``!miniTicker@arr`` /
+    # ``!bookTicker`` / ``!markPrice@arr`` / ``!forceOrder@arr`` pushes
+    # for EVERY symbol Binance lists - including non-ASCII contracts
+    # such as ``我踏马来了USDT`` or ``币安人生USDT``. Phase 11C.1B refuses
+    # to use any character-class regex (``^[A-Z0-9_]{2,30}USDT$``) for
+    # symbol validation; the only authoritative source is the snapshot
+    # pulled from ``/fapi/v1/exchangeInfo`` at runner startup
+    # (:class:`app.market_data_public.symbol_universe.SymbolUniverse`).
+    #
+    #   WS_SYMBOL_REJECTED            - the candidate pool refused a
+    #                                   WS-radar symbol because it is
+    #                                   NOT in the bootstrapped
+    #                                   exchangeInfo set. The payload
+    #                                   carries the rejected symbol +
+    #                                   the reason tag so the daily
+    #                                   report and Reflection can
+    #                                   audit drift between bootstrap
+    #                                   and live WS pushes.
+    WS_SYMBOL_REJECTED = "WS_SYMBOL_REJECTED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

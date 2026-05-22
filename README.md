@@ -1,32 +1,62 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 10D - Telegram Outbound + Export Commands (Issue #10 Part 4).
-> **Paper / mock execution only.** Phase 10D adds the operator-facing
-> :mod:`app.telegram` outbound layer + the file-export bridge layered
-> on top of every Phase 1-10C contract. The dispatcher proactively
-> pushes formatter-rendered alerts (regime flips, candidate symbols,
-> state transitions, order events, risk rejections, profit locks,
-> capital rebases, P0/P1 incidents, daily reports). The command
-> center accepts 16 operator commands (status / positions / pnl /
-> risk / capital / incidents / pause / resume / kill_all / rebase +
-> 6 ``/export_*``). The export bridge connects ``/export_*`` to the
-> Phase 8.5 :class:`TestDataExportService` and sends a SHORT
-> generating summary + the redacted ``.zip`` document attachment;
-> never a raw chat dump. **The Risk Engine remains the single gate.**
-> The default boot path keeps ``outbound_enabled=False`` (Phase 1
-> safety lock + Phase 10D refusal-only HTTP skeleton); the Phase 10D
-> boot self-check exercises every public path against a deterministic
-> :class:`FakeTelegramClient` that opens NO socket. **Closes Issue #10**.
+> **Phase status:** Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar (PR-B).
+> **Paper / mock execution only.** Phase 11C.1B layers a real-network
+> public-market WebSocket adapter
+> (:class:`StdlibPublicWSTransport` - RFC 6455 over the Python
+> standard library, no third-party WS package) plus a routed
+> :class:`MultiTransportPublicWSManager` (one transport per
+> ``/public/{ws,stream}`` and ``/market/{ws,stream}`` route) on
+> top of every Phase 1-11C / 11C.1A contract. The runner subscribes
+> to the FIVE public Binance USDⓈ-M Futures WebSocket streams
+> (``!ticker@arr`` / ``!miniTicker@arr`` / ``!bookTicker`` /
+> ``!markPrice@arr`` / ``!forceOrder@arr``), feeds them into the
+> all-market radar buffer, scores every symbol, drives a bounded
+> :class:`CandidatePool`, and runs the existing Phase 11C event
+> chain only on the active head. The default WS transport refuses
+> to open a real socket (``NotImplementedError``); the in-process
+> pump covers ``--dry-run``; the routed real-network manager is
+> selected when ``--ws-first`` is set without ``--dry-run``. Phase
+> 11C.1B does NOT silently fall back to REST under ``--ws-first``;
+> if the real WS pump cannot be constructed the runner exits with
+> ``rc=2``.
 >
-> The Phase 1 safety lock (`mode=paper`,
-> `live_trading_enabled=False`, `right_tail_enabled=False`,
-> `llm_enabled=False`, `exchange_live_order_enabled=False`) and
-> every later boundary remain in force. The four
+> **Phase 11C.1B 5-min real public WS smoke: PASS.** ``ws_messages_received``
+> > 0, ``ws_chains_emitted`` > 0, ``rate_limit_429_count = 0``,
+> ``rate_limit_418_count = 0``, ``rate_limit_ban = False``, every
+> safety flag unchanged. Evidence:
+> ``docs/PHASE_11C_1B_DRY_RUN_EVIDENCE.md`` and the closing banner
+> emitted by the runner.
+>
+> **Symbol validation: exchangeInfo-as-truth, NEVER an ASCII-only
+> regex.** Binance USDⓈ-M Futures lists non-ASCII contracts (e.g.
+> ``我踏马来了USDT``, ``币安人生USDT``) - real listings with their own
+> ``/fapi/v1/exchangeInfo`` entries, WS pushes, and REST detail
+> endpoints. The runner bootstraps a
+> :class:`app.market_data_public.symbol_universe.SymbolUniverse`
+> from a one-shot ``/fapi/v1/exchangeInfo`` snapshot at startup;
+> the candidate pool consults that set on every ``offer()`` and
+> emits ``WS_SYMBOL_REJECTED`` for any WS-radar symbol that is NOT
+> in it - regardless of character class. Refusing symbols by
+> ASCII-only character class (``^[A-Z0-9_]{2,30}USDT$`` or any
+> equivalent) would silently lose discovery on every exotic
+> listing; the source-tree audit
+> ``tests/unit/test_phase11c_1b_symbol_universe.py
+> ::test_symbol_validation_uses_exchange_info_not_ascii_regex``
+> fails the next PR that re-introduces one.
+>
+> The Phase 1 safety lock (``mode=paper``,
+> ``live_trading_enabled=False``, ``right_tail_enabled=False``,
+> ``llm_enabled=False``, ``exchange_live_order_enabled=False``)
+> and every later boundary remain in force. The four
 > ``ExchangeClientBase`` write surfaces (``create_order``,
 > ``cancel_order``, ``set_leverage``, ``set_margin_mode``)
-> **continue to raise** ``SafeModeViolation`` and Phase 10D NEVER
-> overrides them. ``/kill_all`` and ``/rebase`` write audit events
-> only; no real exchange order is placed.
+> **continue to raise** ``SafeModeViolation``; no Phase 11C.1B
+> code path overrides them. No Binance API key, no Binance API
+> secret, no signed endpoint, no ``listenKey``, no user data
+> stream, no private WebSocket, no trading WebSocket API, no
+> ``/private`` routed surface, no DeepSeek, no Telegram outbound,
+> no Binance Square.
 
 ---
 
@@ -50,7 +80,201 @@ This is the implementation of the production specification in
 | Phase 10A - Replay Engine (Part 1 of Issue #10) | #10 (Part A) | merged | `feature/phase-10a-replay-engine` (PR #23) |
 | Phase 10B - Reflection Engine (Part 2 of Issue #10) | #10 (Part B) | merged | `feature/phase-10b-reflection-engine` (PR #24) |
 | Phase 10C - LLM Guarded Interpreter (Part 3 of Issue #10) | #10 (Part C) | merged | `feature/phase-10c-llm-guarded-interpreter` (PR #25) |
-| Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | this branch | `feature/phase-10d-telegram-outbound-export-commands` |
+| Phase 10D - Telegram Outbound + Export Commands (Part 4 of Issue #10) | #10 (Part D) | merged | `feature/phase-10d-telegram-outbound-export-commands` (PR #26) |
+| Phase 11B - Cloud Paper Acceptance | #11B | merged (GO) | 30/30 dry-run + 648/648 24h@2min observations PASS |
+| Phase 11C - Real Binance Public Market Data Read-Only Paper | #11C | open (parent) | held until 11C.1A + 11C.1B + 11C.1C all close |
+| Phase 11C.1A - Binance Public REST Rate Limit Governor & 418 Protection | #11C.1A | merged | `feature/phase-11c1-rest-rate-limit-governor` |
+| Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar | #11C.1B | this branch (5-min real WS smoke PASS) | `feature/phase-11c1-ws-first-all-market-radar` |
+
+## Phase 11C deliverable - Real Binance Public Market Data Read-Only Paper
+
+Phase 11C is the FIRST real-exchange surface in the project. It connects
+to Binance USDⓈ-M Futures **public-market** REST + WebSocket endpoints,
+feeds the data through the existing Phase 4 :class:`MarketDataBuffer`,
+the Phase 7 :class:`RiskEngine`, and the Phase 8.5 learning-ready
+contract, and emits the full Phase 11C event chain into ``events.db``.
+There is NO Binance API key, NO Binance API secret, NO signed endpoint,
+NO ``listenKey``, NO user data stream, NO private WebSocket, NO trading
+WebSocket API, NO ``/private`` routed surface, and NO real order. The
+four ``ExchangeClientBase`` write surfaces continue to raise
+:class:`SafeModeViolation`.
+
+The parent Phase 11C ships in three follow-up sub-phases (each a
+separate PR, each gated independently):
+
+  - **Phase 11C.1A** - Public REST Rate Limit Governor + 418 Protection
+    (merged). Caps per-IP weight at 300 / minute, sleeps Retry-After
+    on 429, latches into protection mode + opens a P1 incident on
+    418, lowers default cadence (``symbol_limit=5``,
+    ``rest_poll_interval_seconds=60``).
+  - **Phase 11C.1B** - WebSocket-First All-Market Demon Coin Radar
+    (this PR). Adds the real-network public-market WS adapter
+    (``StdlibPublicWSTransport``) + the routed
+    ``MultiTransportPublicWSManager`` + the
+    ``AllMarketRadarBuffer`` + the bounded ``CandidatePool`` + the
+    ``WSRadarChainDriver``. The runner now discovers demon coins
+    (妖币) without per-symbol REST detail polling.
+  - **Phase 11C.1C** - Multi-candidate priority ranking + cluster
+    classifier (separate branch). NOT in this PR.
+
+### What Phase 11C reads from Binance
+
+Public REST (one bootstrap + on-demand for the active candidate head):
+``/fapi/v1/exchangeInfo``, ``/fapi/v1/ticker/24hr``,
+``/fapi/v1/ticker/bookTicker``, ``/fapi/v1/klines``,
+``/fapi/v1/aggTrades``, ``/fapi/v1/depth``,
+``/fapi/v1/fundingRate``, ``/fapi/v1/openInterest``,
+``/fapi/v1/premiumIndex``.
+
+Public WebSocket (Phase 11C.1B routed acceptance path):
+
+  - PUBLIC route ``wss://fstream.binance.com/public/stream``:
+    ``!bookTicker``.
+  - MARKET route ``wss://fstream.binance.com/market/stream``:
+    ``!ticker@arr`` / ``!miniTicker@arr`` / ``!markPrice@arr`` /
+    ``!forceOrder@arr``.
+
+The unrouted ``wss://fstream.binance.com/stream`` URL is **not** the
+acceptance path: Binance silently drops market-class streams over
+unrouted connections.
+
+### What Phase 11C is NOT (refused at the URL parser + the host
+allowlist + the path-root allowlist + the stream allowlist + the
+denylist substring scan + every constructor's credential-shaped
+kwarg refusal)
+
+  - NOT live trading
+  - NOT connected to the Binance trading API
+  - NOT consuming any Binance API key / API secret / ``listenKey``
+  - NOT calling any signed endpoint
+  - NOT calling any account / position / leverage / margin endpoint
+  - NOT subscribing to any user data stream / private WebSocket /
+    trading WebSocket API
+  - NOT connecting to ``wss://fstream.binance.com/private`` or any
+    ``/ws-api`` / ``/ws-fapi`` / ``/ws-papi`` / ``/trading-api`` /
+    ``/userDataStream`` path-root variant
+  - NOT connected to DeepSeek
+  - NOT connected to a real Telegram bot
+  - NOT connected to 币安广场
+  - NOT a path into Phase 12
+
+### Phase 11C.1B 5-min real public WS smoke: PASS
+
+The 5-minute real public WS smoke against
+``wss://fstream.binance.com/public/stream`` and
+``wss://fstream.binance.com/market/stream`` reports:
+
+  - ``ws_messages_received`` > 0 (both routes pushed live frames);
+  - ``ws_chains_emitted`` > 0 (the candidate pool admitted active-head
+    candidates and the WS-radar chain fired end-to-end);
+  - ``rate_limit_429_count = 0``, ``rate_limit_418_count = 0``,
+    ``rate_limit_ban = False`` (the rate-limit governor never
+    triggered);
+  - ``PUBLIC_WS_CONNECTED`` written to ``events.db``;
+  - every safety flag unchanged
+    (``mode=paper``, ``live_trading=False``, ``right_tail=False``,
+    ``llm=False``, ``exchange_live_orders=False``,
+    ``telegram_outbound_enabled=False``,
+    ``binance_private_api_enabled=False``).
+
+The original 5-min smoke reported ``ws_messages_received=0`` because
+the per-tick non-blocking pump
+(``pump_messages(timeout_seconds=0.0)``) never entered the
+``StdlibPublicWSTransport.poll`` ``recv`` path - the deadline
+expired before any byte was read off the socket. The fix drains the
+recv buffer non-blockingly at the top of every ``poll`` call (and
+the runner now uses the WS pump's blocking timeout for its sleep
+window), so kernel-buffered bytes surface on every tick. Evidence:
+the ``test_real_ws_transport_drains_buffered_bytes_with_zero_timeout``
++ ``test_real_ws_runner_loop_pattern_drains_messages_with_zero_timeout``
+regression tests, and the closing run banner emitted by
+``scripts.run_public_market_paper``.
+
+### Phase 11C.1B symbol validation - exchangeInfo-as-truth
+
+Binance USDⓈ-M Futures lists contracts whose symbol contains
+non-ASCII characters - documented production examples include
+``我踏马来了USDT`` and ``币安人生USDT``. Each is a real Binance contract
+with its own ``/fapi/v1/exchangeInfo`` entry, its own all-market WS
+push under ``!ticker@arr`` / ``!miniTicker@arr`` / ``!bookTicker`` /
+``!markPrice@arr`` / ``!forceOrder@arr``, and its own
+``/fapi/v1/depth`` / ``/fapi/v1/aggTrades`` REST detail endpoint.
+A symbol filter that uses an ASCII-only character class
+(``^[A-Z0-9_]{2,30}(USDT|USDC)$`` or any equivalent) silently loses
+discovery on every exotic listing the moment Binance adds one.
+
+The Phase 11C.1B contract:
+
+  1. The runner bootstraps an
+     :class:`app.market_data_public.symbol_universe.SymbolUniverse`
+     from a single ``/fapi/v1/exchangeInfo`` snapshot at startup.
+  2. The :class:`CandidatePool` consults that universe on every
+     ``offer()``. Symbols IN the set are admitted, regardless of
+     character class. Symbols NOT in the set surface a typed
+     ``WS_SYMBOL_REJECTED`` event (with the rejected symbol +
+     reason tag + radar context on the payload) and the candidate
+     is silently dropped.
+  3. The dry-run / fixture fallback (``SymbolUniverse.empty()``)
+     admits every non-empty symbol so the existing 2000+ test
+     suite stays green.
+  4. The source-tree audit
+     ``tests/unit/test_phase11c_1b_symbol_universe.py
+     ::test_symbol_validation_uses_exchange_info_not_ascii_regex``
+     fails the next PR that re-introduces an ASCII-only symbol
+     regex anywhere on the WS-radar / symbol-validation path.
+
+The brief is explicit: **the rejection reason is "not in
+exchangeInfo", NEVER "non-ASCII character class".** A pure-ASCII
+symbol that is missing from the snapshot (e.g. a brand-new
+listing that came online mid-run, or a delisting whose WS pushes
+arrived between bootstrap and subscribe) is treated identically
+to a Chinese symbol that is missing.
+
+### Phase 11C / 11C.1A / 11C.1B daily-report fields
+
+The daily Markdown report now includes (every field is
+JSON-serialisable and surfaces from
+``CandidatePool.metrics_payload`` /
+``BinancePublicWSClient.metrics_payload`` /
+``BinancePublicRestGovernor.metrics_payload``):
+
+  - ``ws_routes_opened`` / ``ws_route_urls`` /
+    ``ws_messages_by_route`` (per-route push counters);
+  - ``ws_messages_received`` / ``ws_reconnect_count`` /
+    ``ws_staleness_ms_max`` / ``ws_stale_count`` /
+    ``ws_real_transport`` / ``ws_data_degraded_ticks``;
+  - ``radar_candidates_seen`` / ``candidate_pool_size_max`` /
+    ``candidate_pool_promoted`` / ``candidate_pool_evicted``;
+  - ``candidate_pool_rejected_by_universe`` /
+    ``ws_symbol_universe_size`` /
+    ``ws_symbol_universe_source`` /
+    ``ws_symbol_universe_bootstrapped``;
+  - ``rate_limit_429_count`` / ``rate_limit_418_count`` /
+    ``rate_limit_protection_triggered`` / ``rate_limit_ban``.
+
+### Run the Phase 11C.1B smoke ladder
+
+```
+# Dry-run (no socket; in-process pump)
+python -m scripts.run_public_market_paper \
+  --duration 30s --symbol-limit 5 --dry-run
+
+# Real public WS, 5 min (Phase 11C.1B acceptance smoke)
+python -m scripts.run_public_market_paper \
+  --duration 5min --symbol-limit 5 --ws-first
+
+# Real public WS, 24 h (Phase 11C real-data acceptance window)
+python -m scripts.run_public_market_paper \
+  --duration 24h --symbol-limit 5 --ws-first
+```
+
+The legacy
+``python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5``
+is **deprecated** - it predates the rate-limit governor and the
+routed WS adapter, and it triggered HTTP 418 in the original 24h
+test.
+
+---
 
 ## Phase 10D deliverable - Telegram Outbound + Export Commands (Issue #10 Part 4)
 
