@@ -253,7 +253,7 @@ pytest tests/ -k phase11c        272 PASS
   command:                       python -m scripts.run_public_market_paper \
                                    --duration 30s --symbol-limit 3 --dry-run \
                                    --poll-interval-seconds 1
-  banner phase tag               Phase 11C.1C-A v1.4.0a11c.1c.a
+  banner phase tag               Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
   dry_run                        True
   duration_seconds               30
   iterations                     30

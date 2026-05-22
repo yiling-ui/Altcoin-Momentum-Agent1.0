@@ -120,10 +120,16 @@ command: python -m scripts.run_public_market_paper \
            --duration 5min --symbol-limit 5 --ws-first \
            --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT
 
-banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
-                                      (CLI banner not yet bumped to
-                                      11C.1C-B; will be flipped on
-                                      ACCEPT or in a follow-up)
+banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
+                                      (the underlying numerics below
+                                      were captured on the same code
+                                      base modulo this PR's label-only
+                                      banner bump from
+                                      `Phase 11C.1C-A v1.4.0a11c.1c.a`
+                                      to
+                                      `Phase 11C.1C-B-IN_REVIEW
+                                      v1.4.0a11c.1c.b`; no data-plane
+                                      change.)
 dry_run                               False
 ws_real_transport                     True (real RFC 6455 stdlib
                                             transport;
@@ -306,12 +312,6 @@ raise `SafeModeViolation` on the public REST client.
 
 ## Remaining risk
 
-  - **CLI banner.** The runner banner still prints
-    `Phase 11C.1C-A v1.4.0a11c.1c.a`. The runtime-calibration
-    layer is functioning end-to-end on top of that banner; the
-    label flip to `Phase 11C.1C-B v1.4.0a11c.1c.b` can be done
-    on ACCEPT or in a follow-up doc-only PR. No behavioural
-    impact.
   - **REST-side observations are degraded by the sandbox-region
     geoblock.** The real Binance public WS path is unaffected
     (30526 frames, 0 stale, 0 reconnect). On an

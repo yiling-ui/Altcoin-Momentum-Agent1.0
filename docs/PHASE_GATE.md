@@ -349,10 +349,15 @@ tests/                                    2231 passed   (no regression vs. post-
   command:                              python -m scripts.run_public_market_paper \
                                           --duration 30s --symbol-limit 3 --dry-run \
                                           --poll-interval-seconds 1
-  banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
-                                        (CLI banner not yet bumped to
-                                        11C.1C-B; will be flipped on
-                                        ACCEPT or in a follow-up)
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
+                                        (banner now reflects the
+                                        post-bump label
+                                        `Phase 11C.1C-B-IN_REVIEW
+                                        v1.4.0a11c.1c.b`; the
+                                        underlying smoke numerics
+                                        are unchanged because the
+                                        bump is a code-label-only
+                                        change.)
   dry_run                               True
   ws_real_transport                     False (in-process pump as expected
                                                 under --dry-run)
@@ -404,10 +409,13 @@ tests/                                    2231 passed   (no regression vs. post-
   command:                              python -m scripts.run_public_market_paper \
                                           --duration 5min --symbol-limit 5 --ws-first \
                                           --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT
-  banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
-                                        (CLI banner not yet bumped to
-                                        11C.1C-B; will be flipped on
-                                        ACCEPT or in a follow-up)
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
+                                        (banner now reflects the
+                                        post-bump label; the
+                                        underlying smoke numerics
+                                        are unchanged because the
+                                        bump is a code-label-only
+                                        change.)
   dry_run                               False
   ws_real_transport                     True (real RFC 6455 stdlib transport;
                                               wss://fstream.binance.com routed
@@ -607,7 +615,7 @@ tests/unit/                               2219 PASS  (no regression; PR #36 bran
 30 s dry-run smoke
   command:                              python -m scripts.run_public_market_paper \
                                           --duration 30s --symbol-limit 3 --dry-run
-  banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
   dry_run                               True
   adaptive_candidate context generated  yes (per ACTIVE candidate)
   ws_messages_received                  6 (in-process pump)
@@ -631,7 +639,7 @@ tests/unit/                               2219 PASS  (no regression; PR #36 bran
   command:                              python -m scripts.run_public_market_paper \
                                           --duration 5min --symbol-limit 5 --ws-first \
                                           --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT
-  banner phase tag                      Phase 11C.1C-A v1.4.0a11c.1c.a
+  banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
   dry_run                               False
   ws_real_transport                     True (real RFC 6455 stdlib transport;
                                               wss://fstream.binance.com routed

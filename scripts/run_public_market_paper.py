@@ -1630,8 +1630,8 @@ def _print_banner(
             f"retry_after_default={cfg.retry_after_default_seconds}s)"
         )
     print(
-        "[AMA-RT] Phase 11C.1C-A - Adaptive Candidate Regime "
-        "& Strategy Selector "
+        "[AMA-RT] Phase 11C.1C-B-IN_REVIEW - Adaptive Candidate Runtime "
+        "Calibration & Early Tail Discovery v0 "
         f"v{__version__} "
         f"mode={settings.trading_mode} "
         f"live_trading={settings.live_trading_enabled} "
@@ -1670,7 +1670,7 @@ def _print_exit_banner(
     metrics = stats.governor_metrics or {}
     ws_metrics = stats.ws_metrics or {}
     print(
-        "[AMA-RT] Phase 11C.1C-A run finished "
+        "[AMA-RT] Phase 11C.1C-B-IN_REVIEW run finished "
         f"duration_seconds={duration_s} "
         f"iterations={stats.iterations} "
         f"chains_emitted={stats.chains_emitted} "
