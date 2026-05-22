@@ -28,6 +28,8 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 10D   | Telegram Outbound + Export Commands                | 2026-05 (est.)  | `docs/CHANGELOG.md`                                            |
 | 11B   | Cloud Paper Acceptance                             | 2026-05-19      | `docs/PHASE_11B_PAPER_ACCEPTANCE_REPORT.md`                    |
 | 11B-HF | Cloud Paper - High-Frequency observation          | 2026-05-19      | 30/30 dry-run PASS; 648/648 24h@2min observations PASS         |
+| 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | 2026-05-21 | PR #31 merged; `tests/unit/test_phase11c1a_rate_limit_governor.py` |
+| 11C.1B | WebSocket-First All-Market Demon Coin Radar (incl. SymbolUniverse exchangeInfo-as-truth) | 2026-05-22 | PRs #32 / #33 / #34 merged; 5min / 10min / 1h real WS smoke PASS; export zip generated; events.db readable; safety flags unchanged. See "Phase 11C.1B acceptance summary" below. |
 
 ### Phase 11B-HF acceptance summary
 
@@ -49,7 +51,188 @@ real Telegram:      not connected
 real DeepSeek:      not connected
 ```
 
-## Open phase: Phase 11C.1B
+### Phase 11C.1B acceptance summary
+
+Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar (incl. the
+SymbolUniverse / exchangeInfo-as-truth follow-up) - was accepted on
+**2026-05-22 (UTC)**. The acceptance evidence is the cloud real-WS
+smoke ladder + the persistence + export sanity checks below; the Phase
+1 safety lock is unchanged throughout.
+
+**Composing PRs (all merged):**
+
+  - PR #31 - Phase 11C.1A: Binance Public REST Governor / 429
+    backoff / 418 shutdown protection.
+  - PR #32 - Phase 11C.1B PR-B: WebSocket-first all-market radar;
+    real `StdlibPublicWSTransport`; routed `/public/stream` +
+    `/market/stream`.
+  - PR #33 - Phase 11C.1B follow-up: fix real WS poll zero-timeout
+    that was leaving `ws_messages_received=0`.
+  - PR #34 - Phase 11C.1B follow-up: `SymbolUniverse` /
+    exchangeInfo-as-truth; non-ASCII Binance contract symbols
+    admitted; ASCII-only symbol regex banned on the validation
+    path; `CandidatePool` now preserves the canonical exchangeInfo
+    string verbatim.
+
+**Real-WS smoke ladder (all PASS):**
+
+```
+5 min real WS    PASS
+  ws_messages_received           = 30317
+  ws_chains_emitted              = 12
+  ingestion_errors               = 0
+  rate_limit_429_count           = 0
+  rate_limit_418_count           = 0
+  ws_stale_count                 = 0
+
+10 min real WS   PASS
+  duration_seconds               = 608
+  ws_messages_received           = 59644
+  ws_chains_emitted              = 27
+  ingestion_errors               = 0
+  rate_limit_429_count           = 0
+  rate_limit_418_count           = 0
+  ws_stale_count                 = 0
+
+1 h real WS (clean)  PASS
+  duration_seconds               = 3600
+  dry_run                        = false
+  ws_real_transport              = true
+  ws_messages_received           = 349134
+  ws_chains_emitted              = 177
+  ws_learning_ready_attached     = 177
+  snapshots_emitted              = 177
+  ingestion_errors               = 0
+  HTTP 429 count                 = 0
+  HTTP 418 count                 = 0
+  rate_limit_ban                 = False
+  ws_reconnect_count             = 0
+  ws_staleness_ms_max            = 0
+  ws_stale_count                 = 0
+  ws_currently_stale             = False
+```
+
+**Persistence + export evidence:**
+
+```
+events.db
+  events_count                   = 56644
+  event-aggregation query        = passed without traceback
+Phase 8.5 export
+  outcome                        = generated successfully
+  format                         = zip archive
+Demon-coin discovery sanity
+  EDENUSDT in radar top-symbols  = yes
+  EDENUSDT in top event volume   = yes
+```
+
+**Safety flags held throughout the Phase 11C.1B acceptance run:**
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none (`/private` refused at allowlist)
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+**Acceptance conditions checked off:**
+
+  - [x] Real WS 5 min run PASS.
+  - [x] Real WS 10 min run PASS.
+  - [x] Real WS 1 h run PASS.
+  - [x] No HTTP 429 across the ladder.
+  - [x] No HTTP 418 across the ladder.
+  - [x] No `ws_stale` ticks across the ladder.
+  - [x] No ingestion errors across the ladder.
+  - [x] Phase 8.5 export zip generated successfully.
+  - [x] `events.db` readable + event-aggregation query green.
+  - [x] Phase 1 safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `right_tail=False`, `llm=False`,
+    `exchange_live_orders=False`, `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`).
+
+## Open phase: Phase 11C.1C
+
+**Phase 11C.1C - Adaptive Candidate Regime & Strategy Selector.**
+Status: **NEXT_ALLOWED / NOT_STARTED.** No code in this repo state
+implements Phase 11C.1C. The detailed gate criteria (test matrix,
+metric contracts, daily-report extensions, safety invariants beyond
+those inherited from Phase 11C.1B) will be drafted here as part of
+the Phase 11C.1C kickoff PR; until then this section is intentionally
+a stub.
+
+### Phase 11C.1C boundary (must hold from day one)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Binance API key / secret                    | refused at construction      |
+| Signed endpoint                             | refused at allowlist check   |
+| `listenKey` / user data stream              | refused at WS allowlist + URL parser |
+| Private WebSocket / trading WS API          | refused at WS allowlist      |
+| Routed-private endpoint (`/private`)        | refused at path-root allowlist |
+| DeepSeek trade-decision authority           | NOT permitted                |
+| Real Telegram outbound                      | NOT permitted                |
+| Phase 12 (live trading)                     | FORBIDDEN                    |
+
+### Phase 11C.1C explicitly forbids (inherited from Phase 11C.1B)
+
+  - Connecting to the Binance trading API.
+  - Reading or storing any Binance API key / API secret /
+    `listenKey`.
+  - Calling any signed endpoint.
+  - Subscribing to any user data stream / private WebSocket /
+    trading WebSocket API / account / margin / position / leverage
+    / balance / order private WS variant.
+  - Connecting to the routed-private endpoint
+    `wss://fstream.binance.com/private` (or any `/ws-api` /
+    `/ws-fapi` / `/ws-papi` / `/trading-api` / `/userDataStream`
+    path-root variant).
+  - Connecting to DeepSeek as a trade-decision authority.
+  - Connecting to the real Telegram outbound HTTP transport.
+  - Auto-retrying after a 418, switching endpoints to evade a 418,
+    rotating source IP to evade a 418.
+  - Introducing a Strategy Selector with live-trading authority.
+  - Enabling AI Learning that auto-decides trades.
+  - Entering Phase 12.
+
+### Phase 11C.1C acceptance gate (placeholder)
+
+To be filled in by the Phase 11C.1C kickoff PR. At minimum the gate
+will require:
+
+  1. The Phase 1 safety lock unchanged.
+  2. A real-WS smoke ladder analogous to Phase 11C.1B's 5min / 10min
+     / 1h ladder, with zero 429 / 418 / stale / ingestion errors.
+  3. Adaptive candidate-regime / strategy-selector decisions emitted
+     as typed events into `events.db` with a Phase 8.5
+     `LearningReadyContext`, but **without** authority to issue real
+     orders.
+  4. A source-tree audit refusing any third-party HTTP / WebSocket /
+     SDK / LLM / Telegram / trading-API import on the Phase 11C.1C
+     surface.
+  5. The four `ExchangeClientBase` write surfaces still raise
+     `SafeModeViolation` after every Phase 11C.1C run.
+
+## Closed phase: Phase 11C.1B
 
 **Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar (PR-B).**
 Phase 11C.1A (PR-A) shipped the rate-limit governor and capped per-loop
@@ -199,19 +382,28 @@ After PR #32 merges (which ships the routed real-network
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
 | 30 s dry-run        | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                | PASS                        |
 | 5 min real WS       | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              | **PASS (2026-05-22)**       |
-| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             | pending (next ladder rung)  |
-| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                | pending                     |
-| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                | pending                     |
-| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               | pending (Phase 11C closure) |
+| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             | **PASS (2026-05-22)**       |
+| 1 h real WS (clean) | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                | **PASS (2026-05-22)**       |
+| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                | optional / not required for Phase 11C.1B closeout |
+| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               | optional / parent Phase 11C longer-window, not required for Phase 11C.1B closeout |
 
-The 5-min PASS rung records: `ws_messages_received > 0`,
-`ws_chains_emitted > 0`, `radar_candidates_seen >= 0` (no longer
-stuck at 0 due to no messages), `PUBLIC_WS_CONNECTED` written,
-no 429 / 418, every safety flag unchanged. The earlier failure
-mode (`ws_messages_received=0` for the full 300s window) was a
-zero-timeout `recv` short-circuit in the stdlib WS transport;
-fixed by draining the recv buffer non-blockingly at the top of
-every `poll` call (see PR #33 / PR-B follow-up commits).
+All three Phase 11C.1B acceptance rungs (5min / 10min / 1h) record:
+`ws_messages_received > 0`, `ws_chains_emitted > 0`,
+`radar_candidates_seen >= 0` (no longer stuck at 0 due to no
+messages), `PUBLIC_WS_CONNECTED` written, no 429 / 418, no
+`ws_stale_count`, no ingestion errors, every safety flag
+unchanged. Full numerics live in
+"Phase 11C.1B acceptance summary" above. The earlier failure mode
+(`ws_messages_received=0` for the full 300s window of the first
+5-min run) was a zero-timeout `recv` short-circuit in the stdlib
+WS transport; fixed by draining the recv buffer non-blockingly at
+the top of every `poll` call (PR #33).
+
+The 6h / 24h rungs are intentionally **optional**: Phase 11C.1B
+closure does NOT require them. They belong to the parent Phase
+11C longer-window observation work (or to a future Phase 11C+
+multi-week paper window) and remain available to anyone who wants
+extra confidence before Phase 11C.1C kicks off.
 
 The legacy command
 `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5`
@@ -268,19 +460,25 @@ multi-candidate arbitration) remains a separate branch.
 ## Closed phase: Phase 11C.1A
 
 **Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
-Protection (PR-A).** Merged. Phase 11C real-data acceptance is paused
-until PR-B lands (which now folds the stdlib WS adapter in).
+Protection (PR-A).** Merged. The Phase 11C real-data acceptance
+pause that motivated this PR was **resolved** by the combined work
+of PRs #31 + #32 + #33 + #34: PR #31 shipped the rate-limit
+governor here; PR #32 shipped the WebSocket-first all-market radar
++ the routed real-network public WS adapter; PR #33 fixed the
+real-WS poll zero-timeout; PR #34 enforced exchangeInfo-as-truth
+symbol validation. Phase 11C.1B is now ACCEPTED.
 
-  - **PR-A** (closed, `feature/phase-11c1-rest-rate-limit-governor`)
+  - **PR-A** (closed, merged in PR #31)
     ships `BinancePublicRestGovernor` (sliding-window weight budget,
     429 backoff, 418 shutdown, `Retry-After`, used-weight tracking),
     lower defaults, and the layered REST runner. NO new candidate
     ranking, NO WebSocket transport.
-  - **PR-B** (this branch, `feature/phase-11c1-ws-first-all-market-radar`)
-    ships the WebSocket-first all-market radar +
-    multi-candidate priority ranking + `candidate_detail_limit`
-    consumption + the real-network `StdlibPublicWSTransport` (RFC
-    6455 over `socket` + `ssl`, stdlib only) + the routed
+  - **PR-B** (closed, merged in PR #32, with follow-ups PR #33 +
+    PR #34)
+    ships the WebSocket-first all-market radar, candidate pool
+    plumbing, `candidate_detail_limit` consumption for REST detail
+    enrichment, the real-network `StdlibPublicWSTransport` (RFC
+    6455 over `socket` + `ssl`, stdlib only), and the routed
     `MultiTransportPublicWSManager` (one `StdlibPublicWSTransport`
     per route - PUBLIC at `/public/stream`, MARKET at
     `/market/stream`). The default WS transport still refuses to
@@ -290,9 +488,15 @@ until PR-B lands (which now folds the stdlib WS adapter in).
     whenever `--ws-first` is set without `--dry-run`. The
     routed-private endpoint `/private` is on
     `FORBIDDEN_WS_PATH_ROOTS` and is never opened.
-  - **PR-C** (separate branch, NOT in this PR) ships
-    priority_score / cluster classifier / same-cluster leader /
-    multi-candidate arbitration.
+    Multi-candidate priority ranking, `priority_score`, cluster
+    classifier, same-cluster leader selection, and strategy
+    selector are explicitly **NOT** in Phase 11C.1B scope: they
+    remain Phase 11C.1C scope (NEXT_ALLOWED / NOT_STARTED).
+  - **PR-C** (priority_score / cluster classifier / same-cluster
+    leader / multi-candidate arbitration) is **not** Phase 11C.1B
+    work. It rolls into Phase 11C.1C - Adaptive Candidate Regime
+    & Strategy Selector, which is currently NEXT_ALLOWED /
+    NOT_STARTED (see "Open phase: Phase 11C.1C" above).
 
 ### Phase 11C.1A boundary (must hold for the entire PR-A scope)
 
@@ -378,31 +582,49 @@ After PR-A merges:
     stops the runner with `rc=2`. The runner does NOT auto-retry,
     does NOT switch endpoints, does NOT rotate source IP.
 
-The Phase 11C real-data 24h acceptance run will resume only after
-PR-B (WebSocket-first radar + candidate ranking) has also landed,
-because PR-A on its own deliberately leaves the per-loop detail
-REST silent.
+The Phase 11C real-data acceptance pause **was resolved** once
+PR-B (WebSocket-first radar) landed alongside PR-A and its
+follow-ups. Candidate ranking remains Phase 11C.1C scope. PR-B
+merged via PR #32, with follow-ups in PR #33 and PR #34; the
+Phase 11C.1B real-WS smoke ladder (5min / 10min / 1h) ran cleanly
+on 2026-05-22 (UTC) and Phase 11C.1B is ACCEPTED.
 
-## Closed phase: Phase 11C (held)
+## Phase 11C parent (open, follow-ups landed)
 
-Phase 11C remains open as a parent phase; its real-data acceptance
-run is paused until Phase 11C.1A + 11C.1B + 11C.1C ship. The
-public-market client, allowlist, event chain, and runner skeleton
-all continue to satisfy their original Phase 11C acceptance gates;
-only the cadence and detail-REST behaviour have been narrowed.
+Phase 11C remains open as a parent / umbrella phase. Phase 11C.1A
+and Phase 11C.1B have **shipped** (PRs #31 / #32 / #33 / #34
+merged) and Phase 11C.1B is ACCEPTED on the 5min / 10min / 1h
+real-WS smoke ladder. Phase 11C.1C is **NEXT_ALLOWED /
+NOT_STARTED**. The longer-window real-data observation rungs (6h /
+24h / multi-week) remain optional under the parent and are NOT
+required for Phase 11C.1B closure. The public-market client,
+allowlist, event chain, and runner skeleton continue to satisfy
+the original Phase 11C acceptance gates; only the cadence and
+detail-REST behaviour have been narrowed.
 
 ## Closed phases (carry-forward)
 
 The closed-phase ledger above remains unchanged. The Phase 11C
-parent phase stays open until all three follow-up PRs land and the
-real-data 24h acceptance run is reproduced.
+parent phase stays open while Phase 11C.1C is drafted; longer
+real-data windows (6h / 24h / multi-week) are tracked here but
+are **not** Phase 11C.1B closure prerequisites.
 
 ### Phase 11C acceptance criteria
 
 1. `pytest` 全部通过.
-2. `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20`
+2. `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`
    completes without exception, producing a daily report at
-   `data/reports/phase11c/{date}-phase11c-public-market.md`.
+   `data/reports/phase11c/{date}-phase11c-public-market.md`. The
+   1h WS-first run is the active Phase 11C acceptance gate; the
+   6h / 24h WS-first runs are **optional** parent Phase 11C
+   longer-window observation rungs (or part of a future Phase
+   11C+ multi-week paper window) and are NOT required to close
+   Phase 11C.1B. The legacy command
+   `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5`
+   is **deprecated and must not be used** - it predates the
+   PR-A rate-limit governor and the PR-B routed WS endpoints,
+   and exercises the pre-PR-A "fetch every detail endpoint for
+   every symbol every loop" pattern that triggered HTTP 418.
 3. Real `MARKET_SNAPSHOT` events written to `events.db` carry the
    Phase 11C tag (`provider="binance_public"`, `phase="11C"`).
 4. `SignalSnapshot` is built from real market data and written into
@@ -464,15 +686,18 @@ GET /fapi/v1/premiumIndex
 
 | Candidate          | Gate                                                                                   |
 | ------------------ | -------------------------------------------------------------------------------------- |
-| Phase 11C+ (longer paper window, e.g. 7d / 14d) | Phase 11C 24h acceptance closed                                       |
-| Phase 11D (DeepSeek READ-ONLY narrative interpreter) | Phase 11C closed; Phase 11C dataset reviewed                     |
-| Phase 12 (Limited live)                         | NOT permitted from Phase 11C alone. Requires Spec §41 Go/No-Go.       |
+| Phase 11C.1C (Adaptive Candidate Regime & Strategy Selector) | **NEXT_ALLOWED / NOT_STARTED.** Paper-mode only. See "Open phase: Phase 11C.1C" above for the inherited Phase 11C.1B forbidden set. |
+| Phase 11C+ (longer paper window, e.g. 7d / 14d) | Phase 11C parent 24h acceptance closed (still optional after the 11C.1B 1h PASS).      |
+| Phase 11D (DeepSeek READ-ONLY narrative interpreter) | Phase 11C closed; Phase 11C dataset reviewed.                                    |
+| Phase 12 (Limited live trading) | **FORBIDDEN.** NOT permitted from Phase 11C.1B alone, NOT permitted from Phase 11C.1C alone. Requires Spec §41 Go/No-Go. |
 
-**Phase 11C closing does NOT authorise Phase 12.** Phase 12 is gated
+**Phase 11C.1B closing does NOT authorise Phase 12.** Phase 12 is gated
 by:
 
   - Spec §41 Go/No-Go checklist
+  - Phase 11C.1C closed
   - Phase 11D (or another Phase 11C+ window) closed
   - Multi-week paper-mode dataset reviewed
   - Operational evidence the four write surfaces, the No-Trade Gate,
     and the Reconciliation loop have held under real-data load
+  - Explicit operator sign-off; Phase 12 is never auto-promoted
