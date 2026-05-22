@@ -1354,11 +1354,61 @@ def main(argv: list[str] | None = None) -> int:
                 stats.notes.append("rate_limit_protection_mode")
                 break
             # Sleep until the next tick. We use small chunks so Ctrl+C
-            # is responsive.
+            # is responsive AND - Phase 11C.1B PR-B fix - we keep
+            # pumping the public WebSocket during the wait window so
+            # the OS TCP receive buffer drains continuously instead
+            # of piling up between ticks. The earlier code called
+            # ``ws_client.pump_messages(timeout_seconds=0.0)`` ONCE
+            # per tick and then ``time.sleep(poll_interval)``; with
+            # the stdlib transport the non-blocking probe never
+            # entered ``recv`` and the radar buffer stayed empty
+            # (smoke test reproduced ws_messages_received=0). For
+            # the real-network transport we now use the WS pump's
+            # blocking timeout for the sleep itself: each chunk
+            # lets ``select`` block for up to ``sleep_chunk``
+            # seconds waiting for socket bytes, then returns
+            # whatever frames arrived. The kernel buffer never gets
+            # a chance to overflow on long-running deployments.
+            #
+            # The in-process pump (``--dry-run``) and the legacy
+            # back-compat refusal pump don't block on poll, so we
+            # fall back to ``time.sleep`` for them - otherwise the
+            # sleep window collapses into a tight CPU spin.
             slept = 0.0
+            sleep_chunk = 0.5
+            ws_pump_blocks_on_poll = bool(
+                ws_first
+                and ws_client is not None
+                and radar_buffer is not None
+                and not ws_pump_is_in_process
+            )
             while slept < poll_interval and not stop_flag["stop"]:
-                time.sleep(min(0.5, poll_interval - slept))
-                slept += 0.5
+                chunk = min(sleep_chunk, poll_interval - slept)
+                if ws_pump_blocks_on_poll and ws_client.is_connected:
+                    try:
+                        extra = ws_client.pump_messages(
+                            timeout_seconds=chunk
+                        )
+                    except NotImplementedError:
+                        # Mid-run regression to refusal-mode; degrade.
+                        stats.notes.append("ws_pump_notimplemented")
+                        ws_first = False
+                        ws_pump_blocks_on_poll = False
+                        time.sleep(chunk)
+                        slept += chunk
+                        continue
+                    except Exception as exc:  # pragma: no cover
+                        stats.notes.append(
+                            f"ws_pump_sleep_error:{type(exc).__name__}"
+                        )
+                        time.sleep(chunk)
+                        slept += chunk
+                        continue
+                    if extra:
+                        radar_buffer.ingest_messages(extra)
+                else:
+                    time.sleep(chunk)
+                slept += chunk
     except KeyboardInterrupt:  # pragma: no cover - rare
         stats.notes.append("keyboard_interrupt")
     except RateLimitProtectionError as exc:
