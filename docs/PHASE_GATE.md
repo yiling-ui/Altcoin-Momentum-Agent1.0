@@ -475,10 +475,10 @@ symbol validation. Phase 11C.1B is now ACCEPTED.
     ranking, NO WebSocket transport.
   - **PR-B** (closed, merged in PR #32, with follow-ups PR #33 +
     PR #34)
-    ships the WebSocket-first all-market radar +
-    multi-candidate priority ranking + `candidate_detail_limit`
-    consumption + the real-network `StdlibPublicWSTransport` (RFC
-    6455 over `socket` + `ssl`, stdlib only) + the routed
+    ships the WebSocket-first all-market radar, candidate pool
+    plumbing, `candidate_detail_limit` consumption for REST detail
+    enrichment, the real-network `StdlibPublicWSTransport` (RFC
+    6455 over `socket` + `ssl`, stdlib only), and the routed
     `MultiTransportPublicWSManager` (one `StdlibPublicWSTransport`
     per route - PUBLIC at `/public/stream`, MARKET at
     `/market/stream`). The default WS transport still refuses to
@@ -488,10 +488,15 @@ symbol validation. Phase 11C.1B is now ACCEPTED.
     whenever `--ws-first` is set without `--dry-run`. The
     routed-private endpoint `/private` is on
     `FORBIDDEN_WS_PATH_ROOTS` and is never opened.
+    Multi-candidate priority ranking, `priority_score`, cluster
+    classifier, same-cluster leader selection, and strategy
+    selector are explicitly **NOT** in Phase 11C.1B scope: they
+    remain Phase 11C.1C scope (NEXT_ALLOWED / NOT_STARTED).
   - **PR-C** (priority_score / cluster classifier / same-cluster
-    leader / multi-candidate arbitration) remains a separate,
-    future scope item and is **not** required for Phase 11C.1B
-    closure. It is tracked alongside the future Phase 11C.1C work.
+    leader / multi-candidate arbitration) is **not** Phase 11C.1B
+    work. It rolls into Phase 11C.1C - Adaptive Candidate Regime
+    & Strategy Selector, which is currently NEXT_ALLOWED /
+    NOT_STARTED (see "Open phase: Phase 11C.1C" above).
 
 ### Phase 11C.1A boundary (must hold for the entire PR-A scope)
 
