@@ -14,15 +14,66 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 Calibration & Early Tail Discovery layer that builds on top of
 the Phase 11C.1C-A contracts.
 
-> **Status: IN_REVIEW / PR_OPEN on PR #38.** PR #38 is currently
-> open against `main` (post-PR-#37 baseline) and has **not** been
-> merged. The entry below describes the changes shipped on the
-> PR branch; Phase 11C.1C-B will only be marked **ACCEPTED**
-> after PR #38 is merged AND a human reviewer accepts the 30s
-> dry-run + 5min real public WS smoke evidence collected for
-> the PR. Until that gate fires, this entry is pre-merge /
-> IN_REVIEW. Phase 11C.1C-C remains **NOT_STARTED**. Phase 12
+> **Status: ACCEPTED (closed 2026-05-22; PR #38 merged into
+> `main`, mergeCommit `ce4b6de`).** The 30s dry-run + 5min real
+> public WS smoke evidence (recorded under
+> `docs/PHASE_GATE.md` §"Phase 11C.1C-B acceptance evidence
+> (closeout)") was accepted; PR #38 has been merged into
+> `main`; Phase 11C.1C-B is therefore **ACCEPTED**. Phase
+> 11C.1C-C is now **NEXT_ALLOWED / NOT_STARTED**. Phase 12
 > remains **FORBIDDEN**.
+
+#### Phase 11C.1C-B accepted (closeout summary)
+
+  - Adaptive Candidate Runtime Calibration
+  - Early Tail Discovery v0
+  - `early_tail_score`
+  - `late_chase_risk`
+  - runtime calibration metrics (15 brief-mandated fields on
+    every adaptive event)
+  - top early-tail candidate reporting
+    (`top_early_tail_candidates` /
+    `top_late_chase_risk_candidates` /
+    `early_tail_score_top_symbols` /
+    `opportunity_score_distribution` in the daily report)
+  - paper-only, no live trading
+  - PR #38 merged into `main` (mergeCommit `ce4b6de`)
+  - 30s dry-run smoke PASS (runtime calibration block + Phase
+    11C.1C-B daily-report section)
+  - 5min real public WS smoke PASS (`dry_run=false`,
+    `ws_real_transport=true`, `ws_messages_received=30526`,
+    `ws_chains_emitted=12`, `rate_limit_429_count=0`,
+    `rate_limit_418_count=0`, `rate_limit_ban=False`,
+    `ws_stale_count=0`, `ws_reconnect_count=0`,
+    `ingestion_errors=12` explainable as sandbox-region HTTP
+    451 geoblock on Binance REST — NOT a 429/418/ban; WS pump
+    ran cleanly throughout)
+  - 12 brief-mandated tests PASS / 257 phase11c tests PASS /
+    2231 full pytest PASS (no regression vs. post-PR-#37
+    main baseline)
+  - safety flags unchanged (`mode=paper`, `live_trading=False`,
+    `right_tail=False`, `llm=False`, `exchange_live_orders=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`)
+  - no Binance API key
+  - no Binance API secret
+  - no signed endpoint
+  - no account/order/position/leverage/margin endpoint
+  - no private websocket
+  - no listenKey
+  - no DeepSeek trade decision
+  - no real Telegram outbound
+  - Phase 12 remains FORBIDDEN
+
+> **Phase 11C.1C-B acceptance does NOT authorise live trading,
+> API keys, private endpoints, DeepSeek trade decisions, real
+> Telegram outbound, or Phase 12.** The Phase 1 safety lock and
+> every Phase 11C.1B / 11C.1C-A forbidden item carry over
+> unchanged. The new `early_tail_score` is descriptive only:
+> it protects a candidate from capacity-driven eviction in the
+> candidate pool but does NOT authorise opening a real
+> position. The Risk Engine remains the single trade-decision
+> gate.
 
 > **Phase 11C.1C-B is NOT live trading. NOT AI Learning. NOT
 > complete strategy validation. NOT the full MFE/MAE processor.

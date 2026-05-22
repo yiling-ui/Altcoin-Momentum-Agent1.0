@@ -31,6 +31,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | 2026-05-21 | PR #31 merged; `tests/unit/test_phase11c1a_rate_limit_governor.py` |
 | 11C.1B | WebSocket-First All-Market Demon Coin Radar (incl. SymbolUniverse exchangeInfo-as-truth) | 2026-05-22 | PRs #32 / #33 / #34 merged; 5min / 10min / 1h real WS smoke PASS; export zip generated; events.db readable; safety flags unchanged. See "Phase 11C.1B acceptance summary" below. |
 | 11C.1C-A | Adaptive Candidate Regime & Strategy Selector Contracts (paper-only) | 2026-05-22 | PR #36 merged; PR #37 docs closeout; 244/244 phase11c tests + 2219/2219 full pytest pass; 30s dry-run + 5min real public WS smoke PASS (32842 real WS messages, 12 chains, 12 each of the six adaptive event types, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban); daily report contains the Phase 11C.1C-A adaptive section; safety flags unchanged. See "Closed phase: Phase 11C.1C-A (ACCEPTED)" below. |
+| 11C.1C-B | Adaptive Candidate Runtime Calibration & Early Tail Discovery v0 (paper-only) | 2026-05-22 | PR #38 merged into `main` (mergeCommit `ce4b6de`); 12/12 brief-mandated tests + 257/257 phase11c tests + 2231/2231 full pytest pass on the PR branch; 30s dry-run + 5min real public WS smoke PASS (`dry_run=false`, `ws_real_transport=true`, 30526 real WS messages, 12 chains, 72 each of the six adaptive event types, runtime calibration block on every adaptive event with all 15 fields, `top_early_tail_candidates` / `top_late_chase_risk_candidates` / `early_tail_score_top_symbols` / `opportunity_score_distribution` in the daily report, `label_queue` contract-only, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban); safety flags unchanged. See "Phase 11C.1C-B acceptance evidence (closeout)" below. |
 
 
 ### Phase 11B-HF acceptance summary
@@ -173,21 +174,34 @@ Contracts (PR #36).** Status: **ACCEPTED (closed 2026-05-22; PR
 smoke evidence below was accepted. Phase 11C.1C-A shipped the
 **paper-only first version** of the data contracts + scoring +
 selector + paper-only routing for the Adaptive Candidate Regime &
-Strategy Selector. Phase 11C.1C-B is now **IN_REVIEW / PR_OPEN**
-on PR #38 (see "Open phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)"
-below); Phase 12 (live trading) remains **FORBIDDEN**.
+Strategy Selector. Phase 11C.1C-B is now **ACCEPTED (closed
+2026-05-22; PR #38 merged into `main`, mergeCommit `ce4b6de`)** —
+see "Closed phase: Phase 11C.1C-B (ACCEPTED)" below; Phase
+11C.1C-C is **NEXT_ALLOWED / NOT_STARTED** (see "Open phase:
+Phase 11C.1C-C (NEXT_ALLOWED / NOT_STARTED)" below); Phase 12
+(live trading) remains **FORBIDDEN**.
 
-## Open phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)
+## Closed phase: Phase 11C.1C-B (ACCEPTED)
 
 **Phase 11C.1C-B — Adaptive Candidate Runtime Calibration & Early
-Tail Discovery v0 (PR #38).** Status: **IN_REVIEW / PR_OPEN.** PR
-#38 is currently open against `main` (post-PR-#37 baseline); the
-runtime-calibration first version is implemented on the branch
-but **NOT YET MERGED**. Phase 11C.1C-B will only be marked
-**ACCEPTED** after PR #38 is merged AND the smoke evidence in
-this section is accepted by a human reviewer. Until that gate
-fires, Phase 11C.1C-B is **NOT** closed; Phase 11C.1C-C remains
-**NOT_STARTED**; Phase 12 (live trading) remains **FORBIDDEN**.
+Tail Discovery v0 (PR #38).** Status: **ACCEPTED (closed
+2026-05-22; PR #38 merged into `main`, mergeCommit
+`ce4b6de`).** PR #38 has been merged into `main`; the 30s
+dry-run + 5min real public WS smoke evidence captured below
+under "Phase 11C.1C-B acceptance evidence (closeout)" was
+accepted. Phase 11C.1C-B shipped the **paper-only first
+version** of the Adaptive Candidate Runtime Calibration & Early
+Tail Discovery layer on top of the Phase 11C.1C-A contracts.
+Phase 11C.1C-C is now **NEXT_ALLOWED / NOT_STARTED** (see
+"Open phase: Phase 11C.1C-C (NEXT_ALLOWED / NOT_STARTED)"
+below); Phase 12 (live trading) remains **FORBIDDEN**.
+
+> **Phase 11C.1C-B acceptance does NOT authorise live trading.**
+> **Phase 11C.1C-B does NOT authorise API keys.**
+> **Phase 11C.1C-B does NOT authorise private endpoints.**
+> **Phase 11C.1C-B does NOT authorise DeepSeek trade decisions.**
+> **Phase 11C.1C-B does NOT authorise real Telegram outbound.**
+> **Phase 11C.1C-B does NOT authorise Phase 12.**
 
 > Phase 11C.1C-B is **paper-mode only**. It is **NOT** live
 > trading, **NOT** AI Learning, **NOT** complete Strategy
@@ -195,11 +209,7 @@ fires, Phase 11C.1C-B is **NOT** closed; Phase 11C.1C-C remains
 > Telegram outbound, **NOT** real Binance trading API. Phase
 > 12 (live trading) stays `FORBIDDEN`.
 
-> After PR #38 is merged AND the smoke evidence below is
-> accepted, Phase 11C.1C-B may be marked ACCEPTED. Until then it
-> is **NOT** ACCEPTED, **NOT** MERGED, **IN_REVIEW / PR_OPEN**.
-
-### Phase 11C.1C-B scope (shipped on the PR #38 branch)
+### Phase 11C.1C-B scope (shipped on `main` via PR #38)
 
   1. **Runtime calibration metrics** attached to every adaptive
      candidate context (Phase 8.5 ``learning_ready`` +
@@ -246,7 +256,7 @@ fires, Phase 11C.1C-B is **NOT** closed; Phase 11C.1C-C remains
      the daily report, and the Phase 8.5 export. Phase 10A
      replay accepts the new fields without failure.
 
-### Phase 11C.1C-B boundary (must hold from day one)
+### Phase 11C.1C-B boundary (held throughout the entire scope)
 
 | Invariant                                   | Required value               |
 | ------------------------------------------- | ---------------------------- |
@@ -290,30 +300,30 @@ fires, Phase 11C.1C-B is **NOT** closed; Phase 11C.1C-C remains
     virtual) to a real-trade authority.
   - Enabling AI Learning that auto-decides trades.
   - Implementing the full MFE/MAE processor (the queue stays a
-    descriptive contract; the processor is reserved for a later
-    PR).
+    descriptive contract; the processor is reserved for Phase
+    11C.1C-C).
   - Issuing any real order.
   - Entering Phase 12.
 
-### Phase 11C.1C-B acceptance criteria (must all hold for ACCEPT)
+### Phase 11C.1C-B acceptance criteria (all met)
 
 1. `pytest tests/unit/test_phase11c_1c_b_runtime_calibration.py`
-   passes (12 brief-mandated tests).
-2. `pytest tests/unit -k phase11c_` passes with no regression vs.
-   the post-PR-#37 main baseline.
-3. The full `tests/` surface continues to pass with no regression
-   vs. the post-PR-#37 main baseline.
-4. A 30 s dry-run produces a `runtime_calibration` block (15
-   fields) on every adaptive event and an `early_tail_score` per
-   ACTIVE candidate; the daily report includes the
+   passed (12 brief-mandated tests).
+2. `pytest tests/unit -k phase11c_` passed (257) with no
+   regression vs. the post-PR-#37 main baseline.
+3. The full `tests/` surface continued to pass (2231) with no
+   regression vs. the post-PR-#37 main baseline.
+4. The 30 s dry-run produced a `runtime_calibration` block (15
+   fields) on every adaptive event and an `early_tail_score`
+   per ACTIVE candidate; the daily report included the
    `## Phase 11C.1C-B` section.
-5. A 5 min real public WS paper run records:
+5. The 5 min real public WS paper run recorded:
    - `dry_run=false`
    - `ws_real_transport=true`
-   - `ws_messages_received > 0`
-   - `ws_chains_emitted > 0`
+   - `ws_messages_received=30526` (`> 0`)
+   - `ws_chains_emitted=12` (`> 0`)
    - `runtime_calibration` block present on every adaptive event
-   - `early_tail_score` generated
+   - `early_tail_score` generated per ACTIVE candidate
    - `top_early_tail_candidates` present in daily report
    - `top_late_chase_risk_candidates` present in daily report
    - `early_tail_score_top_symbols` present in daily report
@@ -322,23 +332,126 @@ fires, Phase 11C.1C-B is **NOT** closed; Phase 11C.1C-C remains
    - `rate_limit_429_count=0`
    - `rate_limit_418_count=0`
    - `rate_limit_ban=False`
-   - `ws_stale_count=0` or explainable
-   - `ingestion_errors=0` or explainable
-6. Every safety flag remains `False` after running the
+   - `ws_stale_count=0`
+   - `ingestion_errors=12` (explainable: sandbox-region
+     geoblock HTTP 451 on Binance REST; NOT a 429/418/ban; WS
+     pump ran cleanly throughout)
+6. Every safety flag remained `False` after running the
    runtime-calibration path end-to-end.
 7. No live trading.
 8. No API key.
 9. No private endpoint.
-10. Phase 12 stays `FORBIDDEN`.
+10. Phase 12 stayed `FORBIDDEN`.
 
-## Phase 11C.1C-B IN_REVIEW evidence (pre-merge / PR #38)
+## Open phase: Phase 11C.1C-C (NEXT_ALLOWED / NOT_STARTED)
 
-> Phase 11C.1C-B is **IN_REVIEW / PR_OPEN** on PR #38. The
-> evidence below was produced from the PR #38 branch prior to
-> merge and must be accepted by a human reviewer before Phase
-> 11C.1C-B may be marked **ACCEPTED**. Until that gate fires,
-> Phase 11C.1C-B is **NOT** closed and Phase 11C.1C-C remains
-> **NOT_STARTED**.
+**Phase 11C.1C-C — Adaptive Candidate Strategy Validation,
+Cluster Exposure Control & full MFE/MAE Processor.** Status:
+**NEXT_ALLOWED / NOT_STARTED.** No implementation has started
+in this repo state. Phase 11C.1C-C is the next sub-phase the
+project is **allowed** to open under the Phase 11C umbrella
+once a kickoff PR lands. Until that kickoff PR is merged, Phase
+11C.1C-C carries no scope, no smoke evidence, and no
+acceptance gate beyond inheriting every Phase 1 + Phase 11C.1B
++ Phase 11C.1C-A + Phase 11C.1C-B forbidden item verbatim. The
+detailed gate criteria (test matrix, metric contracts,
+daily-report extensions, MFE/MAE processor contract, cluster
+exposure controls) will be filled in by the Phase 11C.1C-C
+kickoff PR.
+
+> **Phase 11C.1C-B acceptance does NOT authorise Phase 11C.1C-C
+> kickoff bypassing the standard gate.** Phase 11C.1C-C will be
+> opened only via its own kickoff PR, with its own brief, its
+> own scope, its own boundary table, its own forbidden list,
+> and its own acceptance evidence.
+>
+> **Phase 11C.1C-B acceptance does NOT authorise live trading,
+> API keys, private endpoints, DeepSeek trade decisions, real
+> Telegram outbound, or Phase 12.** Phase 12 (real money / live
+> trading) remains **FORBIDDEN**.
+
+### Phase 11C.1C-C boundary (must hold from day one; inherited)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Binance API key / secret                    | refused at construction      |
+| Signed endpoint                             | refused at allowlist check   |
+| `listenKey` / user data stream              | refused at WS allowlist + URL parser |
+| Private WebSocket / trading WS API          | refused at WS allowlist      |
+| Routed-private endpoint (`/private`)        | refused at path-root allowlist |
+| DeepSeek trade-decision authority           | NOT permitted                |
+| Real Telegram outbound                      | NOT permitted                |
+| Phase 12 (live trading)                     | FORBIDDEN                    |
+
+### Phase 11C.1C-C explicitly forbids (inherited from Phase 11C.1C-B)
+
+  - Connecting to the Binance trading API.
+  - Reading or storing any Binance API key / API secret /
+    `listenKey`.
+  - Calling any signed endpoint.
+  - Subscribing to any user data stream / private WebSocket /
+    trading WebSocket API / account / margin / position / leverage
+    / balance / order private WS variant.
+  - Connecting to the routed-private endpoint
+    `wss://fstream.binance.com/private` (or any `/ws-api` /
+    `/ws-fapi` / `/ws-papi` / `/trading-api` / `/userDataStream`
+    path-root variant).
+  - Connecting to DeepSeek as a trade-decision authority.
+  - Connecting to the real Telegram outbound HTTP transport.
+  - Auto-retrying after a 418, switching endpoints to evade a
+    418, rotating source IP to evade a 418.
+  - Promoting any paper / virtual signal (`strategy_mode`,
+    `early_tail_score`, future MFE/MAE labels) to a real-trade
+    authority.
+  - Enabling AI Learning that auto-decides trades.
+  - Issuing any real order.
+  - Entering Phase 12.
+
+### Phase 11C.1C-C acceptance gate (placeholder)
+
+To be filled in by the Phase 11C.1C-C kickoff PR. At minimum
+the gate will require:
+
+  1. The Phase 1 safety lock unchanged.
+  2. A real-WS smoke ladder analogous to Phase 11C.1B's 5min /
+     10min / 1h ladder, with zero 429 / 418 / stale / ingestion
+     errors (or every ingestion error explained).
+  3. The MFE/MAE processor and any new strategy-validation /
+     cluster-exposure decisions emitted as typed events into
+     `events.db` with a Phase 8.5 `LearningReadyContext`, but
+     **without** authority to issue real orders.
+  4. A source-tree audit refusing any third-party HTTP /
+     WebSocket / SDK / LLM / Telegram / trading-API import on
+     the Phase 11C.1C-C surface.
+  5. The four `ExchangeClientBase` write surfaces still raise
+     `SafeModeViolation` after every Phase 11C.1C-C run.
+
+## Phase 11C.1C-B acceptance evidence (closeout)
+
+> The smoke-evidence transcript below is the verbatim runner
+> output captured from the PR #38 branch at acceptance time.
+> The banner string `Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b`
+> is the literal `__phase__` / `__version__` value that the
+> Python runtime printed on `main` when the smoke runs were
+> performed; it is preserved here because rewriting verbatim
+> historical evidence would mis-state what the runner actually
+> printed. Bumping the banner to drop the trailing `-IN_REVIEW`
+> suffix would require a runtime-code change to
+> `app/__init__.py` and is therefore reserved for a separate
+> follow-up code PR; this docs-only closeout intentionally does
+> NOT touch any runtime code. The Phase 11C.1C-B gate state
+> recorded in the closed-phases table at the top of this
+> document and in the `## Closed phase: Phase 11C.1C-B
+> (ACCEPTED)` section above is the authoritative one and reads
+> **ACCEPTED**.
 
 ```
 test_phase11c_1c_b_runtime_calibration.py  12 passed   (brief-mandated cases)
@@ -509,7 +622,7 @@ tests/                                    2231 passed   (no regression vs. post-
                                          applied)
 ```
 
-Safety flags held throughout the Phase 11C.1C-B pre-merge smoke
+Safety flags held throughout the Phase 11C.1C-B acceptance smoke
 runs (30s dry-run + 5min real WS):
 
 ```
@@ -714,11 +827,13 @@ The original "Phase 11C.1C" placeholder has been split into
 sequential sub-phases. Phase 11C.1C-A is **ACCEPTED (closed
 2026-05-22; PR #36 merged; PR #37 docs closeout)**. Phase
 11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail
-Discovery v0) is **IN_REVIEW / PR_OPEN** on PR #38 (see "Open
-phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)" above). After PR
-#38 is merged AND the smoke evidence is accepted, Phase
-11C.1C-B may be marked ACCEPTED. Phase 11C.1C-C remains
-**NOT_STARTED**.
+Discovery v0) is **ACCEPTED (closed 2026-05-22; PR #38 merged
+into `main`, mergeCommit `ce4b6de`)** — see "Closed phase: Phase
+11C.1C-B (ACCEPTED)" above. Phase 11C.1C-C (Adaptive Candidate
+Strategy Validation, Cluster Exposure Control & full MFE/MAE
+Processor) is **NEXT_ALLOWED / NOT_STARTED** — see "Open phase:
+Phase 11C.1C-C (NEXT_ALLOWED / NOT_STARTED)" above. Phase 12
+(live trading) remains **FORBIDDEN**.
 
 ### Phase 11C.1C boundary (must hold from day one)
 
@@ -1038,13 +1153,23 @@ symbol validation. Phase 11C.1B is now ACCEPTED.
     `FORBIDDEN_WS_PATH_ROOTS` and is never opened.
     Multi-candidate priority ranking, `priority_score`, cluster
     classifier, same-cluster leader selection, and strategy
-    selector are explicitly **NOT** in Phase 11C.1B scope: they
-    remain Phase 11C.1C scope (NEXT_ALLOWED / NOT_STARTED).
+    selector are explicitly **NOT** in Phase 11C.1B scope: most
+    of those contracts subsequently landed in Phase 11C.1C-A
+    (ACCEPTED) and Phase 11C.1C-B (ACCEPTED). The remainder
+    (full MFE/MAE processor, deeper Strategy Validation, Cluster
+    Exposure Control) is Phase 11C.1C-C scope (NEXT_ALLOWED /
+    NOT_STARTED).
   - **PR-C** (priority_score / cluster classifier / same-cluster
     leader / multi-candidate arbitration) is **not** Phase 11C.1B
-    work. It rolls into Phase 11C.1C - Adaptive Candidate Regime
-    & Strategy Selector, which is currently NEXT_ALLOWED /
-    NOT_STARTED (see "Open phase: Phase 11C.1C" above).
+    work. The data-contract / scoring / selector first version
+    shipped in Phase 11C.1C-A (ACCEPTED); the runtime-calibration
+    + Early Tail Discovery first version shipped in Phase
+    11C.1C-B (ACCEPTED). The remaining work (deeper Strategy
+    Validation, Cluster Exposure Control, full MFE/MAE
+    processor) rolls into Phase 11C.1C-C, which is currently
+    NEXT_ALLOWED /
+    NOT_STARTED (see "Open phase: Phase 11C.1C-C
+    (NEXT_ALLOWED / NOT_STARTED)" above).
 
 ### Phase 11C.1A boundary (must hold for the entire PR-A scope)
 
@@ -1139,16 +1264,18 @@ on 2026-05-22 (UTC) and Phase 11C.1B is ACCEPTED.
 
 ## Phase 11C parent (open, follow-ups landed)
 
-Phase 11C remains open as a parent / umbrella phase. Phase 11C.1A
-and Phase 11C.1B have **shipped** (PRs #31 / #32 / #33 / #34
-merged) and Phase 11C.1B is ACCEPTED on the 5min / 10min / 1h
-real-WS smoke ladder. Phase 11C.1C is **NEXT_ALLOWED /
-NOT_STARTED**. The longer-window real-data observation rungs (6h /
-24h / multi-week) remain optional under the parent and are NOT
-required for Phase 11C.1B closure. The public-market client,
-allowlist, event chain, and runner skeleton continue to satisfy
-the original Phase 11C acceptance gates; only the cadence and
-detail-REST behaviour have been narrowed.
+Phase 11C remains open as a parent / umbrella phase. Phase 11C.1A,
+Phase 11C.1B, Phase 11C.1C-A, and Phase 11C.1C-B have all
+**shipped** (PRs #31 / #32 / #33 / #34 / #36 / #38 merged into
+`main`); Phase 11C.1B, Phase 11C.1C-A, and Phase 11C.1C-B are
+ACCEPTED. Phase 11C.1C-C (deeper Strategy Validation + Cluster
+Exposure Control + full MFE/MAE processor) is **NEXT_ALLOWED /
+NOT_STARTED**. The longer-window real-data observation rungs
+(6h / 24h / multi-week) remain optional under the parent and are
+NOT required for Phase 11C.1C-B closure. The public-market
+client, allowlist, event chain, and runner skeleton continue to
+satisfy the original Phase 11C acceptance gates; only the cadence
+and detail-REST behaviour have been narrowed.
 
 ## Closed phases (carry-forward)
 
@@ -1235,12 +1362,12 @@ GET /fapi/v1/premiumIndex
 | Candidate          | Gate                                                                                   |
 | ------------------ | -------------------------------------------------------------------------------------- |
 | Phase 11C.1C-A (Adaptive Candidate Regime & Strategy Selector Contracts) | **ACCEPTED (closed 2026-05-22; PR #36 merged; PR #37 docs closeout).** Paper-mode only. See "Closed phase: Phase 11C.1C-A (ACCEPTED)" above for the closeout record. |
-| Phase 11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail Discovery v0) | **IN_REVIEW / PR_OPEN (PR #38).** Paper-mode only. PR #38 is currently open; **NOT** MERGED, **NOT** ACCEPTED. See "Open phase: Phase 11C.1C-B (IN_REVIEW / PR_OPEN)" above for the in-review smoke evidence. After PR #38 is merged AND the smoke evidence is accepted, Phase 11C.1C-B may be marked ACCEPTED. |
-| Phase 11C.1C-C (deeper Strategy Validation + Cluster Exposure Control + MFE/MAE processor) | **NOT_STARTED.** Paper-mode only. Cannot open until Phase 11C.1C-B is ACCEPTED. |
-| Phase 11C.1C (parent, legacy) | **OPEN.** Split into 11C.1C-A (ACCEPTED), 11C.1C-B (IN_REVIEW / PR_OPEN on PR #38), and 11C.1C-C (NOT_STARTED). Paper-mode only. |
+| Phase 11C.1C-B (Adaptive Candidate Runtime Calibration & Early Tail Discovery v0) | **ACCEPTED (closed 2026-05-22; PR #38 merged into `main`, mergeCommit `ce4b6de`).** Paper-mode only. See "Closed phase: Phase 11C.1C-B (ACCEPTED)" above for the closeout record and "Phase 11C.1C-B acceptance evidence (closeout)" below for the verbatim smoke transcript. **Phase 11C.1C-B acceptance does NOT authorise live trading, API keys, private endpoints, DeepSeek trade decisions, real Telegram outbound, or Phase 12.** |
+| Phase 11C.1C-C (deeper Strategy Validation + Cluster Exposure Control + full MFE/MAE processor) | **NEXT_ALLOWED / NOT_STARTED.** Paper-mode only. No implementation in this repo state. Will be opened only via its own kickoff PR with its own brief, scope, boundary table, forbidden list, and acceptance evidence. See "Open phase: Phase 11C.1C-C (NEXT_ALLOWED / NOT_STARTED)" above. |
+| Phase 11C.1C (parent, legacy) | **OPEN.** Split into 11C.1C-A (ACCEPTED), 11C.1C-B (ACCEPTED), and 11C.1C-C (NEXT_ALLOWED / NOT_STARTED). Paper-mode only. |
 | Phase 11C+ (longer paper window, e.g. 7d / 14d) | Phase 11C parent 24h acceptance closed (still optional after the 11C.1B 1h PASS).      |
 | Phase 11D (DeepSeek READ-ONLY narrative interpreter) | Phase 11C closed; Phase 11C dataset reviewed.                                    |
-| Phase 12 (Limited live trading) | **FORBIDDEN.** NOT permitted from Phase 11C.1B alone, NOT permitted from Phase 11C.1C alone. Requires Spec §41 Go/No-Go. |
+| Phase 12 (Limited live trading) | **FORBIDDEN.** NOT permitted from Phase 11C.1B alone, NOT permitted from Phase 11C.1C-A alone, NOT permitted from Phase 11C.1C-B alone, NOT permitted from Phase 11C.1C-C alone, NOT permitted from any Phase 11C sub-phase alone. Requires Spec §41 Go/No-Go. |
 
 **Phase 11C.1B closing does NOT authorise Phase 12.** Phase 12 is gated
 by:
