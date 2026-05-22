@@ -12,6 +12,62 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 **Version:** `1.4.0a11c.1b` - Phase 11C.1B. Tracks the Phase 11C
 real-data acceptance recovery PR-B.
 
+#### Phase 11C.1B 5-min real public WS smoke: PASS (2026-05-22)
+
+The 5-min real public WS smoke now reports
+`ws_messages_received > 0`, `ws_chains_emitted > 0`,
+`PUBLIC_WS_CONNECTED` written, no 429 / 418, every safety flag
+unchanged. The original failure was a zero-timeout `recv`
+short-circuit in `StdlibPublicWSTransport.poll`; fixed by always
+draining the recv buffer non-blockingly at the top of every
+`poll` call (and routing the runner's wait window through the WS
+pump's blocking timeout instead of an unrelated `time.sleep`).
+See `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B and the
+new regression tests
+`test_real_ws_transport_drains_buffered_bytes_with_zero_timeout`
++ `test_real_ws_runner_loop_pattern_drains_messages_with_zero_timeout`.
+
+#### Phase 11C.1B follow-up: SymbolUniverse (exchangeInfo-as-truth)
+
+Binance USDⓈ-M Futures lists non-ASCII contracts in production -
+documented examples include `我踏马来了USDT` and `币安人生USDT`. Each
+is a real Binance contract with its own `/fapi/v1/exchangeInfo`
+entry, its own all-market WS push, and its own REST detail
+endpoints. Phase 11C.1B therefore validates symbols against the
+bootstrapped `exchangeInfo` snapshot - NEVER an ASCII-only regex.
+
+  - **New module** `app/market_data_public/symbol_universe.py`
+    with `SymbolUniverse.from_exchange_info(symbols)` and
+    `SymbolUniverse.empty()` (back-compat admit-all fallback).
+  - **New event** `EventType.WS_SYMBOL_REJECTED` for symbols
+    refused by the universe gate.
+  - **CandidatePool** now consults the universe in `offer()`;
+    rejected symbols emit `WS_SYMBOL_REJECTED` and never enter
+    the pool's accounting.
+  - **Runner** bootstraps the universe from
+    `BinancePublicClient.get_symbols()` before constructing the
+    candidate pool; falls back to the empty universe on
+    bootstrap failure.
+  - **Daily-report** payload extended with
+    `candidate_pool_rejected_by_universe`,
+    `ws_symbol_universe_size`, `ws_symbol_universe_source`,
+    `ws_symbol_universe_bootstrapped`,
+    `ws_symbol_universe_bootstrap_ts_ms`.
+  - **New test file** `tests/unit/test_phase11c_1b_symbol_universe.py`
+    with the 4 brief-mandated tests:
+    - `test_non_ascii_exchange_symbol_allowed_if_in_exchange_info`
+    - `test_non_ascii_ws_symbol_rejected_if_not_in_exchange_info`
+    - `test_symbol_validation_uses_exchange_info_not_ascii_regex`
+    - `test_empty_universe_is_admit_all_back_compat`
+
+The brief is explicit: **the rejection reason is "not in
+exchangeInfo", NEVER "non-ASCII character class".** A pure-ASCII
+symbol that is missing from the snapshot is treated identically
+to a Chinese symbol that is missing.
+
+Total tests: **2184 passed** (was 2180 before the SymbolUniverse
+follow-up; +4 new tests).
+
 #### PR-B revision: routed public/market WebSocket endpoints
 
 PR #32 now connects to the documented Binance USDⓈ-M Futures

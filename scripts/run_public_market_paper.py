@@ -83,6 +83,8 @@ from app.exports.service import TestDataExportService  # noqa: E402
 from app.incidents.repository import IncidentRepository  # noqa: E402
 from app.market_data.buffer import MarketDataBuffer  # noqa: E402
 from app.market_data.models import MarketDataBufferConfig  # noqa: E402
+from loguru import logger  # noqa: E402
+
 from app.market_data_public import (  # noqa: E402
     AllMarketRadarBuffer,
     CandidatePool,
@@ -90,6 +92,7 @@ from app.market_data_public import (  # noqa: E402
     PaperEventChainDriver,
     PublicMarketIngestor,
     RadarScoreConfig,
+    SymbolUniverse,
     WSRadarChainDriver,
     pre_anomaly_score_light,
 )
@@ -1117,12 +1120,55 @@ def main(argv: list[str] | None = None) -> int:
             dbs.close()
             return 2
         radar_buffer = AllMarketRadarBuffer()
+        # Phase 11C.1B: bootstrap the SymbolUniverse from the public
+        # /fapi/v1/exchangeInfo snapshot. The candidate pool consults
+        # this set on every offer() and emits WS_SYMBOL_REJECTED for
+        # any WS-radar symbol that is NOT in it. We deliberately do
+        # NOT use any ASCII-only character-class regex - Binance
+        # USDT-M Futures lists non-ASCII contracts (e.g. the
+        # documented Chinese-named USDT contracts ``我踏马来了USDT`` /
+        # ``币安人生USDT``); refusing them by character class would
+        # silently lose discovery on every exotic listing. Under
+        # ``--dry-run`` and on bootstrap failure we fall back to the
+        # empty universe (admit everything) so existing fixture
+        # tests remain green; the runner emits a degraded note
+        # instead of a SymbolUniverse rejection in that case.
+        symbol_universe = SymbolUniverse.empty()
+        if not args.dry_run:
+            try:
+                exchange_symbols = client.get_symbols()
+            except RateLimitProtectionError as exc:
+                logger.warning(
+                    "[phase11c.1b] SymbolUniverse bootstrap hit "
+                    "rate-limit protection; falling back to admit-all "
+                    "empty universe: {}",
+                    exc,
+                )
+                exchange_symbols = []
+            except Exception as exc:
+                logger.warning(
+                    "[phase11c.1b] SymbolUniverse bootstrap failed; "
+                    "falling back to admit-all empty universe: {}",
+                    exc,
+                )
+                exchange_symbols = []
+            if exchange_symbols:
+                symbol_universe = SymbolUniverse.from_exchange_info(
+                    s.symbol for s in exchange_symbols
+                )
+                logger.info(
+                    "[phase11c.1b] SymbolUniverse bootstrapped from "
+                    "exchangeInfo size={}",
+                    len(symbol_universe),
+                )
         candidate_pool = CandidatePool(
             config=CandidatePoolConfig(
                 candidate_pool_size=candidate_pool_size,
                 active_detail_limit=active_detail_limit,
                 candidate_ttl_seconds=candidate_ttl_seconds,
             ),
+            symbol_universe=symbol_universe,
+            event_repo=event_repo,
         )
         ws_chain = WSRadarChainDriver(
             risk_engine=risk,

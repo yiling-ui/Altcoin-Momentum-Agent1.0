@@ -7,9 +7,10 @@ intentionally short. The full phase-gate ledger lives in
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2026-05-21 | Phase 11C.1B | WebSocket-First All-Market Demon Coin Radar | in-development - routed real public+market WS adapter implemented; PR awaiting cloud smoke | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B     |
+| 2026-05-22 | Phase 11C.1B follow-up | SymbolUniverse (exchangeInfo-as-truth, non-ASCII contracts allowed) | merged into PR-B | `tests/unit/test_phase11c_1b_symbol_universe.py` (4 tests) |
+| 2026-05-22 | Phase 11C.1B | WebSocket-First All-Market Demon Coin Radar | 5-min real public WS smoke PASS (`ws_messages_received>0`, `ws_chains_emitted>0`, no 429/418, safety flags unchanged) | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B; `docs/PHASE_11C_1B_DRY_RUN_EVIDENCE.md` |
 | 2026-05-21 | Phase 11C.1A | Binance Public REST Rate Limit Governor & 418 Protection | merged        | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1A     |
-| 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | paused (24h acceptance resumes once PR #32 / PR-B routed WS merges) | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
+| 2026-05-21 | Phase 11C | Real Binance Public Market Data Read-Only Paper | open (parent); 24h acceptance resumes after 11C.1B 10-min/1h/6h/24h ladder | `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md`             |
 | 2026-05-19 | Phase 11B-HF | Cloud Paper - High-Frequency observation     | accepted (GO) | 30/30 dry-run PASS, 648/648 24h@2min observations PASS |
 | 2026-05-19 | Phase 11B | Cloud Paper Acceptance                       | accepted (GO) | `docs/PHASE_11B_PAPER_ACCEPTANCE_REPORT.md`            |
 | ...        | Phase 10D | Telegram Outbound + Export Commands          | merged        | `docs/CHANGELOG.md`                                    |

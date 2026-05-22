@@ -115,21 +115,25 @@ bootstrap-only REST), which is documented as **not** the Phase
 
 ### Phase 11C.1B acceptance criteria
 
-1. `pytest` 全部通过. Currently `2163 passed`.
+1. `pytest` 全部通过. Currently `2184 passed`.
 2. The new test files
    `tests/unit/test_phase11c_1b_ws_radar.py` (scaffold + radar +
    pool + chain),
    `tests/unit/test_phase11c_1b_real_ws_adapter.py` (real public
    WS adapter + runner refusal + reconnect backoff + staleness
-   gate + safety flags + RFC 6455 handshake / frame audit), and
+   gate + safety flags + RFC 6455 handshake / frame audit),
    `tests/unit/test_phase11c_1b_routed_public_market_ws.py`
    (routed `/public/{ws,stream}` + `/market/{ws,stream}`
    acceptance, `/private` refusal, stream-route classification,
    `MultiTransportPublicWSManager` merge, runner uses both
-   routed transports, no follow-up wording in source / docs)
+   routed transports, no follow-up wording in source / docs), and
+   `tests/unit/test_phase11c_1b_symbol_universe.py`
+   (exchangeInfo-as-truth gate + non-ASCII contract admission +
+   `WS_SYMBOL_REJECTED` audit + source-tree audit refusing any
+   ASCII-only symbol regex)
    pin every behaviour the brief calls out (15 brief-mandated +
-   11 routed-endpoint + supporting). Full list in
-   `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B.
+   11 routed-endpoint + 4 SymbolUniverse + supporting). Full list
+   in `docs/PHASE_11C_PUBLIC_MARKET_READONLY.md` §11C.1B.
 3. The four `ExchangeClientBase` write surfaces still raise
    `SafeModeViolation`.
 4. No file in the Phase 11C source set imports a third-party HTTP /
@@ -189,22 +193,74 @@ After PR #32 merges (which ships the routed real-network
   - per-loop REST detail: ONLY for the active head, gated on the
     PR-A rate-limit governor.
 
-The acceptance ladder:
+### Phase 11C.1B acceptance ladder (smoke runs)
 
-| Cloud smoke         | Command                                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 30 s dry-run        | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                |
-| 5 min real WS       | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              |
-| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             |
-| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                |
-| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                |
-| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               |
+| Cloud smoke         | Command                                                                                                                              | Status (UTC)                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| 30 s dry-run        | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                | PASS                        |
+| 5 min real WS       | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              | **PASS (2026-05-22)**       |
+| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             | pending (next ladder rung)  |
+| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                | pending                     |
+| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                | pending                     |
+| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               | pending (Phase 11C closure) |
+
+The 5-min PASS rung records: `ws_messages_received > 0`,
+`ws_chains_emitted > 0`, `radar_candidates_seen >= 0` (no longer
+stuck at 0 due to no messages), `PUBLIC_WS_CONNECTED` written,
+no 429 / 418, every safety flag unchanged. The earlier failure
+mode (`ws_messages_received=0` for the full 300s window) was a
+zero-timeout `recv` short-circuit in the stdlib WS transport;
+fixed by draining the recv buffer non-blockingly at the top of
+every `poll` call (see PR #33 / PR-B follow-up commits).
 
 The legacy command
 `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5`
 is **deprecated**. It exercises the pre-PR-A "fetch every detail
 endpoint for every symbol every loop" pattern that triggered HTTP
 418, and it predates routed WS endpoints.
+
+### Phase 11C.1B follow-up: SymbolUniverse (exchangeInfo-as-truth)
+
+Binance USDⓈ-M Futures lists non-ASCII contracts in production -
+documented examples include `我踏马来了USDT` and `币安人生USDT`. Each
+is a real Binance contract with its own `/fapi/v1/exchangeInfo`
+entry, its own all-market WS push, and its own REST detail
+endpoints. The Phase 11C.1B brief therefore forbids any
+character-class regex (`^[A-Z0-9_]{2,30}(USDT|USDC)$` or any
+equivalent) on the symbol-validation path; the only authoritative
+source is the snapshot pulled from `/fapi/v1/exchangeInfo` at
+runner startup.
+
+Implementation:
+
+  - `app/market_data_public/symbol_universe.py` -
+    `SymbolUniverse.from_exchange_info(symbols)` builds the
+    bootstrapped set; `SymbolUniverse.empty()` is the back-compat
+    "admit everything" fallback for dry-run / fixture tests.
+  - `CandidatePool.offer()` consults the universe; symbols missing
+    from the bootstrapped set surface a typed `WS_SYMBOL_REJECTED`
+    event (new entry on `EventType`) and the candidate is dropped
+    before it enters the pool's accounting.
+  - The runner (`scripts/run_public_market_paper.main`) bootstraps
+    the universe from `client.get_symbols()` before constructing
+    the candidate pool. On bootstrap failure (rate-limit
+    protection, network error, etc.) the runner falls back to the
+    empty universe and logs the degraded note - safety flags stay
+    unchanged and the pool admits everything to avoid blocking the
+    smoke ladder on a transient REST fault.
+  - Source-tree audit: `tests/unit/test_phase11c_1b_symbol_universe.py
+    ::test_symbol_validation_uses_exchange_info_not_ascii_regex`
+    walks every WS-radar / symbol-validation file and refuses
+    any `re.compile|match|fullmatch|search` whose pattern smells
+    like an ASCII-only symbol regex. The next PR that re-introduces
+    one fails this test.
+
+The brief is explicit: **the rejection reason is "not in
+exchangeInfo", NEVER "non-ASCII character class".** A pure-ASCII
+symbol that is missing from the snapshot (e.g. a brand-new listing
+that came online mid-run, or a delisting whose WS pushes arrived
+between bootstrap and subscribe) is treated identically to a
+Chinese symbol that is missing.
 
 PR-C (priority_score / cluster classifier / same-cluster leader /
 multi-candidate arbitration) remains a separate branch.
