@@ -13,6 +13,15 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 **paper-only first version** of the Adaptive Candidate Regime &
 Strategy Selector contracts.
 
+> **Status: IN_REVIEW / PR_OPEN on PR #36.** PR #36 is currently
+> open against `main` and has **not** been merged. The entry
+> below describes the changes shipped on the PR branch; Phase
+> 11C.1C-A will only be marked **ACCEPTED** (and Phase 11C.1C-B
+> will only become NEXT_ALLOWED) after PR #36 is merged and a
+> human reviewer accepts the 30s dry-run + 5min real public WS
+> smoke evidence collected for the PR. Until that gate fires,
+> this entry is pre-merge / IN_REVIEW.
+
 > **Phase 11C.1C-A is NOT live trading. NOT AI Learning. NOT
 > complete strategy validation. NOT the full MFE/MAE processor. It
 > is the data-contract + scoring + selector + paper-only routing
@@ -266,9 +275,12 @@ raise `SafeModeViolation` on the public REST client.
   now expects the Phase 11C.1C-A label "Adaptive Candidate
   Regime".
 
-Total tests: **2197 passed** with PR #36 applied (was 2166
-before the Phase 11C.1C-A merge). No regressions on the existing
-2166-test surface.
+Total tests on the PR #36 branch: **2219 passed** in `tests/unit/`
+(244 phase11c-prefixed cases including the 31 brief-mandated
+`test_phase11c_1c_a_adaptive_candidate.py` cases). No regressions
+relative to the 2166-test pre-Phase 11C.1C-A baseline. PR #36 has
+**not** been merged at the time of this entry; the test count
+above is the pre-merge figure measured on the PR branch.
 
 #### Versions stamped on every adaptive event
 
