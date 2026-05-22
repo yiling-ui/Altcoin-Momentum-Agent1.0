@@ -382,19 +382,28 @@ After PR #32 merges (which ships the routed real-network
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
 | 30 s dry-run        | `python -m scripts.run_public_market_paper --duration 30s --symbol-limit 5 --dry-run`                                                | PASS                        |
 | 5 min real WS       | `python -m scripts.run_public_market_paper --duration 5min --symbol-limit 5 --ws-first`                                              | **PASS (2026-05-22)**       |
-| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             | pending (next ladder rung)  |
-| 1 h WS-first + REST | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                | pending                     |
-| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                | pending                     |
-| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               | pending (Phase 11C closure) |
+| 10 min real WS      | `python -m scripts.run_public_market_paper --duration 10min --symbol-limit 5 --ws-first`                                             | **PASS (2026-05-22)**       |
+| 1 h real WS (clean) | `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`                                                | **PASS (2026-05-22)**       |
+| 6 h WS-first        | `python -m scripts.run_public_market_paper --duration 6h --symbol-limit 5 --ws-first`                                                | optional / not required for Phase 11C.1B closeout |
+| 24 h WS-first       | `python -m scripts.run_public_market_paper --duration 24h --symbol-limit 5 --ws-first`                                               | optional / parent Phase 11C longer-window, not required for Phase 11C.1B closeout |
 
-The 5-min PASS rung records: `ws_messages_received > 0`,
-`ws_chains_emitted > 0`, `radar_candidates_seen >= 0` (no longer
-stuck at 0 due to no messages), `PUBLIC_WS_CONNECTED` written,
-no 429 / 418, every safety flag unchanged. The earlier failure
-mode (`ws_messages_received=0` for the full 300s window) was a
-zero-timeout `recv` short-circuit in the stdlib WS transport;
-fixed by draining the recv buffer non-blockingly at the top of
-every `poll` call (see PR #33 / PR-B follow-up commits).
+All three Phase 11C.1B acceptance rungs (5min / 10min / 1h) record:
+`ws_messages_received > 0`, `ws_chains_emitted > 0`,
+`radar_candidates_seen >= 0` (no longer stuck at 0 due to no
+messages), `PUBLIC_WS_CONNECTED` written, no 429 / 418, no
+`ws_stale_count`, no ingestion errors, every safety flag
+unchanged. Full numerics live in
+"Phase 11C.1B acceptance summary" above. The earlier failure mode
+(`ws_messages_received=0` for the full 300s window of the first
+5-min run) was a zero-timeout `recv` short-circuit in the stdlib
+WS transport; fixed by draining the recv buffer non-blockingly at
+the top of every `poll` call (PR #33).
+
+The 6h / 24h rungs are intentionally **optional**: Phase 11C.1B
+closure does NOT require them. They belong to the parent Phase
+11C longer-window observation work (or to a future Phase 11C+
+multi-week paper window) and remain available to anyone who wants
+extra confidence before Phase 11C.1C kicks off.
 
 The legacy command
 `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5`
@@ -451,15 +460,21 @@ multi-candidate arbitration) remains a separate branch.
 ## Closed phase: Phase 11C.1A
 
 **Phase 11C.1A - Binance Public REST Rate Limit Governor & 418
-Protection (PR-A).** Merged. Phase 11C real-data acceptance is paused
-until PR-B lands (which now folds the stdlib WS adapter in).
+Protection (PR-A).** Merged. The Phase 11C real-data acceptance
+pause that motivated this PR was **resolved** by the combined work
+of PRs #31 + #32 + #33 + #34: PR #31 shipped the rate-limit
+governor here; PR #32 shipped the WebSocket-first all-market radar
++ the routed real-network public WS adapter; PR #33 fixed the
+real-WS poll zero-timeout; PR #34 enforced exchangeInfo-as-truth
+symbol validation. Phase 11C.1B is now ACCEPTED.
 
-  - **PR-A** (closed, `feature/phase-11c1-rest-rate-limit-governor`)
+  - **PR-A** (closed, merged in PR #31)
     ships `BinancePublicRestGovernor` (sliding-window weight budget,
     429 backoff, 418 shutdown, `Retry-After`, used-weight tracking),
     lower defaults, and the layered REST runner. NO new candidate
     ranking, NO WebSocket transport.
-  - **PR-B** (this branch, `feature/phase-11c1-ws-first-all-market-radar`)
+  - **PR-B** (closed, merged in PR #32, with follow-ups PR #33 +
+    PR #34)
     ships the WebSocket-first all-market radar +
     multi-candidate priority ranking + `candidate_detail_limit`
     consumption + the real-network `StdlibPublicWSTransport` (RFC
@@ -473,9 +488,10 @@ until PR-B lands (which now folds the stdlib WS adapter in).
     whenever `--ws-first` is set without `--dry-run`. The
     routed-private endpoint `/private` is on
     `FORBIDDEN_WS_PATH_ROOTS` and is never opened.
-  - **PR-C** (separate branch, NOT in this PR) ships
-    priority_score / cluster classifier / same-cluster leader /
-    multi-candidate arbitration.
+  - **PR-C** (priority_score / cluster classifier / same-cluster
+    leader / multi-candidate arbitration) remains a separate,
+    future scope item and is **not** required for Phase 11C.1B
+    closure. It is tracked alongside the future Phase 11C.1C work.
 
 ### Phase 11C.1A boundary (must hold for the entire PR-A scope)
 
@@ -561,24 +577,31 @@ After PR-A merges:
     stops the runner with `rc=2`. The runner does NOT auto-retry,
     does NOT switch endpoints, does NOT rotate source IP.
 
-The Phase 11C real-data 24h acceptance run will resume only after
-PR-B (WebSocket-first radar + candidate ranking) has also landed,
-because PR-A on its own deliberately leaves the per-loop detail
-REST silent.
+The Phase 11C real-data acceptance pause **was resolved** once
+PR-B (WebSocket-first radar + candidate ranking) landed alongside
+PR-A. PR-B merged via PR #32, with follow-ups in PR #33 and PR
+#34; the Phase 11C.1B real-WS smoke ladder (5min / 10min / 1h)
+ran cleanly on 2026-05-22 (UTC) and Phase 11C.1B is ACCEPTED.
 
-## Closed phase: Phase 11C (held)
+## Phase 11C parent (open, follow-ups landed)
 
-Phase 11C remains open as a parent phase; its real-data acceptance
-run is paused until Phase 11C.1A + 11C.1B + 11C.1C ship. The
-public-market client, allowlist, event chain, and runner skeleton
-all continue to satisfy their original Phase 11C acceptance gates;
-only the cadence and detail-REST behaviour have been narrowed.
+Phase 11C remains open as a parent / umbrella phase. Phase 11C.1A
+and Phase 11C.1B have **shipped** (PRs #31 / #32 / #33 / #34
+merged) and Phase 11C.1B is ACCEPTED on the 5min / 10min / 1h
+real-WS smoke ladder. Phase 11C.1C is **NEXT_ALLOWED /
+NOT_STARTED**. The longer-window real-data observation rungs (6h /
+24h / multi-week) remain optional under the parent and are NOT
+required for Phase 11C.1B closure. The public-market client,
+allowlist, event chain, and runner skeleton continue to satisfy
+the original Phase 11C acceptance gates; only the cadence and
+detail-REST behaviour have been narrowed.
 
 ## Closed phases (carry-forward)
 
 The closed-phase ledger above remains unchanged. The Phase 11C
-parent phase stays open until all three follow-up PRs land and the
-real-data 24h acceptance run is reproduced.
+parent phase stays open while Phase 11C.1C is drafted; longer
+real-data windows (6h / 24h / multi-week) are tracked here but
+are **not** Phase 11C.1B closure prerequisites.
 
 ### Phase 11C acceptance criteria
 
