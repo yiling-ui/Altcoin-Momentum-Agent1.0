@@ -1,5 +1,18 @@
 # Phase 11C.1C-B - Adaptive Candidate Runtime Calibration & Early Tail Discovery v0
 
+> **Status: IN_REVIEW / PR_OPEN on PR #38.** PR #38 is currently
+> open against `main` (post-PR-#37 baseline) and has **not** been
+> merged. The contract below describes the **paper-only first
+> version** shipped on the PR #38 branch; Phase 11C.1C-B will
+> only be marked **ACCEPTED** after PR #38 is merged AND a human
+> reviewer accepts the 30s dry-run + 5min real public WS smoke
+> evidence collected for this PR. Until that gate fires, Phase
+> 11C.1C-B is **NOT** ACCEPTED, **NOT** MERGED, **IN_REVIEW /
+> PR_OPEN**. Phase 11C.1C-A is **ACCEPTED** (closed 2026-05-22;
+> PR #36 merged; PR #37 docs closeout). Phase 11C.1C-C remains
+> **NOT_STARTED**. Phase 12 (real money / live trading) remains
+> **FORBIDDEN**.
+
 This document describes the **first version** of the Adaptive
 Candidate Runtime Calibration & Early Tail Discovery layer that
 ships in Phase 11C.1C-B. It builds on the Phase 11C.1C-A contracts

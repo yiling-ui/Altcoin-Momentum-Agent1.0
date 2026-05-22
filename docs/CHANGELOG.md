@@ -7,20 +7,254 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-B - Adaptive Candidate Runtime Calibration & Early Tail Discovery v0
+
+**Version:** `1.4.0a11c.1c.b` - Phase 11C.1C-B. Tracks the
+**paper-only first version** of the Adaptive Candidate Runtime
+Calibration & Early Tail Discovery layer that builds on top of
+the Phase 11C.1C-A contracts.
+
+> **Status: IN_REVIEW / PR_OPEN on PR #38.** PR #38 is currently
+> open against `main` (post-PR-#37 baseline) and has **not** been
+> merged. The entry below describes the changes shipped on the
+> PR branch; Phase 11C.1C-B will only be marked **ACCEPTED**
+> after PR #38 is merged AND a human reviewer accepts the 30s
+> dry-run + 5min real public WS smoke evidence collected for
+> the PR. Until that gate fires, this entry is pre-merge /
+> IN_REVIEW. Phase 11C.1C-C remains **NOT_STARTED**. Phase 12
+> remains **FORBIDDEN**.
+
+> **Phase 11C.1C-B is NOT live trading. NOT AI Learning. NOT
+> complete strategy validation. NOT the full MFE/MAE processor.
+> NOT real Telegram outbound. NOT real Binance trading API. It
+> is the runtime calibration metrics + Early Tail Discovery v0 +
+> daily-report enhancements first version on top of the Phase
+> 11C.1C-A contracts.**
+
+#### `RuntimeCalibrationMetrics` value object (`app/adaptive/models.py`)
+
+A new frozen Pydantic v2 model carrying the brief-mandated
+fifteen fields:
+
+  - `candidate_first_seen_ts`
+  - `candidate_first_seen_price`
+  - `current_price`
+  - `price_change_since_first_seen`
+  - `quote_volume_acceleration_1m`
+  - `quote_volume_acceleration_5m`
+  - `price_acceleration_1m`
+  - `price_acceleration_5m`
+  - `volume_rank`
+  - `volume_rank_jump_5m`
+  - `distance_to_24h_high`
+  - `distance_from_first_seen`
+  - `freshness_score`
+  - `late_chase_risk`
+  - `early_tail_score`
+
+The block is attached to every `AdaptiveCandidateContext` (under
+the new `runtime_calibration` field) and rides into the Phase
+8.5 `learning_ready.adaptive_candidate.runtime_calibration`
+sub-block on every event the WS-radar chain emits, so Phase 8.5
+export, Phase 10A replay, and the daily report all pick it up
+without schema gymnastics.
+
+#### New `app/adaptive/runtime.py` - pure-function helpers
+
+  - `compute_runtime_calibration(...)` - top-level builder; takes
+    raw runtime inputs (first-seen ts/price, current ts/price,
+    price + quote-volume rolling history, current rank +
+    5m-old rank, candidate stage, blowoff risk) and returns the
+    populated `RuntimeCalibrationMetrics`.
+  - `compute_early_tail_score(...)` - additive 0..100 score
+    derived from `volume_rank_jump_5m` + quote-volume / price
+    accelerations + freshness, gated by stage and capped by
+    distance from first-seen.
+  - `compute_late_chase_risk_score(...)` - 0..100 risk score
+    that rises with distance from first-seen, proximity to 24h
+    high, and lost freshness; clamped high for `late` /
+    `blowoff` and clamped low for `dumped`.
+  - `compute_freshness_score(...)` - simple
+    `half_life / (half_life + elapsed)` decay.
+  - `compute_relative_acceleration(...)` - rolling-history
+    helper.
+
+All functions are pure (no I/O, no global state); the source-tree
+audit in
+`tests/unit/test_phase11c_1c_a_adaptive_candidate.py
+::test_adaptive_module_does_not_import_third_party_network_libs`
+already covers the new module.
+
+#### `Candidate` baselines + per-symbol rolling history
+
+`app/market_data_public/candidate_pool.py`:
+
+  - **Stable baselines** recorded ONCE at admission:
+    `first_seen_price`, `quote_volume_first_seen`,
+    `volume_rank_first_seen`. These never get overwritten on
+    subsequent `offer()` updates.
+  - **Rolling histories** (`price_history`,
+    `quote_volume_history`, `volume_rank_history`, oldest -> newest)
+    capped at
+    `CandidatePoolConfig.per_symbol_history_max_samples` (200)
+    and trimmed to the last 10 minutes.
+  - **Runtime-layer scores** (`early_tail_score`,
+    `late_chase_risk_score`, `freshness_score`,
+    `promoted_before_24h_top_move`) written back by the
+    WS-radar chain driver via the new
+    `CandidatePool.update_runtime_metrics(...)` method.
+
+#### Early Tail Discovery v0 - capacity-protection invariant
+
+`CandidatePool._enforce_capacity` now sorts candidates by a
+two-tier eviction key so the brief's "do not evict high
+`early_tail_score`" invariant holds:
+
+```
+evict_key = (
+    1 if early_tail_score >= early_tail_protect_threshold else 0,
+    early_tail_score,
+    radar_score,
+    last_seen_ms,
+)
+```
+
+UNPROTECTED candidates (early-tail score below threshold) get
+evicted first. PROTECTED candidates only get evicted if every
+unprotected candidate has already been removed - and the lowest
+early-tail score goes first. The default threshold lives in
+`DEFAULT_EARLY_TAIL_PROTECT_THRESHOLD = 60.0`.
+
+#### WS-radar chain integration
+
+`WSRadarChainDriver` (`app/market_data_public/ws_radar_chain.py`):
+
+  - Now accepts an optional `candidate_pool=` handle so the
+    driver can write runtime metrics back onto the candidate
+    after every chain pass.
+  - Reads `candidate.first_seen_price` (stable admission
+    baseline) instead of the previous "approximate via
+    snapshot" path.
+  - Threads `candidate.price_history` /
+    `candidate.quote_volume_history` /
+    `pool.volume_rank_5m_ago(candidate)` into
+    `compute_runtime_calibration`.
+  - Tracks per-run aggregates surfaced by
+    `adaptive_metrics_payload`:
+      - `top_early_tail_candidates` (capped at 10)
+      - `top_late_chase_risk_candidates` (capped at 10)
+      - `early_tail_score_top_symbols`
+      - `opportunity_score_distribution` (10-point bins:
+        `0-10` ... `90-100`)
+      - `symbols_promoted_before_24h_top_move`
+      - `eden_alt_near_examples` - candidate symbols whose
+        upper-cased name starts with `EDEN`, `ALT`, or `NEAR`
+        and whose `early_tail_score > 0`.
+
+#### Daily report enhancement
+
+`DailyReportSnapshot` + the Markdown body
+(`app/paper_run/daily_report.py`) now carry the new fields:
+
+  - `top_early_tail_candidates`
+  - `top_late_chase_risk_candidates`
+  - `early_tail_score_top_symbols`
+  - `opportunity_score_distribution`
+  - `symbols_promoted_before_24h_top_move`
+  - `eden_alt_near_examples`
+  - `early_tail_protect_threshold`
+  - `candidate_pool_promoted_before_24h_top_move`
+
+The Markdown body adds a new section
+`## Phase 11C.1C-B Adaptive Candidate Runtime Calibration & Early
+Tail Discovery v0` after the existing Phase 11C.1C-A block,
+explicitly noting the paper / virtual nature of the layer.
+
+#### Phase 1 safety lock UNCHANGED
+
+Phase 11C.1C-B does NOT touch the Phase 1 safety lock. After
+running the runtime-calibration pipeline end-to-end every flag
+below remains:
+
+```
+mode                            = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+forbid_private_credentials      = True
+forbid_signed_endpoints         = True
+forbid_trade_endpoints          = True
+forbid_account_endpoints        = True
+forbid_position_endpoints       = True
+forbid_leverage_endpoints       = True
+forbid_margin_endpoints         = True
+forbid_live_trading             = True
+forbid_right_tail               = True
+forbid_llm_trade_decisions      = True
+forbid_telegram_outbound        = True
+```
+
+The four ExchangeClientBase write surfaces (`create_order`,
+`cancel_order`, `set_leverage`, `set_margin_mode`) continue to
+raise `SafeModeViolation` on the public REST client.
+
+#### Phase 11C.1C-B explicitly does NOT
+
+- accept any Binance API key / API secret / `listenKey`.
+- subscribe to any user data stream / private WebSocket / trading
+  WebSocket API / account / margin / position / leverage / balance
+  / order private WS variant.
+- treat the new `early_tail_score` or the existing
+  `strategy_mode` (paper / virtual) field as a real-trade
+  authority. The Risk Engine remains the single trade-decision
+  gate; `stop_unconfirmed=True` continues to lock the WS-radar
+  chain into the typed-reject path.
+- implement the full MFE/MAE processor. The
+  `LabelQueueContract` is descriptive; the processor is reserved
+  for a future PR (Phase 11C.1C-C).
+- implement AI Learning. The Phase 11C.1C-B scoring / selector
+  is deterministic.
+- enable real Telegram outbound, DeepSeek trade decisions, or
+  any third-party HTTP / WebSocket / SDK / LLM / Telegram bot
+  import on the runtime-calibration surface.
+- enter Phase 12.
+
+#### Tests
+
+- `tests/unit/test_phase11c_1c_b_runtime_calibration.py` (new,
+  12 cases) pinning every brief-mandated behaviour:
+  - `test_early_tail_score_detects_volume_rank_jump`
+  - `test_freshness_penalizes_late_chase`
+  - `test_late_blowoff_never_follow`
+  - `test_top_early_tail_candidates_reported`
+  - `test_candidate_first_seen_price_preserved`
+  - `test_volume_rank_jump_calculated`
+  - `test_adaptive_runtime_fields_exportable`
+  - `test_no_live_trading_flags_unchanged`
+  - `test_runtime_calibration_payload_round_trips`
+  - `test_pool_protects_high_early_tail_candidate_from_eviction`
+  - `test_eden_alt_near_examples_surfaced`
+  - `test_strategy_mode_does_not_authorise_real_trade`
+
+The full Phase 11C.1C-A test suite continues to pass with no
+regression vs. the post-PR-#37 main baseline.
+
 ### Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector Contracts
 
 **Version:** `1.4.0a11c.1c.a` - Phase 11C.1C-A. Tracks the
 **paper-only first version** of the Adaptive Candidate Regime &
 Strategy Selector contracts.
 
-> **Status: IN_REVIEW / PR_OPEN on PR #36.** PR #36 is currently
-> open against `main` and has **not** been merged. The entry
-> below describes the changes shipped on the PR branch; Phase
-> 11C.1C-A will only be marked **ACCEPTED** (and Phase 11C.1C-B
-> will only become NEXT_ALLOWED) after PR #36 is merged and a
-> human reviewer accepts the 30s dry-run + 5min real public WS
-> smoke evidence collected for the PR. Until that gate fires,
-> this entry is pre-merge / IN_REVIEW.
+> **Status: ACCEPTED (closed 2026-05-22; PR #36 merged; PR #37
+> docs closeout).** PR #36 has been merged into `main`; PR #37
+> closed out the docs gate. The Phase 11C.1C-A acceptance smoke
+> evidence (30s dry-run + 5min real public WS) was accepted; the
+> entry below is the closeout record. Phase 11C.1C-B is now
+> **IN_REVIEW / PR_OPEN** on PR #38 (see the Phase 11C.1C-B
+> entry above).
 
 > **Phase 11C.1C-A is NOT live trading. NOT AI Learning. NOT
 > complete strategy validation. NOT the full MFE/MAE processor. It
@@ -275,12 +509,13 @@ raise `SafeModeViolation` on the public REST client.
   now expects the Phase 11C.1C-A label "Adaptive Candidate
   Regime".
 
-Total tests on the PR #36 branch: **2219 passed** in `tests/unit/`
+Total tests on PR #36: **2219 passed** in `tests/unit/`
 (244 phase11c-prefixed cases including the 31 brief-mandated
 `test_phase11c_1c_a_adaptive_candidate.py` cases). No regressions
 relative to the 2166-test pre-Phase 11C.1C-A baseline. PR #36 has
-**not** been merged at the time of this entry; the test count
-above is the pre-merge figure measured on the PR branch.
+been merged into `main`; PR #37 closed out the docs gate. The
+test count above is the figure measured on the PR branch at
+acceptance time.
 
 #### Versions stamped on every adaptive event
 
