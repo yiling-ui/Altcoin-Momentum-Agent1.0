@@ -7,6 +7,294 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector Contracts
+
+**Version:** `1.4.0a11c.1c.a` - Phase 11C.1C-A. Tracks the
+**paper-only first version** of the Adaptive Candidate Regime &
+Strategy Selector contracts.
+
+> **Status: IN_REVIEW / PR_OPEN on PR #36.** PR #36 is currently
+> open against `main` and has **not** been merged. The entry
+> below describes the changes shipped on the PR branch; Phase
+> 11C.1C-A will only be marked **ACCEPTED** (and Phase 11C.1C-B
+> will only become NEXT_ALLOWED) after PR #36 is merged and a
+> human reviewer accepts the 30s dry-run + 5min real public WS
+> smoke evidence collected for the PR. Until that gate fires,
+> this entry is pre-merge / IN_REVIEW.
+
+> **Phase 11C.1C-A is NOT live trading. NOT AI Learning. NOT
+> complete strategy validation. NOT the full MFE/MAE processor. It
+> is the data-contract + scoring + selector + paper-only routing
+> first version.**
+
+#### New package: `app/adaptive/`
+
+Seven Pydantic v2 frozen value objects + six pure
+classifier / scorer functions:
+
+- `MarketRegimeAssessment` - regime bucket + confidence + risk
+  multiplier + allowed_strategy_modes + no_trade_reason. Buckets:
+  `MEME_RISK_ON` / `SECTOR_ROTATION` / `BTC_ABSORPTION` /
+  `ALT_RISK_OFF` / `SYSTEMIC_RISK` / `RISK_OFF` / `NO_TRADE` /
+  `NEUTRAL`.
+- `CandidateStageAssessment` - life-cycle stage (`early` / `mid`
+  / `late` / `blowoff` / `dumped`) + freshness +
+  late_chase_risk + blowoff_risk + first_seen_ts +
+  first_seen_price + current_price + distance_from_first_seen +
+  distance_to_24h_high.
+- `OpportunityScore` - weighted-sum score + S/A/B/C grade.
+- `StrategyModeDecision` - paper / virtual strategy expression
+  (`follow` / `pullback` / `observe` / `reject`).
+- `ClusterContext` - cluster_id + cluster_leader + cluster_rank
+  + cluster_size + cluster_reason. The first-version classifier
+  groups by quote-asset suffix.
+- `LabelQueueContract` - opportunity_id / scan_batch_id / symbol
+  / enqueued_at_ms / mfe_mae_label_pending / future_tail_label_pending
+  / tracking_windows / reference_price. Default tracking
+  windows: 5m / 15m / 30m / 1h / 4h.
+- `AdaptiveCandidateContext` - one-shot bundle of the above plus
+  the four version labels (`strategy_version` / `scoring_version`
+  / `risk_config_version` / `state_machine_version`).
+- `assess_market_regime`, `classify_candidate_stage`,
+  `compute_opportunity_score`, `select_strategy_mode`,
+  `build_cluster_context`, `build_label_queue_contract`,
+  `build_adaptive_candidate_context` (one-shot orchestrator).
+
+#### Six new EventType entries (`app/core/events.py`)
+
+```
+MARKET_REGIME_ASSESSED
+CANDIDATE_STAGE_CLASSIFIED
+OPPORTUNITY_SCORED
+STRATEGY_MODE_SELECTED
+CLUSTER_CONTEXT_ATTACHED
+LABEL_QUEUE_ENQUEUED
+```
+
+The Phase 8.5 export, Phase 10A replay, and Phase 10B reflection
+pipelines accept the new types unchanged. The Phase 8.5 eleven-type
+`LEARNING_READY_EVENT_TYPES` tuple is unchanged; the new types are
+exposed as the separate `ADAPTIVE_LEARNING_READY_EVENT_TYPES`
+tuple so the Phase 8.5 contract stays load-bearing.
+
+#### Scoring formula (first version)
+
+```
+score = (
+    0.25 * momentum_strength
+  + 0.20 * volume_expansion
+  + 0.15 * liquidity_quality
+  + 0.15 * regime_fit
+  + 0.15 * freshness
+  - 0.20 * manipulation_risk
+  - 0.20 * late_chase_risk
+)
+```
+
+Inputs clipped to `[0.0, 100.0]`; score clipped to `[0.0, 100.0]`.
+Grade boundaries: S>=80, A in [65,80), B in [50,65), C<50.
+Tunable via `OpportunityScoreInputs` + `OpportunityScoreWeights`.
+
+#### Strategy selector (first version)
+
+Decision flow (in priority order):
+
+1. `manipulation_risk >= 60` -> **reject**.
+2. regime is `RISK_OFF` / `NO_TRADE` / `SYSTEMIC_RISK` ->
+   **reject**. `ALT_RISK_OFF` -> **observe**.
+3. stage is `dumped` / `blowoff` / `late` -> **observe**.
+4. `mid` + strong momentum + late_chase_risk high -> **pullback**.
+5. `early` + every "follow" condition holds + regime allows
+   follow -> **follow**.
+6. otherwise -> **observe**.
+
+The `mode` is a **paper / virtual** field. `follow` does NOT
+authorise opening a position; the Risk Engine remains the single
+trade-decision gate; `stop_unconfirmed=True` continues to lock the
+chain into the typed-reject path.
+
+#### Phase 8.5 contracts extended
+
+- `LearningReadyContext` (Phase 8.5) gained an optional
+  `adaptive_candidate` field; `to_event_payload()` renders it
+  under the canonical `adaptive_candidate` key.
+- `VirtualTradePlan` (Phase 8.5) gained eleven optional adaptive
+  fields: `opportunity_score`, `opportunity_grade`,
+  `candidate_stage`, `strategy_mode`, `cluster_id`,
+  `cluster_leader`, `label_queue_pending`, `follow_allowed`,
+  `pullback_allowed`, `observe_only`, `reject_reason`. All default
+  to `None` so existing callers continue to work; the round-trip
+  helper `payload_to_virtual_trade_plan` preserves them.
+
+#### WS-radar chain wired
+
+`WSRadarChainDriver.drive()` now:
+
+  - builds an `AdaptiveCandidateContext` per ACTIVE candidate via
+    `_build_adaptive_context_for_candidate`;
+  - emits the six new events alongside the existing
+    `PRE_ANOMALY_DETECTED` / `ANOMALY_DETECTED` /
+    `STATE_TRANSITION` chain via `_emit_adaptive_events`;
+  - attaches the adaptive context to every event's
+    `learning_ready.adaptive_candidate`;
+  - propagates the adaptive fields onto the paper
+    `VirtualTradePlan`;
+  - tracks per-regime / per-stage / per-mode / per-grade
+    histograms and exposes `adaptive_metrics_payload()` for the
+    runner / daily report (counters: `market_regime_counts`,
+    `candidate_stage_counts`, `strategy_mode_counts`,
+    `opportunity_grade_counts`, `top_opportunity_scores`,
+    `follow_count`, `pullback_count`, `observe_count`,
+    `reject_count`, `late_chase_rejected_count`,
+    `blowoff_observed_count`, `label_queue_enqueued`).
+
+#### Daily report (`app/paper_run/daily_report.py`)
+
+- `DailyReportBuilder.build()` accepts a new `adaptive_metrics`
+  kwarg.
+- `DailyReportSnapshot` gained the brief-mandated adaptive fields:
+  `market_regime_counts`, `candidate_stage_counts`,
+  `strategy_mode_counts`, `opportunity_grade_counts`,
+  `top_opportunity_scores`, `label_queue_enqueued`,
+  `observe_count`, `reject_count`, `follow_count`,
+  `pullback_count`, `late_chase_rejected_count`,
+  `blowoff_observed_count`, `market_regime_assessed_count`,
+  `candidate_stage_classified_count`,
+  `opportunity_scored_count`, `strategy_mode_selected_count`,
+  `cluster_context_attached_count`, `adaptive_metrics`.
+- `_aggregate` cross-checks the event-log counts of the six new
+  event types against the runner-side `adaptive_metrics` so a
+  stale runner counter cannot under-report a real adaptive event.
+- The Markdown body has a new
+  `## Phase 11C.1C-A Adaptive Candidate Regime & Strategy Selector`
+  section with every brief-mandated counter + per-regime,
+  per-stage, per-mode, per-grade tables + a top-N opportunity
+  score table.
+
+#### Phase 11C runner (`scripts/run_public_market_paper.py`)
+
+The runner populates `_Phase11CRunStats.adaptive_metrics` from
+`WSRadarChainDriver.adaptive_metrics_payload()` on every loop tick
+and passes the dict through to `DailyReportBuilder.build()` on
+shutdown.
+
+#### Phase 1 safety lock UNCHANGED
+
+Phase 11C.1C-A does NOT touch the Phase 1 safety lock. After
+running the adaptive pipeline end-to-end (with the six new
+adaptive events firing alongside the Phase 11C.1B chain) every
+flag below remains:
+
+```
+mode                            = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+forbid_private_credentials      = True
+forbid_signed_endpoints         = True
+forbid_trade_endpoints          = True
+forbid_account_endpoints        = True
+forbid_position_endpoints       = True
+forbid_leverage_endpoints       = True
+forbid_margin_endpoints         = True
+forbid_live_trading             = True
+forbid_right_tail               = True
+forbid_llm_trade_decisions      = True
+forbid_telegram_outbound        = True
+```
+
+The four ExchangeClientBase write surfaces (`create_order`,
+`cancel_order`, `set_leverage`, `set_margin_mode`) continue to
+raise `SafeModeViolation` on the public REST client.
+
+#### Phase 11C.1C-A explicitly does NOT
+
+- accept any Binance API key / API secret / `listenKey`.
+- subscribe to any user data stream / private WebSocket / trading
+  WebSocket API / account / margin / position / leverage / balance
+  / order private WS variant.
+- treat the new `strategy_mode` (paper / virtual) field as a
+  real-trade authority. The Risk Engine remains the single
+  trade-decision gate; `stop_unconfirmed=True` continues to lock
+  the WS-radar chain into the typed-reject path.
+- implement the full MFE/MAE processor. The
+  `LabelQueueContract` is descriptive; the processor is reserved
+  for a future PR (Phase 11C.1C-B).
+- implement AI Learning. The Phase 11C.1C-A scoring / selector is
+  deterministic; auto-decided trades are reserved for Phase
+  11C.1C-B+.
+- enable real Telegram outbound, DeepSeek trade decisions, or any
+  third-party HTTP / WebSocket / SDK / LLM / Telegram bot import
+  on the adaptive surface.
+- enter Phase 12.
+
+#### Tests
+
+- `tests/unit/test_phase11c_1c_a_adaptive_candidate.py` (new, 31
+  cases) pinning every brief-mandated behaviour:
+  - `test_market_regime_assessment_contract`
+  - `test_candidate_stage_assessment_contract_field_set`
+  - `test_opportunity_score_contract_field_set`
+  - `test_label_queue_contract_created`
+  - `test_cluster_context_groups_by_quote_asset`
+  - `test_candidate_stage_classifier_early`
+  - `test_candidate_stage_classifier_mid`
+  - `test_candidate_stage_classifier_late`
+  - `test_candidate_stage_classifier_blowoff`
+  - `test_candidate_stage_classifier_dumped`
+  - `test_opportunity_score_formula`
+  - `test_opportunity_grade_boundaries`
+  - `test_strategy_selector_follow`
+  - `test_strategy_selector_pullback`
+  - `test_strategy_selector_observe_for_late`
+  - `test_strategy_selector_observe_for_blowoff`
+  - `test_strategy_selector_reject_for_high_manipulation`
+  - `test_strategy_selector_reject_for_no_trade_regime`
+  - `test_adaptive_candidate_context_payload_round_trips`
+  - `test_adaptive_context_attached_to_learning_ready_payload`
+  - `test_adaptive_event_types_distinct_from_phase_8_5_set`
+  - `test_ws_radar_chain_emits_six_adaptive_events`
+  - `test_virtual_trade_plan_contains_adaptive_fields`
+  - `test_daily_report_contains_adaptive_candidate_metrics`
+  - `test_export_replay_reads_adaptive_candidate_events`
+  - `test_no_live_trading_flags_unchanged`
+  - `test_no_real_telegram_outbound_flag_unchanged`
+  - `test_no_binance_api_key_consumed`
+  - `test_phase_12_remains_forbidden`
+  - `test_strategy_mode_does_not_authorise_real_trade`
+  - `test_adaptive_module_does_not_import_third_party_network_libs`
+- `tests/unit/test_phase11b_no_network.py` extended: allowed
+  paper_run event-type list grew the six new entries
+  (`MARKET_REGIME_ASSESSED` / `CANDIDATE_STAGE_CLASSIFIED` /
+  `OPPORTUNITY_SCORED` / `STRATEGY_MODE_SELECTED` /
+  `CLUSTER_CONTEXT_ATTACHED` / `LABEL_QUEUE_ENQUEUED`).
+- `tests/unit/test_main_entrypoint.py` updated: banner assertion
+  now expects the Phase 11C.1C-A label "Adaptive Candidate
+  Regime".
+
+Total tests on the PR #36 branch: **2219 passed** in `tests/unit/`
+(244 phase11c-prefixed cases including the 31 brief-mandated
+`test_phase11c_1c_a_adaptive_candidate.py` cases). No regressions
+relative to the 2166-test pre-Phase 11C.1C-A baseline. PR #36 has
+**not** been merged at the time of this entry; the test count
+above is the pre-merge figure measured on the PR branch.
+
+#### Versions stamped on every adaptive event
+
+```
+strategy_version       = phase_11c_1c_a.strategy.v1
+scoring_version        = phase_11c_1c_a.scoring.v1
+risk_config_version    = phase_11c_1c_a.risk_config.v1
+state_machine_version  = phase_11c_1c_a.state_machine.v1
+```
+
+A future PR that bumps the formula or the state machine bumps the
+version label and Reflection / Replay automatically picks up the
+change.
+
 ### Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar
 
 **Version:** `1.4.0a11c.1b` - Phase 11C.1B. Tracks the Phase 11C

@@ -31,6 +31,23 @@ Phase 11C.1B contract:
     runner makes a per-loop REST detail call for the candidate;
   - the chain does NOT call any LLM / Telegram outbound / private
     endpoint.
+
+Phase 11C.1C-A extension
+------------------------
+
+The chain now also emits the six Phase 11C.1C-A typed events
+alongside the existing chain (``MARKET_REGIME_ASSESSED`` /
+``CANDIDATE_STAGE_CLASSIFIED`` / ``OPPORTUNITY_SCORED`` /
+``STRATEGY_MODE_SELECTED`` / ``CLUSTER_CONTEXT_ATTACHED`` /
+``LABEL_QUEUE_ENQUEUED``) and attaches the resulting
+:class:`AdaptiveCandidateContext` to the existing
+:class:`LearningReadyContext` (under ``learning_ready.adaptive_candidate``).
+
+The adaptive context is **descriptive only** - the strategy_mode is
+a paper / virtual field; the Risk Engine remains the single trade-
+decision gate; ``stop_unconfirmed=True`` continues to lock every
+decision into the typed-reject path. None of the adaptive events
+flips a Phase 1 safety flag.
 """
 
 from __future__ import annotations
@@ -40,6 +57,11 @@ from typing import Any
 
 from loguru import logger
 
+from app.adaptive import (
+    AdaptiveCandidateContext,
+    OpportunityScoreInputs,
+    build_adaptive_candidate_context,
+)
 from app.core.clock import now_ms
 from app.core.enums import (
     AnomalyReasonTag,
@@ -88,6 +110,10 @@ class WSRadarChainResult:
     reject_reasons: tuple[str, ...]
     learning_ready_attached: bool
     notes: tuple[str, ...]
+    # Phase 11C.1C-A - adaptive context surface. ``None`` when the
+    # adaptive context could not be built (extremely defensive); on
+    # the happy path every field is populated.
+    adaptive_context: AdaptiveCandidateContext | None = None
 
 
 class WSRadarChainDriver:
@@ -95,6 +121,10 @@ class WSRadarChainDriver:
 
     SOURCE_MODULE = "market_data_public.ws_radar_chain"
     SOURCE_PHASE = "phase_11c_1b_ws_first_radar"
+    # Phase 11C.1C-A - source-phase tag for the adaptive sub-block.
+    # Distinct from :attr:`SOURCE_PHASE` so Reflection can split the
+    # adaptive vs. non-adaptive parts of the chain.
+    ADAPTIVE_SOURCE_PHASE = "phase_11c_1c_a_adaptive_candidate"
 
     def __init__(
         self,
@@ -110,6 +140,30 @@ class WSRadarChainDriver:
         self._risk_approved_count = 0
         self._risk_rejected_count = 0
         self._learning_ready_attached_count = 0
+        # Phase 11C.1C-A - adaptive event counters.
+        self._market_regime_assessed_count = 0
+        self._candidate_stage_classified_count = 0
+        self._opportunity_scored_count = 0
+        self._strategy_mode_selected_count = 0
+        self._cluster_context_attached_count = 0
+        self._label_queue_enqueued_count = 0
+        # Per-grade / per-mode / per-stage histograms for the daily
+        # report. Keys are the canonical labels in
+        # :data:`OPPORTUNITY_GRADES` / :data:`STRATEGY_MODES` /
+        # :data:`CANDIDATE_STAGES`.
+        self._opportunity_grade_counts: dict[str, int] = {}
+        self._strategy_mode_counts: dict[str, int] = {}
+        self._candidate_stage_counts: dict[str, int] = {}
+        self._market_regime_counts: dict[str, int] = {}
+        self._top_opportunity_scores: list[
+            tuple[str, str, float, str]
+        ] = []  # (symbol, opp_id, score, grade)
+        self._observe_count = 0
+        self._reject_count = 0
+        self._follow_count = 0
+        self._pullback_count = 0
+        self._late_chase_rejected_count = 0
+        self._blowoff_observed_count = 0
 
     # ------------------------------------------------------------------
     @property
@@ -128,9 +182,92 @@ class WSRadarChainDriver:
     def learning_ready_attached_count(self) -> int:
         return self._learning_ready_attached_count
 
+    # ---- Phase 11C.1C-A counters --------------------------------------
+    @property
+    def market_regime_assessed_count(self) -> int:
+        return self._market_regime_assessed_count
+
+    @property
+    def candidate_stage_classified_count(self) -> int:
+        return self._candidate_stage_classified_count
+
+    @property
+    def opportunity_scored_count(self) -> int:
+        return self._opportunity_scored_count
+
+    @property
+    def strategy_mode_selected_count(self) -> int:
+        return self._strategy_mode_selected_count
+
+    @property
+    def cluster_context_attached_count(self) -> int:
+        return self._cluster_context_attached_count
+
+    @property
+    def label_queue_enqueued_count(self) -> int:
+        return self._label_queue_enqueued_count
+
+    def adaptive_metrics_payload(self) -> dict[str, Any]:
+        """Return a JSON-safe dict of Phase 11C.1C-A adaptive metrics.
+
+        Used by the runner / daily-report builder to surface the
+        adaptive counters without re-querying events.db.
+        """
+        # Top opportunity scores ordered desc by score, capped at 10.
+        top = sorted(
+            self._top_opportunity_scores,
+            key=lambda r: -r[2],
+        )[:10]
+        return {
+            "market_regime_assessed_count": int(
+                self._market_regime_assessed_count
+            ),
+            "candidate_stage_classified_count": int(
+                self._candidate_stage_classified_count
+            ),
+            "opportunity_scored_count": int(self._opportunity_scored_count),
+            "strategy_mode_selected_count": int(
+                self._strategy_mode_selected_count
+            ),
+            "cluster_context_attached_count": int(
+                self._cluster_context_attached_count
+            ),
+            "label_queue_enqueued_count": int(
+                self._label_queue_enqueued_count
+            ),
+            "market_regime_counts": dict(self._market_regime_counts),
+            "candidate_stage_counts": dict(self._candidate_stage_counts),
+            "strategy_mode_counts": dict(self._strategy_mode_counts),
+            "opportunity_grade_counts": dict(self._opportunity_grade_counts),
+            "follow_count": int(self._follow_count),
+            "pullback_count": int(self._pullback_count),
+            "observe_count": int(self._observe_count),
+            "reject_count": int(self._reject_count),
+            "late_chase_rejected_count": int(self._late_chase_rejected_count),
+            "blowoff_observed_count": int(self._blowoff_observed_count),
+            "top_opportunity_scores": [
+                {
+                    "symbol": sym,
+                    "opportunity_id": opp_id,
+                    "score": float(score),
+                    "grade": grade,
+                }
+                for sym, opp_id, score, grade in top
+            ],
+            "label_queue_enqueued": int(self._label_queue_enqueued_count),
+        }
+
     # ------------------------------------------------------------------
     def drive(self, candidate: Candidate) -> WSRadarChainResult:
-        """Emit the Phase 11C.1B WS-radar chain for one candidate."""
+        """Emit the Phase 11C.1B WS-radar chain for one candidate.
+
+        Phase 11C.1C-A: also builds and emits the adaptive context
+        events (``MARKET_REGIME_ASSESSED`` /
+        ``CANDIDATE_STAGE_CLASSIFIED`` / ``OPPORTUNITY_SCORED`` /
+        ``STRATEGY_MODE_SELECTED`` / ``CLUSTER_CONTEXT_ATTACHED`` /
+        ``LABEL_QUEUE_ENQUEUED``) and attaches the adaptive context
+        to the existing :class:`LearningReadyContext`.
+        """
         self._chain_count += 1
         snap = candidate.snapshot
         symbol = candidate.symbol
@@ -140,6 +277,13 @@ class WSRadarChainDriver:
         # The candidate already carries a Phase 8.5 identity; reuse it
         # so opportunity_id / scan_batch_id continuity is preserved.
         opportunity = candidate.identity
+
+        # 0. Phase 11C.1C-A - build the adaptive candidate context
+        #    BEFORE the rest of the chain so every event the chain
+        #    emits can carry the adaptive sub-block.
+        adaptive = self._build_adaptive_context_for_candidate(
+            candidate=candidate, timestamp=timestamp
+        )
 
         # 1. PRE_ANOMALY_DETECTED with the radar reasons mapped onto
         #    the existing Phase 6 reason vocabulary.
@@ -166,12 +310,15 @@ class WSRadarChainDriver:
             pre_anomaly_score=pre_anomaly_score,
             anomaly_score=pre_anomaly_score,  # radar score doubles as proxy
         )
-        virtual_plan = self._build_virtual_trade_plan(snap=snap)
+        virtual_plan = self._build_virtual_trade_plan(
+            snap=snap, adaptive=adaptive
+        )
         learning_context = LearningReadyContext(
             opportunity=opportunity,
             signal_snapshot=signal,
             virtual_trade_plan=virtual_plan,
             config_versions=self._config_versions,
+            adaptive_candidate=adaptive,
             source_phase=self.SOURCE_PHASE,
             extra={
                 "radar_score": float(candidate.radar_score),
@@ -209,6 +356,15 @@ class WSRadarChainDriver:
             payload=attach_learning_ready(anomaly_payload, learning_context),
         )
 
+        # 2b. Phase 11C.1C-A - emit the six adaptive events
+        #     alongside the existing chain.
+        self._emit_adaptive_events(
+            adaptive=adaptive,
+            symbol=symbol,
+            timestamp=timestamp,
+            learning_context=learning_context,
+        )
+
         # 3. Risk Engine. stop_unconfirmed=True locks every Phase 11C.1B
         #    decision into RISK_REJECTED.
         request = RiskRequest(
@@ -231,6 +387,15 @@ class WSRadarChainDriver:
                 "provider": "binance_public_ws",
                 "scan_batch_id": opportunity.scan_batch_id,
                 "radar_score": float(candidate.radar_score),
+                "adaptive_strategy_mode": (
+                    adaptive.strategy_mode.mode if adaptive else None
+                ),
+                "adaptive_opportunity_grade": (
+                    adaptive.opportunity_score.grade if adaptive else None
+                ),
+                "adaptive_candidate_stage": (
+                    adaptive.candidate_stage.stage if adaptive else None
+                ),
             },
         )
         decision = self._risk.evaluate(request)
@@ -266,6 +431,7 @@ class WSRadarChainDriver:
             reject_reasons=tuple(decision.reasons),
             learning_ready_attached=learning_attached,
             notes=tuple(notes),
+            adaptive_context=adaptive,
         )
 
     # ------------------------------------------------------------------
@@ -344,7 +510,9 @@ class WSRadarChainDriver:
         )
 
     @staticmethod
-    def _build_virtual_trade_plan(*, snap) -> VirtualTradePlan:
+    def _build_virtual_trade_plan(
+        *, snap, adaptive: AdaptiveCandidateContext | None = None
+    ) -> VirtualTradePlan:
         ref_price = float(snap.last_price or 0.0)
         if ref_price <= 0 and snap.bid is not None and snap.ask is not None:
             if snap.bid > 0 and snap.ask > 0:
@@ -355,6 +523,41 @@ class WSRadarChainDriver:
         tp1 = ref_price * 1.02
         tp2 = ref_price * 1.05
         invalid = ref_price * 0.97
+
+        # Phase 11C.1C-A - propagate the adaptive sub-block onto the
+        # paper VirtualTradePlan. Every adaptive field is descriptive
+        # only; nothing here authorises a real trade. The Risk Engine
+        # remains the single trade-decision gate; ``stop_unconfirmed``
+        # is True downstream so the engine refuses the new-open path
+        # regardless of the paper plan content.
+        if adaptive is not None:
+            adaptive_kwargs: dict[str, Any] = {
+                "opportunity_score": float(
+                    adaptive.opportunity_score.score
+                ),
+                "opportunity_grade": str(adaptive.opportunity_score.grade),
+                "candidate_stage": str(adaptive.candidate_stage.stage),
+                "strategy_mode": str(adaptive.strategy_mode.mode),
+                "cluster_id": str(adaptive.cluster.cluster_id),
+                "cluster_leader": (
+                    str(adaptive.cluster.cluster_leader)
+                    if adaptive.cluster.cluster_leader is not None
+                    else None
+                ),
+                "label_queue_pending": bool(
+                    adaptive.label_queue.mfe_mae_label_pending
+                    or adaptive.label_queue.future_tail_label_pending
+                ),
+                "follow_allowed": bool(adaptive.strategy_mode.follow_allowed),
+                "pullback_allowed": bool(
+                    adaptive.strategy_mode.pullback_allowed
+                ),
+                "observe_only": bool(adaptive.strategy_mode.observe_only),
+                "reject_reason": adaptive.strategy_mode.reject_reason,
+            }
+        else:
+            adaptive_kwargs = {}
+
         return VirtualTradePlan(
             virtual_entry=float(ref_price),
             virtual_stop=float(stop),
@@ -366,7 +569,282 @@ class WSRadarChainDriver:
             direction=Direction.LONG,
             setup_type="phase_11c_1b_ws_radar_observation",
             notes=("phase_11c_1b_ws_radar_paper_observation",),
+            **adaptive_kwargs,
         )
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-A - Adaptive candidate context builder + emitter.
+    # ------------------------------------------------------------------
+    def _build_adaptive_context_for_candidate(
+        self,
+        *,
+        candidate: Candidate,
+        timestamp: int,
+    ) -> AdaptiveCandidateContext:
+        """Build the Phase 11C.1C-A adaptive context for one candidate.
+
+        The function reads ONLY information already on the candidate /
+        snapshot (no REST call, no LLM, no Telegram outbound). The
+        ``avg_price_acceleration_60s`` / ``positive_acceleration_ratio``
+        / ``liquidation_event_rate`` aggregate inputs are derived from
+        the per-symbol snapshot - a future PR may upgrade these to
+        real cross-batch aggregates once the runner threads them
+        through.
+        """
+        snap = candidate.snapshot
+        symbol = candidate.symbol
+        identity = candidate.identity
+        first_seen_price = (
+            float(snap.last_price)
+            if snap.last_price
+            else float(getattr(snap, "mark_price", 0.0) or 0.0)
+        )
+        # ``first_seen_ms`` is on the candidate; it was captured at
+        # admission. The radar snapshot's ``last_price`` is the
+        # current price; first_seen_price is approximated as the
+        # candidate's reference snapshot.
+        first_seen_ts_ms = int(candidate.first_seen_ms or timestamp)
+        current_price = float(snap.last_price or 0.0)
+        if current_price <= 0.0:
+            current_price = float(getattr(snap, "mark_price", 0.0) or 0.0)
+        # Approximate price_24h_high using the 24h price-change
+        # percentage. ``price_change_pct_24h`` is signed; when it is
+        # positive, the 24h high is at least as large as the current
+        # price, so we approximate the high as
+        # ``current_price / (1 - high_offset)`` with a small floor
+        # so the ``distance_to_24h_high`` numeric stays informative
+        # even for momentum candidates that have just printed a new
+        # high.
+        price_24h_high = self._approximate_24h_high(snap, current_price)
+        accel_60 = (
+            float(snap.price_acceleration_60s)
+            if snap.price_acceleration_60s is not None
+            else None
+        )
+        # Per-snapshot regime aggregates: a future PR threads
+        # cross-batch values through; for Phase 11C.1C-A we use the
+        # candidate's own acceleration so the classifier always has
+        # a non-None input. ``positive_acceleration_ratio`` is 1.0
+        # when the candidate's accel is positive, else 0.0; this is
+        # conservative - the classifier defaults to NEUTRAL unless
+        # the score is large enough.
+        if accel_60 is None:
+            avg_accel = 0.0
+            pos_ratio = 0.0
+        else:
+            avg_accel = float(accel_60)
+            pos_ratio = 1.0 if accel_60 > 0.0 else 0.0
+        liq_rate = 1.0 if bool(snap.liquidation_event) else 0.0
+        # Score inputs derived from the candidate state. These are
+        # conservative; richer inputs land in a future PR via
+        # explicit kwargs.
+        radar_score = float(candidate.radar_score)
+        score_inputs = OpportunityScoreInputs(
+            momentum_strength=max(0.0, min(100.0, radar_score)),
+            volume_expansion=max(0.0, min(100.0, radar_score * 0.6)),
+            liquidity_quality=50.0,
+            regime_fit=0.0,  # filled in by the orchestrator
+            freshness=0.0,   # filled in by the orchestrator
+            manipulation_risk=0.0,
+            late_chase_risk=0.0,
+        )
+        # The orchestrator will recompute regime_fit / freshness /
+        # late_chase_risk / manipulation_risk from the cheap
+        # classifiers; passing ``None`` for ``score_inputs`` makes it
+        # use the derived defaults. We pass our radar-score-based
+        # inputs explicitly only when the caller wants them; for
+        # Phase 11C.1C-A, the derived defaults are the simpler path.
+        return build_adaptive_candidate_context(
+            opportunity_id=identity.opportunity_id,
+            scan_batch_id=identity.scan_batch_id,
+            symbol=symbol,
+            timestamp_ms=int(timestamp),
+            first_seen_ts_ms=first_seen_ts_ms,
+            first_seen_price=first_seen_price,
+            current_price=current_price,
+            price_24h_high=price_24h_high,
+            price_acceleration_60s=accel_60,
+            avg_price_acceleration_60s=avg_accel,
+            positive_acceleration_ratio=pos_ratio,
+            liquidation_event_rate=liq_rate,
+            data_quality="ok",
+            snapshot_count=1,
+            radar_score=radar_score,
+            cluster_reason=("ws_radar_chain",),
+            label_queue_notes=(self.SOURCE_PHASE,),
+        )
+
+    @staticmethod
+    def _approximate_24h_high(snap, current_price: float) -> float:
+        """Approximate the 24h high from the snapshot.
+
+        Phase 11C.1C-A only has the 24h price-change percentage on
+        the snapshot. We derive a conservative 24h high so the
+        ``distance_to_24h_high`` numeric is non-zero and informative.
+        """
+        if current_price <= 0.0:
+            return 0.0
+        pct = snap.price_change_pct_24h
+        if pct is None or pct <= 0.0:
+            # If 24h change is non-positive, the 24h high is at least
+            # current_price; bias the high slightly above current.
+            return float(current_price * 1.001)
+        # Naive: assume the 24h high is at most 1% above the current
+        # price + 0.5 * pct of additional headroom. The exact formula
+        # is not load-bearing; the field is informational.
+        try:
+            headroom = max(0.0, float(pct) * 0.5)
+        except (TypeError, ValueError):
+            headroom = 0.0
+        return float(current_price * (1.0 + headroom + 0.001))
+
+    def _emit_adaptive_events(
+        self,
+        *,
+        adaptive: AdaptiveCandidateContext,
+        symbol: str,
+        timestamp: int,
+        learning_context: LearningReadyContext,
+    ) -> None:
+        """Emit the six Phase 11C.1C-A adaptive events.
+
+        Every payload carries the Phase 8.5 identity tuple plus the
+        Phase 11C.1C-A version labels so Reflection / Replay can
+        group on them without parsing free-form audit dicts.
+        """
+        identity_block = {
+            "opportunity_id": adaptive.opportunity_id,
+            "scan_batch_id": adaptive.scan_batch_id,
+            "symbol": symbol,
+            "timestamp": int(timestamp),
+            "strategy_version": adaptive.strategy_version,
+            "scoring_version": adaptive.scoring_version,
+            "risk_config_version": adaptive.risk_config_version,
+            "state_machine_version": adaptive.state_machine_version,
+            "source_phase": self.ADAPTIVE_SOURCE_PHASE,
+        }
+
+        # 1. MARKET_REGIME_ASSESSED
+        regime_payload = {
+            **identity_block,
+            "market_regime": adaptive.market_regime.to_payload(),
+        }
+        self._emit(
+            EventType.MARKET_REGIME_ASSESSED,
+            symbol=symbol,
+            timestamp=timestamp,
+            payload=attach_learning_ready(regime_payload, learning_context),
+        )
+        self._market_regime_assessed_count += 1
+        regime_name = str(adaptive.market_regime.regime_name)
+        self._market_regime_counts[regime_name] = (
+            self._market_regime_counts.get(regime_name, 0) + 1
+        )
+
+        # 2. CANDIDATE_STAGE_CLASSIFIED
+        stage_payload = {
+            **identity_block,
+            "candidate_stage": adaptive.candidate_stage.to_payload(),
+        }
+        self._emit(
+            EventType.CANDIDATE_STAGE_CLASSIFIED,
+            symbol=symbol,
+            timestamp=timestamp,
+            payload=attach_learning_ready(stage_payload, learning_context),
+        )
+        self._candidate_stage_classified_count += 1
+        stage_label = str(adaptive.candidate_stage.stage)
+        self._candidate_stage_counts[stage_label] = (
+            self._candidate_stage_counts.get(stage_label, 0) + 1
+        )
+
+        # 3. OPPORTUNITY_SCORED
+        score_payload = {
+            **identity_block,
+            "opportunity_score": adaptive.opportunity_score.to_payload(),
+        }
+        self._emit(
+            EventType.OPPORTUNITY_SCORED,
+            symbol=symbol,
+            timestamp=timestamp,
+            payload=attach_learning_ready(score_payload, learning_context),
+        )
+        self._opportunity_scored_count += 1
+        grade = str(adaptive.opportunity_score.grade)
+        self._opportunity_grade_counts[grade] = (
+            self._opportunity_grade_counts.get(grade, 0) + 1
+        )
+        self._top_opportunity_scores.append(
+            (
+                symbol,
+                str(adaptive.opportunity_id),
+                float(adaptive.opportunity_score.score),
+                grade,
+            )
+        )
+        # Cap the top list to 50 entries so long runs do not grow
+        # the in-process counter unbounded.
+        if len(self._top_opportunity_scores) > 50:
+            self._top_opportunity_scores.sort(key=lambda r: -r[2])
+            self._top_opportunity_scores = self._top_opportunity_scores[:50]
+
+        # 4. STRATEGY_MODE_SELECTED
+        mode_payload = {
+            **identity_block,
+            "strategy_mode": adaptive.strategy_mode.to_payload(),
+        }
+        self._emit(
+            EventType.STRATEGY_MODE_SELECTED,
+            symbol=symbol,
+            timestamp=timestamp,
+            payload=attach_learning_ready(mode_payload, learning_context),
+        )
+        self._strategy_mode_selected_count += 1
+        mode = str(adaptive.strategy_mode.mode)
+        self._strategy_mode_counts[mode] = (
+            self._strategy_mode_counts.get(mode, 0) + 1
+        )
+        if mode == "follow":
+            self._follow_count += 1
+        elif mode == "pullback":
+            self._pullback_count += 1
+        elif mode == "observe":
+            self._observe_count += 1
+        elif mode == "reject":
+            self._reject_count += 1
+        # late_chase / blowoff bookkeeping: a candidate counted as
+        # observe AND classified as late or blowoff is the
+        # late_chase_rejected / blowoff_observed cohort.
+        if mode == "observe" and stage_label == "late":
+            self._late_chase_rejected_count += 1
+        if mode == "observe" and stage_label == "blowoff":
+            self._blowoff_observed_count += 1
+
+        # 5. CLUSTER_CONTEXT_ATTACHED
+        cluster_payload = {
+            **identity_block,
+            "cluster": adaptive.cluster.to_payload(),
+        }
+        self._emit(
+            EventType.CLUSTER_CONTEXT_ATTACHED,
+            symbol=symbol,
+            timestamp=timestamp,
+            payload=attach_learning_ready(cluster_payload, learning_context),
+        )
+        self._cluster_context_attached_count += 1
+
+        # 6. LABEL_QUEUE_ENQUEUED
+        label_payload = {
+            **identity_block,
+            "label_queue": adaptive.label_queue.to_payload(),
+        }
+        self._emit(
+            EventType.LABEL_QUEUE_ENQUEUED,
+            symbol=symbol,
+            timestamp=timestamp,
+            payload=attach_learning_ready(label_payload, learning_context),
+        )
+        self._label_queue_enqueued_count += 1
 
     # ------------------------------------------------------------------
     # Event emission helpers

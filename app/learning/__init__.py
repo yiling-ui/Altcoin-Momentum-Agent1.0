@@ -60,6 +60,7 @@ change to events.db.
 """
 
 from app.learning.context import (
+    ADAPTIVE_LEARNING_READY_EVENT_TYPES,
     LEARNING_READY_EVENT_TYPES,
     LEARNING_READY_KEY,
     LearningReadyContext,
@@ -113,4 +114,5 @@ __all__ = [
     "attach_learning_ready",
     "LEARNING_READY_KEY",
     "LEARNING_READY_EVENT_TYPES",
+    "ADAPTIVE_LEARNING_READY_EVENT_TYPES",
 ]

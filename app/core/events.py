@@ -178,6 +178,49 @@ class EventType(str, Enum):
     #                                   and live WS pushes.
     WS_SYMBOL_REJECTED = "WS_SYMBOL_REJECTED"
 
+    # ---- Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector ----
+    # The Phase 11C.1C-A WS-radar event-chain driver emits these six
+    # events alongside the existing ``PRE_ANOMALY_DETECTED`` /
+    # ``ANOMALY_DETECTED`` / ``STATE_TRANSITION`` chain so Reflection
+    # / Replay / Export can carry the adaptive sub-blocks forward
+    # without re-deriving them from a free-form audit dict.
+    #
+    # Every payload includes the Phase 8.5 identity fields
+    # (``opportunity_id`` / ``scan_batch_id`` / ``symbol`` /
+    # ``timestamp``), the Phase 11C.1C-A version labels
+    # (``strategy_version`` / ``scoring_version`` /
+    # ``risk_config_version`` / ``state_machine_version``), and the
+    # corresponding sub-block dict. The events are descriptive only
+    # - none of them authorises a real trade and none of them flips
+    # a Phase 1 safety flag.
+    #
+    #   MARKET_REGIME_ASSESSED      - macro-cycle bucket + risk
+    #                                 multiplier + allowed strategy
+    #                                 modes for the current scan batch.
+    #   CANDIDATE_STAGE_CLASSIFIED  - the candidate's life-cycle stage
+    #                                 (early / mid / late / blowoff /
+    #                                 dumped) + supporting numerics.
+    #   OPPORTUNITY_SCORED          - weighted-sum score + S / A / B /
+    #                                 C grade.
+    #   STRATEGY_MODE_SELECTED      - paper / virtual strategy
+    #                                 expression (follow / pullback /
+    #                                 observe / reject). Does NOT
+    #                                 authorise opening a position.
+    #   CLUSTER_CONTEXT_ATTACHED    - cluster_id + cluster_leader +
+    #                                 cluster_rank for the candidate.
+    #   LABEL_QUEUE_ENQUEUED        - future MFE / MAE / Tail-label
+    #                                 tracking-window contract for
+    #                                 the candidate. Phase 11C.1C-A
+    #                                 does NOT implement the MFE/MAE
+    #                                 processor; the queue is
+    #                                 descriptive.
+    MARKET_REGIME_ASSESSED = "MARKET_REGIME_ASSESSED"
+    CANDIDATE_STAGE_CLASSIFIED = "CANDIDATE_STAGE_CLASSIFIED"
+    OPPORTUNITY_SCORED = "OPPORTUNITY_SCORED"
+    STRATEGY_MODE_SELECTED = "STRATEGY_MODE_SELECTED"
+    CLUSTER_CONTEXT_ATTACHED = "CLUSTER_CONTEXT_ATTACHED"
+    LABEL_QUEUE_ENQUEUED = "LABEL_QUEUE_ENQUEUED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

@@ -125,6 +125,29 @@ class DailyReportSnapshot:
     radar_score_top_symbols: list[dict[str, Any]] = field(default_factory=list)
     ws_metrics: dict[str, Any] = field(default_factory=dict)
     candidate_pool_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector
+    # metrics. The runner passes the WSRadarChainDriver's
+    # ``adaptive_metrics_payload()`` through ``adaptive_metrics``;
+    # the builder cross-checks the event-log counts of the six new
+    # event types against those counters before rendering.
+    market_regime_counts: dict[str, int] = field(default_factory=dict)
+    candidate_stage_counts: dict[str, int] = field(default_factory=dict)
+    strategy_mode_counts: dict[str, int] = field(default_factory=dict)
+    opportunity_grade_counts: dict[str, int] = field(default_factory=dict)
+    top_opportunity_scores: list[dict[str, Any]] = field(default_factory=list)
+    label_queue_enqueued: int = 0
+    observe_count: int = 0
+    reject_count: int = 0
+    follow_count: int = 0
+    pullback_count: int = 0
+    late_chase_rejected_count: int = 0
+    blowoff_observed_count: int = 0
+    market_regime_assessed_count: int = 0
+    candidate_stage_classified_count: int = 0
+    opportunity_scored_count: int = 0
+    strategy_mode_selected_count: int = 0
+    cluster_context_attached_count: int = 0
+    adaptive_metrics: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -230,6 +253,33 @@ class DailyReportSnapshot:
             "radar_score_top_symbols": list(self.radar_score_top_symbols),
             "ws_metrics": dict(self.ws_metrics),
             "candidate_pool_metrics": dict(self.candidate_pool_metrics),
+            # Phase 11C.1C-A adaptive metrics.
+            "market_regime_counts": dict(self.market_regime_counts),
+            "candidate_stage_counts": dict(self.candidate_stage_counts),
+            "strategy_mode_counts": dict(self.strategy_mode_counts),
+            "opportunity_grade_counts": dict(self.opportunity_grade_counts),
+            "top_opportunity_scores": list(self.top_opportunity_scores),
+            "label_queue_enqueued": int(self.label_queue_enqueued),
+            "observe_count": int(self.observe_count),
+            "reject_count": int(self.reject_count),
+            "follow_count": int(self.follow_count),
+            "pullback_count": int(self.pullback_count),
+            "late_chase_rejected_count": int(self.late_chase_rejected_count),
+            "blowoff_observed_count": int(self.blowoff_observed_count),
+            "market_regime_assessed_count": int(
+                self.market_regime_assessed_count
+            ),
+            "candidate_stage_classified_count": int(
+                self.candidate_stage_classified_count
+            ),
+            "opportunity_scored_count": int(self.opportunity_scored_count),
+            "strategy_mode_selected_count": int(
+                self.strategy_mode_selected_count
+            ),
+            "cluster_context_attached_count": int(
+                self.cluster_context_attached_count
+            ),
+            "adaptive_metrics": dict(self.adaptive_metrics),
         }
 
 
@@ -274,6 +324,7 @@ class DailyReportBuilder:
         ingestion_errors: int | None = None,
         ws_metrics: Mapping[str, Any] | None = None,
         candidate_pool_metrics: Mapping[str, Any] | None = None,
+        adaptive_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -297,6 +348,19 @@ class DailyReportBuilder:
         ``ingestion_errors`` is the runner-side count of failed REST
         ingest attempts (e.g. transport failures that did NOT trigger
         a 429 or 418).
+
+        Phase 11C.1C-A addition:
+
+        ``adaptive_metrics`` carries the
+        :meth:`WSRadarChainDriver.adaptive_metrics_payload` dict so the
+        builder can render the new
+        ``Phase 11C.1C-A Adaptive Candidate Regime & Strategy Selector``
+        Markdown section. The builder cross-checks the event-log
+        counts of the six new event types
+        (``MARKET_REGIME_ASSESSED`` / ``CANDIDATE_STAGE_CLASSIFIED`` /
+        ``OPPORTUNITY_SCORED`` / ``STRATEGY_MODE_SELECTED`` /
+        ``CLUSTER_CONTEXT_ATTACHED`` / ``LABEL_QUEUE_ENQUEUED``)
+        against those counters before rendering.
         """
         finished_ms = (
             finished_at_ms
@@ -319,6 +383,7 @@ class DailyReportBuilder:
             ingestion_errors=ingestion_errors,
             ws_metrics=dict(ws_metrics or {}),
             candidate_pool_metrics=dict(candidate_pool_metrics or {}),
+            adaptive_metrics=dict(adaptive_metrics or {}),
         )
 
         if write_to_disk:
@@ -344,6 +409,7 @@ class DailyReportBuilder:
         ingestion_errors: int | None = None,
         ws_metrics: Mapping[str, Any] | None = None,
         candidate_pool_metrics: Mapping[str, Any] | None = None,
+        adaptive_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -649,6 +715,144 @@ class DailyReportBuilder:
             ),
             ws_metrics=dict(ws_metrics or {}),
             candidate_pool_metrics=dict(candidate_pool_metrics or {}),
+            # Phase 11C.1C-A adaptive metrics. The values come from
+            # the ``adaptive_metrics`` kwarg first; the event-log
+            # counts of the six new event types are used as a
+            # cross-check / fall-back so a stale runner counter
+            # cannot under-report a real adaptive event.
+            market_regime_counts=dict(
+                (adaptive_metrics or {}).get("market_regime_counts", {})
+                or {}
+            ),
+            candidate_stage_counts=dict(
+                (adaptive_metrics or {}).get("candidate_stage_counts", {})
+                or {}
+            ),
+            strategy_mode_counts=dict(
+                (adaptive_metrics or {}).get("strategy_mode_counts", {})
+                or {}
+            ),
+            opportunity_grade_counts=dict(
+                (adaptive_metrics or {}).get("opportunity_grade_counts", {})
+                or {}
+            ),
+            top_opportunity_scores=list(
+                (adaptive_metrics or {}).get("top_opportunity_scores", [])
+                or []
+            ),
+            label_queue_enqueued=int(
+                max(
+                    int(
+                        (adaptive_metrics or {}).get(
+                            "label_queue_enqueued", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.LABEL_QUEUE_ENQUEUED.value, 0
+                        )
+                    ),
+                )
+            ),
+            observe_count=int(
+                (adaptive_metrics or {}).get("observe_count", 0) or 0
+            ),
+            reject_count=int(
+                (adaptive_metrics or {}).get("reject_count", 0) or 0
+            ),
+            follow_count=int(
+                (adaptive_metrics or {}).get("follow_count", 0) or 0
+            ),
+            pullback_count=int(
+                (adaptive_metrics or {}).get("pullback_count", 0) or 0
+            ),
+            late_chase_rejected_count=int(
+                (adaptive_metrics or {}).get(
+                    "late_chase_rejected_count", 0
+                )
+                or 0
+            ),
+            blowoff_observed_count=int(
+                (adaptive_metrics or {}).get("blowoff_observed_count", 0)
+                or 0
+            ),
+            market_regime_assessed_count=int(
+                max(
+                    int(
+                        (adaptive_metrics or {}).get(
+                            "market_regime_assessed_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.MARKET_REGIME_ASSESSED.value, 0
+                        )
+                    ),
+                )
+            ),
+            candidate_stage_classified_count=int(
+                max(
+                    int(
+                        (adaptive_metrics or {}).get(
+                            "candidate_stage_classified_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.CANDIDATE_STAGE_CLASSIFIED.value, 0
+                        )
+                    ),
+                )
+            ),
+            opportunity_scored_count=int(
+                max(
+                    int(
+                        (adaptive_metrics or {}).get(
+                            "opportunity_scored_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.OPPORTUNITY_SCORED.value, 0
+                        )
+                    ),
+                )
+            ),
+            strategy_mode_selected_count=int(
+                max(
+                    int(
+                        (adaptive_metrics or {}).get(
+                            "strategy_mode_selected_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_MODE_SELECTED.value, 0
+                        )
+                    ),
+                )
+            ),
+            cluster_context_attached_count=int(
+                max(
+                    int(
+                        (adaptive_metrics or {}).get(
+                            "cluster_context_attached_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.CLUSTER_CONTEXT_ATTACHED.value, 0
+                        )
+                    ),
+                )
+            ),
+            adaptive_metrics=dict(adaptive_metrics or {}),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -757,6 +961,60 @@ class DailyReportBuilder:
             f"**{snapshot.liquidation_events_seen}**\n"
         )
 
+        # Phase 11C.1C-A - Adaptive Candidate Regime & Strategy Selector
+        # Markdown block. Every value is read straight off the
+        # snapshot so a stale runner counter cannot under-report a
+        # real adaptive event (the snapshot's
+        # ``..._count`` fields take ``max`` of the runner counter and
+        # the events.db count).
+        def _kv_lines(d: dict) -> str:
+            if not d:
+                return "- (no entries in this window)"
+            return "\n".join(
+                f"- `{k}` x {int(v)}" for k, v in sorted(
+                    d.items(), key=lambda r: (-int(r[1]), str(r[0]))
+                )
+            )
+
+        market_regime_lines = _kv_lines(snapshot.market_regime_counts)
+        candidate_stage_lines = _kv_lines(snapshot.candidate_stage_counts)
+        strategy_mode_lines = _kv_lines(snapshot.strategy_mode_counts)
+        opportunity_grade_lines = _kv_lines(snapshot.opportunity_grade_counts)
+        if snapshot.top_opportunity_scores:
+            top_score_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"score={float(row.get('score', 0.0)):.2f} "
+                f"grade={row.get('grade', '?')} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.top_opportunity_scores[:10]
+            )
+        else:
+            top_score_lines = "- (no opportunity scores in this window)"
+
+        adaptive_block = (
+            f"- MARKET_REGIME_ASSESSED count: "
+            f"**{snapshot.market_regime_assessed_count}**\n"
+            f"- CANDIDATE_STAGE_CLASSIFIED count: "
+            f"**{snapshot.candidate_stage_classified_count}**\n"
+            f"- OPPORTUNITY_SCORED count: "
+            f"**{snapshot.opportunity_scored_count}**\n"
+            f"- STRATEGY_MODE_SELECTED count: "
+            f"**{snapshot.strategy_mode_selected_count}**\n"
+            f"- CLUSTER_CONTEXT_ATTACHED count: "
+            f"**{snapshot.cluster_context_attached_count}**\n"
+            f"- LABEL_QUEUE_ENQUEUED count: "
+            f"**{snapshot.label_queue_enqueued}**\n"
+            f"- Strategy modes: follow="
+            f"{snapshot.follow_count} pullback="
+            f"{snapshot.pullback_count} observe="
+            f"{snapshot.observe_count} reject="
+            f"{snapshot.reject_count}\n"
+            f"- Late-chase rejected: "
+            f"**{snapshot.late_chase_rejected_count}**\n"
+            f"- Blowoff observed: "
+            f"**{snapshot.blowoff_observed_count}**\n"
+        )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -809,6 +1067,17 @@ class DailyReportBuilder:
             f"## Phase 11C.1B WebSocket all-market radar\n{ws_block}\n"
             f"### WS messages by stream\n{ws_messages_by_stream_lines}\n\n"
             f"### Radar score top symbols\n{ws_top_lines}\n\n"
+            f"## Phase 11C.1C-A Adaptive Candidate Regime "
+            f"& Strategy Selector\n"
+            f"_Adaptive sub-blocks are paper / virtual only. "
+            f"Strategy modes do NOT authorise real orders; the Risk "
+            f"Engine remains the single trade-decision gate._\n\n"
+            f"{adaptive_block}\n"
+            f"### Market regime counts\n{market_regime_lines}\n\n"
+            f"### Candidate stage counts\n{candidate_stage_lines}\n\n"
+            f"### Strategy mode counts\n{strategy_mode_lines}\n\n"
+            f"### Opportunity grade counts\n{opportunity_grade_lines}\n\n"
+            f"### Top opportunity scores\n{top_score_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"
