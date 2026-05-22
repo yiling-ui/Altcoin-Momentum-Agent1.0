@@ -583,10 +583,11 @@ After PR-A merges:
     does NOT switch endpoints, does NOT rotate source IP.
 
 The Phase 11C real-data acceptance pause **was resolved** once
-PR-B (WebSocket-first radar + candidate ranking) landed alongside
-PR-A. PR-B merged via PR #32, with follow-ups in PR #33 and PR
-#34; the Phase 11C.1B real-WS smoke ladder (5min / 10min / 1h)
-ran cleanly on 2026-05-22 (UTC) and Phase 11C.1B is ACCEPTED.
+PR-B (WebSocket-first radar) landed alongside PR-A and its
+follow-ups. Candidate ranking remains Phase 11C.1C scope. PR-B
+merged via PR #32, with follow-ups in PR #33 and PR #34; the
+Phase 11C.1B real-WS smoke ladder (5min / 10min / 1h) ran cleanly
+on 2026-05-22 (UTC) and Phase 11C.1B is ACCEPTED.
 
 ## Phase 11C parent (open, follow-ups landed)
 
@@ -611,9 +612,19 @@ are **not** Phase 11C.1B closure prerequisites.
 ### Phase 11C acceptance criteria
 
 1. `pytest` 全部通过.
-2. `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20`
+2. `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 5 --ws-first`
    completes without exception, producing a daily report at
-   `data/reports/phase11c/{date}-phase11c-public-market.md`.
+   `data/reports/phase11c/{date}-phase11c-public-market.md`. The
+   1h WS-first run is the active Phase 11C acceptance gate; the
+   6h / 24h WS-first runs are **optional** parent Phase 11C
+   longer-window observation rungs (or part of a future Phase
+   11C+ multi-week paper window) and are NOT required to close
+   Phase 11C.1B. The legacy command
+   `python -m scripts.run_public_market_paper --duration 1h --symbol-limit 20 --poll-interval-seconds 5`
+   is **deprecated and must not be used** - it predates the
+   PR-A rate-limit governor and the PR-B routed WS endpoints,
+   and exercises the pre-PR-A "fetch every detail endpoint for
+   every symbol every loop" pattern that triggered HTTP 418.
 3. Real `MARKET_SNAPSHOT` events written to `events.db` carry the
    Phase 11C tag (`provider="binance_public"`, `phase="11C"`).
 4. `SignalSnapshot` is built from real market data and written into
