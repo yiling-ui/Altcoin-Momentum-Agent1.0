@@ -121,15 +121,6 @@ command: python -m scripts.run_public_market_paper \
            --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT
 
 banner phase tag                      Phase 11C.1C-B-IN_REVIEW v1.4.0a11c.1c.b
-                                      (the underlying numerics below
-                                      were captured on the same code
-                                      base modulo this PR's label-only
-                                      banner bump from
-                                      `Phase 11C.1C-A v1.4.0a11c.1c.a`
-                                      to
-                                      `Phase 11C.1C-B-IN_REVIEW
-                                      v1.4.0a11c.1c.b`; no data-plane
-                                      change.)
 dry_run                               False
 ws_real_transport                     True (real RFC 6455 stdlib
                                             transport;
