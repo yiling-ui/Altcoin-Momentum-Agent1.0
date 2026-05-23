@@ -174,6 +174,43 @@ class DailyReportSnapshot:
     eden_alt_near_examples: list[dict[str, Any]] = field(default_factory=list)
     early_tail_protect_threshold: float = 0.0
     candidate_pool_promoted_before_24h_top_move: int = 0
+    # Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime metrics. The
+    # runner passes the :meth:`LabelQueueRuntime.metrics_payload`
+    # dict through ``label_runtime_metrics``; the builder cross-checks
+    # the event-log counts of the six new event types against those
+    # counters before rendering.
+    label_tracking_started_count: int = 0
+    label_window_updated_count: int = 0
+    label_window_completed_count: int = 0
+    tail_label_assigned_count: int = 0
+    missed_tail_detected_count: int = 0
+    fake_breakout_detected_count: int = 0
+    pending_label_records: int = 0
+    completed_label_records: int = 0
+    expired_label_records: int = 0
+    unresolved_label_records: int = 0
+    tail_label_distribution: dict[str, int] = field(default_factory=dict)
+    reached_2r_count: int = 0
+    reached_3r_count: int = 0
+    reached_5r_count: int = 0
+    reached_10r_count: int = 0
+    early_tail_score_bucket_outcomes: dict[str, dict[str, int]] = field(
+        default_factory=dict
+    )
+    opportunity_score_bucket_outcomes: dict[str, dict[str, int]] = field(
+        default_factory=dict
+    )
+    strategy_mode_outcomes: dict[str, dict[str, int]] = field(
+        default_factory=dict
+    )
+    late_chase_risk_bucket_outcomes: dict[str, dict[str, int]] = field(
+        default_factory=dict
+    )
+    top_mfe_symbols: list[dict[str, Any]] = field(default_factory=list)
+    worst_mae_symbols: list[dict[str, Any]] = field(default_factory=list)
+    missed_tail_symbols: list[dict[str, Any]] = field(default_factory=list)
+    fake_breakout_symbols: list[dict[str, Any]] = field(default_factory=list)
+    label_runtime_metrics: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -329,6 +366,49 @@ class DailyReportSnapshot:
             "candidate_pool_promoted_before_24h_top_move": int(
                 self.candidate_pool_promoted_before_24h_top_move
             ),
+            # Phase 11C.1C-C-A label-tracking runtime aggregates.
+            "label_tracking_started_count": int(
+                self.label_tracking_started_count
+            ),
+            "label_window_updated_count": int(
+                self.label_window_updated_count
+            ),
+            "label_window_completed_count": int(
+                self.label_window_completed_count
+            ),
+            "tail_label_assigned_count": int(
+                self.tail_label_assigned_count
+            ),
+            "missed_tail_detected_count": int(
+                self.missed_tail_detected_count
+            ),
+            "fake_breakout_detected_count": int(
+                self.fake_breakout_detected_count
+            ),
+            "pending_label_records": int(self.pending_label_records),
+            "completed_label_records": int(self.completed_label_records),
+            "expired_label_records": int(self.expired_label_records),
+            "unresolved_label_records": int(self.unresolved_label_records),
+            "tail_label_distribution": dict(self.tail_label_distribution),
+            "reached_2r_count": int(self.reached_2r_count),
+            "reached_3r_count": int(self.reached_3r_count),
+            "reached_5r_count": int(self.reached_5r_count),
+            "reached_10r_count": int(self.reached_10r_count),
+            "early_tail_score_bucket_outcomes": dict(
+                self.early_tail_score_bucket_outcomes
+            ),
+            "opportunity_score_bucket_outcomes": dict(
+                self.opportunity_score_bucket_outcomes
+            ),
+            "strategy_mode_outcomes": dict(self.strategy_mode_outcomes),
+            "late_chase_risk_bucket_outcomes": dict(
+                self.late_chase_risk_bucket_outcomes
+            ),
+            "top_mfe_symbols": list(self.top_mfe_symbols),
+            "worst_mae_symbols": list(self.worst_mae_symbols),
+            "missed_tail_symbols": list(self.missed_tail_symbols),
+            "fake_breakout_symbols": list(self.fake_breakout_symbols),
+            "label_runtime_metrics": dict(self.label_runtime_metrics),
         }
 
 
@@ -374,6 +454,7 @@ class DailyReportBuilder:
         ws_metrics: Mapping[str, Any] | None = None,
         candidate_pool_metrics: Mapping[str, Any] | None = None,
         adaptive_metrics: Mapping[str, Any] | None = None,
+        label_runtime_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -433,6 +514,7 @@ class DailyReportBuilder:
             ws_metrics=dict(ws_metrics or {}),
             candidate_pool_metrics=dict(candidate_pool_metrics or {}),
             adaptive_metrics=dict(adaptive_metrics or {}),
+            label_runtime_metrics=dict(label_runtime_metrics or {}),
         )
 
         if write_to_disk:
@@ -459,6 +541,7 @@ class DailyReportBuilder:
         ws_metrics: Mapping[str, Any] | None = None,
         candidate_pool_metrics: Mapping[str, Any] | None = None,
         adaptive_metrics: Mapping[str, Any] | None = None,
+        label_runtime_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -955,6 +1038,186 @@ class DailyReportBuilder:
                 )
                 or 0
             ),
+            # Phase 11C.1C-C-A label-tracking runtime aggregates.
+            label_tracking_started_count=int(
+                max(
+                    int(
+                        (label_runtime_metrics or {}).get(
+                            "label_tracking_started_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.LABEL_TRACKING_STARTED.value, 0
+                        )
+                    ),
+                )
+            ),
+            label_window_updated_count=int(
+                max(
+                    int(
+                        (label_runtime_metrics or {}).get(
+                            "label_window_updated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.LABEL_WINDOW_UPDATED.value, 0
+                        )
+                    ),
+                )
+            ),
+            label_window_completed_count=int(
+                max(
+                    int(
+                        (label_runtime_metrics or {}).get(
+                            "label_window_completed_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.LABEL_WINDOW_COMPLETED.value, 0
+                        )
+                    ),
+                )
+            ),
+            tail_label_assigned_count=int(
+                max(
+                    int(
+                        (label_runtime_metrics or {}).get(
+                            "tail_label_assigned_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.TAIL_LABEL_ASSIGNED.value, 0
+                        )
+                    ),
+                )
+            ),
+            missed_tail_detected_count=int(
+                max(
+                    int(
+                        (label_runtime_metrics or {}).get(
+                            "missed_tail_detected_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.MISSED_TAIL_DETECTED.value, 0
+                        )
+                    ),
+                )
+            ),
+            fake_breakout_detected_count=int(
+                max(
+                    int(
+                        (label_runtime_metrics or {}).get(
+                            "fake_breakout_detected_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.FAKE_BREAKOUT_DETECTED.value, 0
+                        )
+                    ),
+                )
+            ),
+            pending_label_records=int(
+                (label_runtime_metrics or {}).get(
+                    "pending_label_records", 0
+                )
+                or 0
+            ),
+            completed_label_records=int(
+                (label_runtime_metrics or {}).get(
+                    "completed_label_records", 0
+                )
+                or 0
+            ),
+            expired_label_records=int(
+                (label_runtime_metrics or {}).get(
+                    "expired_label_records", 0
+                )
+                or 0
+            ),
+            unresolved_label_records=int(
+                (label_runtime_metrics or {}).get(
+                    "unresolved_label_records", 0
+                )
+                or 0
+            ),
+            tail_label_distribution=dict(
+                (label_runtime_metrics or {}).get(
+                    "tail_label_distribution", {}
+                )
+                or {}
+            ),
+            reached_2r_count=int(
+                (label_runtime_metrics or {}).get("reached_2r_count", 0)
+                or 0
+            ),
+            reached_3r_count=int(
+                (label_runtime_metrics or {}).get("reached_3r_count", 0)
+                or 0
+            ),
+            reached_5r_count=int(
+                (label_runtime_metrics or {}).get("reached_5r_count", 0)
+                or 0
+            ),
+            reached_10r_count=int(
+                (label_runtime_metrics or {}).get("reached_10r_count", 0)
+                or 0
+            ),
+            early_tail_score_bucket_outcomes=dict(
+                (label_runtime_metrics or {}).get(
+                    "early_tail_score_bucket_outcomes", {}
+                )
+                or {}
+            ),
+            opportunity_score_bucket_outcomes=dict(
+                (label_runtime_metrics or {}).get(
+                    "opportunity_score_bucket_outcomes", {}
+                )
+                or {}
+            ),
+            strategy_mode_outcomes=dict(
+                (label_runtime_metrics or {}).get(
+                    "strategy_mode_outcomes", {}
+                )
+                or {}
+            ),
+            late_chase_risk_bucket_outcomes=dict(
+                (label_runtime_metrics or {}).get(
+                    "late_chase_risk_bucket_outcomes", {}
+                )
+                or {}
+            ),
+            top_mfe_symbols=list(
+                (label_runtime_metrics or {}).get("top_mfe_symbols", [])
+                or []
+            ),
+            worst_mae_symbols=list(
+                (label_runtime_metrics or {}).get("worst_mae_symbols", [])
+                or []
+            ),
+            missed_tail_symbols=list(
+                (label_runtime_metrics or {}).get("missed_tail_symbols", [])
+                or []
+            ),
+            fake_breakout_symbols=list(
+                (label_runtime_metrics or {}).get(
+                    "fake_breakout_symbols", []
+                )
+                or []
+            ),
+            label_runtime_metrics=dict(label_runtime_metrics or {}),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -1186,6 +1449,105 @@ class DailyReportBuilder:
             f"**{snapshot.early_tail_protect_threshold:.2f}**\n"
         )
 
+        # ---- Phase 11C.1C-C-A label-tracking runtime block ----
+        label_runtime_block = (
+            f"- LABEL_TRACKING_STARTED count: "
+            f"**{snapshot.label_tracking_started_count}**\n"
+            f"- LABEL_WINDOW_UPDATED count: "
+            f"**{snapshot.label_window_updated_count}**\n"
+            f"- LABEL_WINDOW_COMPLETED count: "
+            f"**{snapshot.label_window_completed_count}**\n"
+            f"- TAIL_LABEL_ASSIGNED count: "
+            f"**{snapshot.tail_label_assigned_count}**\n"
+            f"- MISSED_TAIL_DETECTED count: "
+            f"**{snapshot.missed_tail_detected_count}**\n"
+            f"- FAKE_BREAKOUT_DETECTED count: "
+            f"**{snapshot.fake_breakout_detected_count}**\n"
+            f"- Pending records: **{snapshot.pending_label_records}** "
+            f"completed: **{snapshot.completed_label_records}** "
+            f"expired: **{snapshot.expired_label_records}** "
+            f"unresolved: **{snapshot.unresolved_label_records}**\n"
+            f"- Reached 2R: **{snapshot.reached_2r_count}** "
+            f"3R: **{snapshot.reached_3r_count}** "
+            f"5R: **{snapshot.reached_5r_count}** "
+            f"10R: **{snapshot.reached_10r_count}**\n"
+        )
+        if snapshot.tail_label_distribution:
+            tail_dist_lines = "\n".join(
+                f"- `{label}` x {int(count)}"
+                for label, count in sorted(
+                    snapshot.tail_label_distribution.items(),
+                    key=lambda r: (-int(r[1]), str(r[0])),
+                )
+            )
+        else:
+            tail_dist_lines = "- (no tail labels assigned in this window)"
+        if snapshot.top_mfe_symbols:
+            top_mfe_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"mfe={float(row.get('mfe_pct', 0.0)) * 100.0:.2f}% "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.top_mfe_symbols[:10]
+            )
+        else:
+            top_mfe_lines = "- (no completed label records in this window)"
+        if snapshot.worst_mae_symbols:
+            worst_mae_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"mae={float(row.get('mae_pct', 0.0)) * 100.0:.2f}% "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.worst_mae_symbols[:10]
+            )
+        else:
+            worst_mae_lines = "- (no completed label records in this window)"
+        if snapshot.missed_tail_symbols:
+            missed_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"label={row.get('tail_label', '?')} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.missed_tail_symbols[:10]
+            )
+        else:
+            missed_lines = "- (no missed-tail outcomes in this window)"
+        if snapshot.fake_breakout_symbols:
+            fake_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"label={row.get('tail_label', '?')} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.fake_breakout_symbols[:10]
+            )
+        else:
+            fake_lines = "- (no fake-breakout outcomes in this window)"
+
+        def _bucket_outcome_lines(
+            buckets: dict[str, dict[str, int]],
+        ) -> str:
+            if not buckets:
+                return "- (no entries in this window)"
+            lines: list[str] = []
+            for bucket in sorted(buckets):
+                inner = buckets[bucket]
+                pairs = ", ".join(
+                    f"{label}={int(c)}"
+                    for label, c in sorted(inner.items())
+                    if int(c) > 0
+                )
+                lines.append(f"- `{bucket}`: {pairs or '(no labels)'}")
+            return "\n".join(lines)
+
+        early_tail_outcome_lines = _bucket_outcome_lines(
+            snapshot.early_tail_score_bucket_outcomes
+        )
+        opp_score_outcome_lines = _bucket_outcome_lines(
+            snapshot.opportunity_score_bucket_outcomes
+        )
+        strategy_mode_outcome_lines = _bucket_outcome_lines(
+            snapshot.strategy_mode_outcomes
+        )
+        late_chase_outcome_lines = _bucket_outcome_lines(
+            snapshot.late_chase_risk_bucket_outcomes
+        )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -1265,6 +1627,29 @@ class DailyReportBuilder:
             f"{distribution_lines}\n\n"
             f"### EDEN / ALT / NEAR-style examples\n"
             f"{eden_lines}\n\n"
+            f"## Phase 11C.1C-C-A MFE / MAE Label Queue Runtime "
+            f"& Tail Outcome Tracking\n"
+            f"_Label-tracking sub-blocks are paper / virtual only. "
+            f"The runtime records candidate outcome labels; it does "
+            f"NOT open / close any real position, and it does NOT "
+            f"infer live position PnL. Tail labels are rule-based; "
+            f"no LLM. Strategy validation conclusions are reserved "
+            f"for the future Strategy Validation Lab._\n\n"
+            f"{label_runtime_block}\n"
+            f"### Tail label distribution\n{tail_dist_lines}\n\n"
+            f"### Top MFE symbols (primary window)\n{top_mfe_lines}\n\n"
+            f"### Worst MAE symbols (primary window)\n"
+            f"{worst_mae_lines}\n\n"
+            f"### Missed-tail symbols\n{missed_lines}\n\n"
+            f"### Fake-breakout symbols\n{fake_lines}\n\n"
+            f"### Outcome by early_tail_score bucket\n"
+            f"{early_tail_outcome_lines}\n\n"
+            f"### Outcome by opportunity_score bucket\n"
+            f"{opp_score_outcome_lines}\n\n"
+            f"### Outcome by strategy_mode\n"
+            f"{strategy_mode_outcome_lines}\n\n"
+            f"### Outcome by late_chase_risk bucket\n"
+            f"{late_chase_outcome_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

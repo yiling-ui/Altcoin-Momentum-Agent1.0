@@ -85,6 +85,11 @@ class Settings:
         return self.defaults.safety
 
     @property
+    def label_queue_runtime(self):
+        """Phase 11C.1C-C-A - MFE / MAE label-tracking runtime config."""
+        return self.defaults.label_queue_runtime
+
+    @property
     def telegram_outbound_enabled(self) -> bool:
         """Phase 11C real-outbound gate.
 

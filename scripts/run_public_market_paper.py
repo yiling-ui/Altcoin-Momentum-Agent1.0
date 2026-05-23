@@ -86,6 +86,11 @@ from app.market_data.buffer import MarketDataBuffer  # noqa: E402
 from app.market_data.models import MarketDataBufferConfig  # noqa: E402
 from loguru import logger  # noqa: E402
 
+from app.adaptive.label_runtime import (  # noqa: E402
+    LabelQueueRuntime,
+    LabelQueueRuntimeConfig,
+)
+
 from app.market_data_public import (  # noqa: E402
     AllMarketRadarBuffer,
     CandidatePool,
@@ -542,6 +547,10 @@ class _Phase11CRunStats:
     # metrics. Populated from ``WSRadarChainDriver.adaptive_metrics_payload``
     # on every loop tick that drives a chain.
     adaptive_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime metrics.
+    # Populated from :meth:`LabelQueueRuntime.metrics_payload` on
+    # every loop tick after the chain drives a candidate.
+    label_runtime_metrics: dict[str, Any] = field(default_factory=dict)
     ws_chains_emitted: int = 0
     ws_risk_rejected: int = 0
     ws_learning_ready_attached: int = 0
@@ -1179,6 +1188,12 @@ def main(argv: list[str] | None = None) -> int:
             risk_engine=risk,
             event_repo=event_repo,
             candidate_pool=candidate_pool,
+            label_queue_runtime=LabelQueueRuntime(
+                event_repo=event_repo,
+                config=LabelQueueRuntimeConfig.from_settings_section(
+                    settings.label_queue_runtime
+                ),
+            ),
         )
 
     # 9. Set up signal handling for graceful shutdown.
@@ -1399,6 +1414,22 @@ def main(argv: list[str] | None = None) -> int:
             # chain driver so the daily report has the latest figures.
             if ws_chain is not None:
                 stats.adaptive_metrics = ws_chain.adaptive_metrics_payload()
+                # Phase 11C.1C-C-A - tick the label runtime so any
+                # window whose end_ts has passed gets finalized, then
+                # snapshot its metrics for the daily report.
+                if ws_chain.label_queue_runtime is not None:
+                    try:
+                        ws_chain.label_queue_runtime.tick(
+                            now_ms=int(now_ms())
+                        )
+                        stats.label_runtime_metrics = (
+                            ws_chain.label_queue_runtime.metrics_payload()
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        stats.notes.append(
+                            f"label_runtime_tick_error:"
+                            f"{type(exc).__name__}"
+                        )
             if radar_buffer is not None:
                 stats.liquidation_events_seen = (
                     radar_buffer.liquidation_events_seen
@@ -1503,6 +1534,20 @@ def main(argv: list[str] | None = None) -> int:
         # Phase 11C.1C-A - capture adaptive metrics on shutdown.
         if ws_chain is not None:
             stats.adaptive_metrics = ws_chain.adaptive_metrics_payload()
+            # Phase 11C.1C-C-A - tick label runtime once more on
+            # shutdown so any window that just closed finalises
+            # before the daily-report snapshot runs.
+            if ws_chain.label_queue_runtime is not None:
+                try:
+                    ws_chain.label_queue_runtime.tick(now_ms=int(now_ms()))
+                    stats.label_runtime_metrics = (
+                        ws_chain.label_queue_runtime.metrics_payload()
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    stats.notes.append(
+                        f"label_runtime_shutdown_tick_error:"
+                        f"{type(exc).__name__}"
+                    )
         if radar_buffer is not None:
             stats.liquidation_events_seen = (
                 radar_buffer.liquidation_events_seen
@@ -1569,6 +1614,7 @@ def main(argv: list[str] | None = None) -> int:
                 ws_metrics=dict(stats.ws_metrics),
                 candidate_pool_metrics=dict(stats.candidate_pool_metrics),
                 adaptive_metrics=dict(stats.adaptive_metrics),
+                label_runtime_metrics=dict(stats.label_runtime_metrics),
             )
             daily_report_path = (
                 daily_dir / f"{snapshot.date}-phase11c-public-market.md"

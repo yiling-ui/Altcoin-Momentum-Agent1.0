@@ -221,6 +221,75 @@ class EventType(str, Enum):
     CLUSTER_CONTEXT_ATTACHED = "CLUSTER_CONTEXT_ATTACHED"
     LABEL_QUEUE_ENQUEUED = "LABEL_QUEUE_ENQUEUED"
 
+    # ---- Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime & Tail Outcome --
+    # Tracking. The Phase 11C.1C-C-A runtime starts an MFE / MAE
+    # tracking record per ACTIVE candidate (after the Phase 11C.1C-A
+    # ``LABEL_QUEUE_ENQUEUED`` event lands), updates the per-window
+    # MFE / MAE / R-multiple state on every fresh price tick, and
+    # closes each window when its end_ts is reached. The events below
+    # describe the full lifecycle.
+    #
+    # Phase 11C.1C-C-A boundary:
+    # - The runtime records *candidate outcome labels only*. It NEVER
+    #   opens / closes a real position, NEVER reads a private API,
+    #   NEVER signs a request, NEVER infers live position PnL,
+    #   and NEVER calls an LLM / Telegram outbound / DeepSeek
+    #   trade-decision endpoint.
+    # - Every payload carries a ``schema_version`` field so future
+    #   PRs can extend the shape; old events without the runtime
+    #   sub-block remain replayable verbatim.
+    #
+    #   LABEL_TRACKING_STARTED   - the runtime registered a NEW
+    #                              :class:`LabelTrackingRecord` for an
+    #                              opportunity. Idempotent: a duplicate
+    #                              ``observe()`` for the same
+    #                              opportunity_id (or fall-back identity
+    #                              tuple) does NOT re-emit this event.
+    #   LABEL_WINDOW_UPDATED     - the runtime advanced the MFE / MAE
+    #                              of one tracking window because a
+    #                              fresh price tick hit a new high or
+    #                              low. The payload carries the
+    #                              window_name + the running stats.
+    #   LABEL_WINDOW_COMPLETED   - the window's ``window_end_ts`` was
+    #                              reached; the runtime froze the
+    #                              window's stats and assigned the
+    #                              per-window tail_label. The
+    #                              candidate's *primary window* (5m by
+    #                              default) drives the record's
+    #                              ``status`` flip to ``completed``.
+    #   TAIL_LABEL_ASSIGNED      - the runtime picked one of
+    #                              ``strong_tail`` /
+    #                              ``moderate_tail`` /
+    #                              ``weak_tail`` /
+    #                              ``fake_breakout`` /
+    #                              ``late_chase_failure`` /
+    #                              ``dumped`` / ``unresolved`` for the
+    #                              window and (when the window is the
+    #                              configured primary) for the record
+    #                              as a whole. Rule-based; no LLM.
+    #   MISSED_TAIL_DETECTED     - a window completed with
+    #                              ``missed_tail=True`` (a meaningful
+    #                              upside ran but the candidate had
+    #                              been classified ``late`` /
+    #                              ``blowoff`` and the chain emitted
+    #                              ``observe`` instead of ``follow``).
+    #                              Helps Strategy Validation Lab
+    #                              measure how often the runtime missed
+    #                              real demon coins.
+    #   FAKE_BREAKOUT_DETECTED   - a window completed with
+    #                              ``fake_breakout=True`` (early
+    #                              upside followed by adverse
+    #                              reversal that wiped most of the
+    #                              gain). Helps measure how often
+    #                              an early_tail signal turned out to
+    #                              be noise.
+    LABEL_TRACKING_STARTED = "LABEL_TRACKING_STARTED"
+    LABEL_WINDOW_UPDATED = "LABEL_WINDOW_UPDATED"
+    LABEL_WINDOW_COMPLETED = "LABEL_WINDOW_COMPLETED"
+    TAIL_LABEL_ASSIGNED = "TAIL_LABEL_ASSIGNED"
+    MISSED_TAIL_DETECTED = "MISSED_TAIL_DETECTED"
+    FAKE_BREAKOUT_DETECTED = "FAKE_BREAKOUT_DETECTED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(
