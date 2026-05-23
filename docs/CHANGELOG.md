@@ -16,31 +16,92 @@ MFE / MAE / `tail_label` outcomes per ACTIVE candidate over
 five tracking windows (5m primary, 15m / 30m / 1h / 4h
 secondary).
 
-> **Status: IN_REVIEW / PR_OPEN.** PR #40 (branch
+> **Status: ACCEPTED (closed 2026-05-23; PR #40 merged into
+> `main`, mergeCommit `75d3c7c`).** PR #40 (branch
 > `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, code
-> commit `4889087`, docs-gate-fix commit `6d6044d`) is open
-> against `main`. The operator-VPS 10 min real public WS smoke
-> has **PASSED** and is back-filled under
-> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence"
-> and `docs/PR40_DESCRIPTION.md`. PR #40 has **not** yet been
-> merged. Phase 11C.1C-C-A is therefore **IN_REVIEW / PR_OPEN**,
-> **NOT** ACCEPTED — ACCEPTED status will be set by a separate
-> closeout PR after PR #40 merges (mirroring the PR #36 → PR
-> #37 and PR #38 → PR #39 closeout pattern). Phase 11C.1C-C-B
-> (deeper Strategy Validation Lab + Cluster Exposure Control)
-> is **NOT_STARTED** and is **not** authorised by the opening
-> of Phase 11C.1C-C-A. Phase 12 remains **FORBIDDEN**.
+> commit `4889087`, docs-gate-fix commit `6d6044d`) merged
+> into `main` on 2026-05-23 (UTC); the operator-VPS 10 min
+> real public WS smoke evidence captured under
+> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence
+> (closeout)" was accepted; Phase 11C.1C-C-A is therefore
+> **ACCEPTED**. This docs-only closeout PR mirrors the PR #36
+> → PR #37 and PR #38 → PR #39 closeout pattern. Phase
+> 11C.1C-C-B (deeper Strategy Validation Lab + Cluster
+> Exposure Control) is now **NEXT_ALLOWED / NOT_STARTED**:
+> Phase 11C.1C-C-A acceptance does **NOT** authorise Phase
+> 11C.1C-C-B kickoff bypassing the standard gate; Phase
+> 11C.1C-C-B will require its own kickoff PR, brief, scope,
+> boundary table, forbidden list, and acceptance evidence.
+> Phase 12 remains **FORBIDDEN**.
 
-> **Phase 11C.1C-C-A is paper-only.**
-> **Phase 11C.1C-C-A is NOT live trading.**
-> **Phase 11C.1C-C-A is NOT AI Learning.**
-> **Phase 11C.1C-C-A is NOT the complete Strategy Validation Lab.**
-> **Phase 11C.1C-C-A is NOT real Telegram outbound.**
-> **Phase 11C.1C-C-A is NOT real Binance trading API.**
-> The new `mfe_pct` / `mae_pct` / `tail_label` / `strategy_mode`
-> fields are descriptive labels only and **MUST NEVER trigger
-> a real trade**; the Risk Engine remains the single
-> trade-decision gate.
+#### Phase 11C.1C-C-A accepted (closeout summary)
+
+  - MFE / MAE Label Queue Runtime
+  - Tail Outcome Tracking
+  - `LABEL_TRACKING_STARTED`
+  - `LABEL_WINDOW_UPDATED`
+  - `LABEL_WINDOW_COMPLETED`
+  - `TAIL_LABEL_ASSIGNED`
+  - `missed_tail` / `fake_breakout` event support
+    (`MISSED_TAIL_DETECTED` / `FAKE_BREAKOUT_DETECTED`
+    independent flags)
+  - paper-only, no live trading
+  - PR #40 merged into `main` (mergeCommit `75d3c7c`)
+  - 30 brief-mandated tests PASS / 287 phase11c tests PASS /
+    2261 full pytest PASS on the PR branch (no regression vs.
+    post-PR-#38 main 2231 baseline)
+  - 30 s dry-run smoke contract-only (smallest tracking
+    window is 5m; cannot complete in 30 s)
+  - **Operator-VPS 10 min real public WS smoke PASS**
+    (`duration_seconds=600.0`, `dry_run=false`,
+    `ws_real_transport=true`, `ws_messages_received=56592`,
+    `ws_chains_emitted=27`,
+    `LABEL_TRACKING_STARTED=19` runner / `36` events.db,
+    `LABEL_WINDOW_UPDATED=38` / `82`,
+    `LABEL_WINDOW_COMPLETED=11` / `20` (5m primary window
+    closed inside the 10 min run),
+    `TAIL_LABEL_ASSIGNED=11` / `20`,
+    `MISSED_TAIL_DETECTED=0`, `FAKE_BREAKOUT_DETECTED=0`,
+    `pending_label_records=8`,
+    `completed_label_records=11`,
+    `expired_label_records=0`,
+    `unresolved_label_records=0`, `HTTP 429 count=0`,
+    `HTTP 418 count=0`, `rate_limit_ban=False`,
+    `ws_reconnect_count=0`, `ws_stale_count=0`,
+    `ws_currently_stale=False`, `ingestion_errors=0`)
+  - safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`)
+  - no Binance API key
+  - no Binance API secret
+  - no signed endpoint
+  - no account/order/position/leverage/margin endpoint
+  - no private websocket
+  - no listenKey
+  - no DeepSeek trade decision
+  - no real Telegram outbound
+  - Phase 12 remains FORBIDDEN
+
+> **Phase 11C.1C-C-A acceptance does NOT authorise live
+> trading, API keys, private endpoints, DeepSeek trade
+> decisions, real Telegram outbound, Phase 11C.1C-C-B kickoff
+> bypassing the standard gate, or Phase 12.** The Phase 1
+> safety lock and every Phase 11C.1B / 11C.1C-A / 11C.1C-B
+> forbidden item carry over unchanged. The new `mfe_pct` /
+> `mae_pct` / `tail_label` / `strategy_mode` /
+> `MISSED_TAIL_DETECTED` / `FAKE_BREAKOUT_DETECTED` fields
+> are descriptive labels only: they MUST NEVER trigger a real
+> trade. The Risk Engine remains the single trade-decision
+> gate.
+
+> **Phase 11C.1C-C-A is NOT live trading. NOT AI Learning.
+> NOT the complete Strategy Validation Lab. NOT Cluster
+> Exposure Control. NOT real Telegram outbound. NOT real
+> Binance trading API.** It is the MFE / MAE Label Queue
+> Runtime + Tail Outcome Tracking first version on top of the
+> Phase 11C.1C-A `LabelQueueContract`.
 
 #### Phase 11C.1C-C-A scope (in PR #40)
 
@@ -138,15 +199,11 @@ a tail_label value.
   - Issuing any real order.
   - Entering Phase 12.
 
-#### Phase 11C.1C-C-A acceptance gate
+#### Phase 11C.1C-C-A acceptance gate (all met)
 
-The acceptance gate is now **fully on file** on the PR branch.
-PR #40 is ready for human review and may be merged after the
-reviewer confirms the docs-only evidence backfill on this
-branch. Phase 11C.1C-C-A will only be flipped to **ACCEPTED**
-by a separate closeout PR after PR #40 merges (mirroring the
-PR #36 → PR #37 and PR #38 → PR #39 closeout pattern); until
-then it remains **IN_REVIEW / PR_OPEN**.
+The acceptance gate is **fully on file** and was accepted on
+merge of PR #40. Phase 11C.1C-C-A is now **ACCEPTED**, mirroring
+the PR #36 → PR #37 and PR #38 → PR #39 closeout pattern.
 
 | Gate                                                                                | Status (PR #40 branch)                                              |
 | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -155,7 +212,7 @@ then it remains **IN_REVIEW / PR_OPEN**.
 | `pytest tests/`                                                                     | **PASS - 2261 / 2261** (no regression vs. post-PR-#38 main 2231 baseline; +30 from new file) |
 | 30 s dry-run smoke (LABEL_TRACKING_STARTED emitted; 5m windows pending)             | claimed by PR #40 commit message; covered by integration tests inside the targeted test file |
 | Safety regression (Phase 1 flags unchanged; no `ORDER_*` / `POSITION_*` / `STOP_*` / `TELEGRAM_MESSAGE_SENT`) | **PASS** (covered by `test_no_live_trading_flags_unchanged` and `test_label_runtime_does_not_open_position_or_authorise_trade`) |
-| 10 min real public WS smoke from operator VPS                                        | **PASSED.** Run from a Binance-reachable VPS against commit `6d6044d`. Verbatim transcript filed under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence" and `docs/PR40_DESCRIPTION.md` §"10 min real public WS smoke (operator-VPS, PASSED)". Headline numerics below. |
+| 10 min real public WS smoke from operator VPS                                        | **PASSED.** Run from a Binance-reachable VPS against commit `6d6044d`. Verbatim transcript filed under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence (closeout)" and `docs/PR40_DESCRIPTION.md` §"10 min real public WS smoke (operator-VPS, PASSED)". Headline numerics below. |
 
 The operator-VPS 10 min real public WS smoke produced, with
 the runner output captured verbatim:

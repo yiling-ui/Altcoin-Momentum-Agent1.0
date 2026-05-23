@@ -1,33 +1,38 @@
 # PR #40 — Phase 11C.1C-C-A: MFE / MAE Label Queue Runtime & Tail Outcome Tracking
 
-> **Status: IN_REVIEW / PR_OPEN.**
+> **Status: MERGED / ACCEPTED.** PR #40 merged into `main` on
+> 2026-05-23 (UTC), mergeCommit `75d3c7c`. The operator-VPS
+> 10 min real public WS smoke **PASSED** and was accepted as
+> Phase 11C.1C-C-A acceptance evidence; the verbatim
+> transcript is on file under `docs/PHASE_GATE.md` §"Phase
+> 11C.1C-C-A acceptance evidence (closeout)".
 >
-> **The operator-VPS 10 min real public WS smoke has PASSED.**
+> Phase 11C.1C-C-A has been flipped to **ACCEPTED** under
+> `docs/PROJECT_STATUS.md` / `docs/PHASE_GATE.md` /
+> `docs/CHANGELOG.md` by the docs-only closeout PR that
+> mirrors the PR #36 → PR #37 and PR #38 → PR #39 closeout
+> pattern.
+>
 > The Kiro-side sandbox could not serve as the smoke host
 > (Binance-region HTTP 451 geoblock; same as the Phase 11C.1C-B
 > closeout), so the smoke run was performed by the operator on
 > a Binance-reachable VPS. The verbatim smoke transcript is
 > back-filled below under "10 min real public WS smoke
 > (operator-VPS, PASSED)" and mirrored under
-> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence".
->
-> **PR #40 is ready for human review and may be merged after
-> the reviewer confirms this docs-only evidence backfill.** PR
-> #40 will only be marked **ACCEPTED** under
-> `docs/PROJECT_STATUS.md` / `docs/PHASE_GATE.md` /
-> `docs/CHANGELOG.md` after PR #40 is merged, by a separate
-> closeout PR (mirroring the PR #36 → PR #37 and PR #38 → PR
-> #39 closeout pattern). Until then Phase 11C.1C-C-A remains
-> **IN_REVIEW / PR_OPEN**.
+> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence
+> (closeout)".
 
 ## Phase
 
   - **Phase 11C.1C-C-A** — paper-only MFE / MAE Label Queue
     Runtime & Tail Outcome Tracking on top of the Phase
-    11C.1C-A `LABEL_QUEUE_ENQUEUED` contract.
-  - **Phase 11C.1C-C-B** — `NOT_STARTED`. Reserved for the
-    deeper Strategy Validation Lab + Cluster Exposure Control;
-    NOT authorised by this PR.
+    11C.1C-A `LABEL_QUEUE_ENQUEUED` contract. **ACCEPTED**
+    (closed 2026-05-23; PR #40 merged into `main`,
+    mergeCommit `75d3c7c`).
+  - **Phase 11C.1C-C-B** — `NEXT_ALLOWED / NOT_STARTED`.
+    Reserved for the deeper Strategy Validation Lab + Cluster
+    Exposure Control; NOT authorised by Phase 11C.1C-C-A
+    acceptance bypassing the standard gate.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
 ## Branch + commit
@@ -149,7 +154,7 @@ emits `ORDER_*` / `POSITION_*` / `STOP_*` /
 > geoblock; same as the Phase 11C.1C-B closeout), so this
 > transcript is the authoritative smoke record. The same
 > transcript is mirrored under `docs/PHASE_GATE.md` §"Phase
-> 11C.1C-C-A acceptance evidence".
+> 11C.1C-C-A acceptance evidence (closeout)".
 
 ```
 branch                          : feature/phase-11c1c-c-mfe-mae-label-queue-runtime
@@ -279,14 +284,17 @@ refuse any deployment that flips a `forbid_*` flag. The
   - [x] Confirm Phase 11C.1C-C-A scope matches
     `docs/PHASE_11C_1C_C_MFE_MAE_LABEL_QUEUE_RUNTIME.md`.
   - [x] Confirm `docs/PROJECT_STATUS.md` records Phase
-    11C.1C-C-A as **IN_REVIEW / PR_OPEN** and Phase 11C.1C-C-B
-    as **NOT_STARTED**.
+    11C.1C-C-A as **ACCEPTED** and Phase 11C.1C-C-B as
+    **NEXT_ALLOWED / NOT_STARTED** (flipped by the docs-only
+    closeout PR after PR #40 merged).
   - [x] Confirm `docs/PHASE_GATE.md` records Phase 11C.1C-C-A
-    as IN_REVIEW with the inherited boundary table and the
-    operator-VPS smoke as **PASSED**.
+    as ACCEPTED with the inherited boundary table and the
+    operator-VPS smoke as **PASSED** (flipped by the
+    docs-only closeout PR after PR #40 merged).
   - [x] Confirm `docs/CHANGELOG.md` carries the Phase
-    11C.1C-C-A IN_REVIEW block with the operator-VPS smoke
-    PASSED.
+    11C.1C-C-A ACCEPTED block with the operator-VPS smoke
+    PASSED summary (flipped by the docs-only closeout PR
+    after PR #40 merged).
   - [x] Confirm the test ladder is GREEN on the PR branch
     (30 / 287 / 2261).
   - [x] Confirm safety regression tests pin the Phase 1 flags
@@ -296,13 +304,14 @@ refuse any deployment that flips a `forbid_*` flag. The
     runner / events.db numerics filed under "10 min real
     public WS smoke (operator-VPS, PASSED)" above and mirrored
     under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance
-    evidence".
-  - [ ] Reviewer confirms the docs-only evidence backfill on
-    this branch (no app/ scripts/ tests/ changes), then merges
-    PR #40.
-  - [ ] After merge, a separate closeout PR (mirroring the PR
-    #36 → PR #37 and PR #38 → PR #39 closeout pattern) flips
-    Phase 11C.1C-C-A from **IN_REVIEW** to **ACCEPTED** under
+    evidence (closeout)".
+  - [x] Reviewer confirmed the docs-only evidence backfill on
+    this branch (no app/ scripts/ tests/ changes); PR #40
+    merged into `main` (mergeCommit `75d3c7c`, merged
+    2026-05-23 UTC).
+  - [x] Separate docs-only closeout PR (mirroring the PR #36 →
+    PR #37 and PR #38 → PR #39 closeout pattern) flipped Phase
+    11C.1C-C-A from **IN_REVIEW** to **ACCEPTED** under
     `docs/PROJECT_STATUS.md` / `docs/PHASE_GATE.md` /
     `docs/CHANGELOG.md`.
 

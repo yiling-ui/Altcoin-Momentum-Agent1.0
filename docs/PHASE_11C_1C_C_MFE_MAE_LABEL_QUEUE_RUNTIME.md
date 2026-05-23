@@ -1,19 +1,29 @@
 # Phase 11C.1C-C-A — MFE / MAE Label Queue Runtime & Tail Outcome Tracking
 
-> **Status: IN_REVIEW / PR_OPEN.** PR #40 (branch
-> `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, commit
-> `4889087`) is open against `main` and has **not** been
-> merged. Phase 11C.1C-C-A is **IN_REVIEW**, **NOT** ACCEPTED.
-> Phase 11C.1C-C-B (deeper Strategy Validation Lab + Cluster
-> Exposure Control) is **NOT_STARTED** and is **not**
-> authorised by the opening of Phase 11C.1C-C-A. **Phase 12
-> (real money / live trading) remains FORBIDDEN.**
+> **Status: ACCEPTED (closed 2026-05-23; PR #40 merged into
+> `main`, mergeCommit `75d3c7c`).** PR #40 (branch
+> `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, code
+> commit `4889087`, docs-gate-fix commit `6d6044d`) merged
+> into `main` on 2026-05-23 (UTC); the operator-VPS 10 min
+> real public WS smoke evidence captured under
+> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence
+> (closeout)" was accepted; Phase 11C.1C-C-A is therefore
+> **ACCEPTED**. Phase 11C.1C-C-B (deeper Strategy Validation
+> Lab + Cluster Exposure Control) is **NEXT_ALLOWED /
+> NOT_STARTED**: Phase 11C.1C-C-A acceptance does **NOT**
+> authorise Phase 11C.1C-C-B kickoff bypassing the standard
+> gate. **Phase 12 (real money / live trading) remains
+> FORBIDDEN.**
+>
+> **Phase 11C.1C-C-A acceptance does NOT authorise live
+> trading, API keys, private endpoints, DeepSeek trade
+> decisions, real Telegram outbound, or Phase 12.**
 
 This document is the canonical scope, boundary, and forbidden-item
 brief for Phase 11C.1C-C-A. The at-a-glance status board is in
 `docs/PROJECT_STATUS.md`; the phase-gate ledger entry is in
-`docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-A
-(IN_REVIEW / PR_OPEN)"; the changelog block is in
+`docs/PHASE_GATE.md` §"Closed phase: Phase 11C.1C-C-A
+(ACCEPTED)"; the changelog block is in
 `docs/CHANGELOG.md`; the PR-side description and operator-VPS
 smoke runbook is in `docs/PR40_DESCRIPTION.md`.
 
@@ -283,12 +293,14 @@ threshold is configurable via the
   - Modifying the Risk Engine's status as the **single**
     trade-decision authority.
 
-## 8. Acceptance gate
+## 8. Acceptance gate (all met)
 
-Phase 11C.1C-C-A is **IN_REVIEW** until **all** of the
-following are met. The test ladder is GREEN on the PR branch;
-the operator-VPS 10 min real WS smoke is **REQUIRED, NOT YET
-FILED**.
+Phase 11C.1C-C-A is **ACCEPTED**: every gate below was met
+on the PR branch and the operator-VPS 10 min real WS smoke
+PASSED. PR #40 merged into `main` on 2026-05-23 (mergeCommit
+`75d3c7c`); the operator-VPS smoke transcript is filed under
+`docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence
+(closeout)".
 
 | Gate                                                                                                                | Status (PR #40 branch)                                              |
 | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -297,11 +309,11 @@ FILED**.
 | `pytest tests/`                                                                                                     | **PASS - 2261 / 2261** (no regression vs. post-PR-#38 main 2231 baseline; +30 from new file) |
 | 30 s dry-run smoke (LABEL_TRACKING_STARTED emitted; 5m primary windows pending)                                     | claimed by PR #40 commit message; covered by integration tests inside the targeted test file |
 | Safety regression test (Phase 1 flags unchanged; no `ORDER_*` / `POSITION_*` / `STOP_*` / `TELEGRAM_MESSAGE_SENT`)   | **PASS** (covered by `test_no_live_trading_flags_unchanged` and `test_label_runtime_does_not_open_position_or_authorise_trade`) |
-| 10 min real public WS smoke from operator VPS                                                                       | **REQUIRED, NOT YET FILED.** Sandbox cannot serve as host.           |
+| 10 min real public WS smoke from operator VPS                                                                       | **PASSED.** Filed verbatim under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence (closeout)". |
 
-## 9. Required operator-VPS 10 min real public WS smoke
+## 9. Operator-VPS 10 min real public WS smoke (PASSED)
 
-Run from a Binance-reachable VPS:
+Run from a Binance-reachable VPS against commit `6d6044d`:
 
 ```
 python -m scripts.run_public_market_paper \
@@ -310,45 +322,54 @@ python -m scripts.run_public_market_paper \
   --ws-first
 ```
 
-Required fields (capture verbatim from runner output / daily
-report):
+Recorded values (verbatim from runner output / daily report;
+full transcript under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A
+acceptance evidence (closeout)"):
 
+  - `duration_seconds = 600.0`
   - `dry_run = false`
   - `ws_real_transport = true`
-  - `ws_messages_received > 0`
-  - `LABEL_TRACKING_STARTED > 0`
-  - `LABEL_WINDOW_UPDATED > 0`
-  - `LABEL_WINDOW_COMPLETED > 0` (5m primary window must
-    close inside the 10 min run)
-  - `TAIL_LABEL_ASSIGNED > 0`
+  - `ws_messages_received = 56592` (`> 0`)
+  - `LABEL_TRACKING_STARTED = 19` (runner) / `36` (events.db)
+    (`> 0`)
+  - `LABEL_WINDOW_UPDATED = 38` (runner) / `82` (events.db)
+    (`> 0`)
+  - `LABEL_WINDOW_COMPLETED = 11` (runner) / `20` (events.db)
+    (`> 0` — 5m primary window closed inside the 10 min run)
+  - `TAIL_LABEL_ASSIGNED = 11` (runner) / `20` (events.db)
+    (`> 0`)
   - daily report contains `"Phase 11C.1C-C-A MFE / MAE Label
-    Queue Runtime & Tail Outcome Tracking"` (or equivalent
-    runner-emitted heading)
-  - `pending_label_records` / `completed_label_records` /
-    `unresolved_label_records` carry sane values
+    Queue Runtime & Tail Outcome Tracking"`
+  - `pending_label_records = 8`,
+    `completed_label_records = 11`,
+    `expired_label_records = 0`,
+    `unresolved_label_records = 0`
   - `rate_limit_429_count = 0`
   - `rate_limit_418_count = 0`
   - `rate_limit_ban = False`
-  - `ws_stale_count = 0` (or every stale tick explained)
-  - `ingestion_errors = 0` (or every ingestion error
-    explained)
+  - `ws_stale_count = 0`
+  - `ws_reconnect_count = 0`
+  - `ws_currently_stale = False`
+  - `ingestion_errors = 0`
+  - `MISSED_TAIL_DETECTED = 0` and `FAKE_BREAKOUT_DETECTED = 0`
+    are valid outcomes for a 10 min window over five seed
+    symbols and are not gate-blocking
   - safety flags unchanged
 
-The Kiro-side sandbox **cannot** serve as the smoke host: the
-same Binance-region HTTP 451 geoblock that was recorded
+The Kiro-side sandbox **could not** serve as the smoke host:
+the same Binance-region HTTP 451 geoblock that was recorded
 under Phase 11C.1C-B's closeout still applies. A
-sandbox-sourced WS smoke is **not** authoritative evidence
-and **must not** be filed as such.
+sandbox-sourced WS smoke would **not** have been authoritative
+evidence and was **not** filed as such; the operator therefore
+ran the smoke from a Binance-reachable VPS.
 
-Once the operator-VPS smoke is on file, capture it under
-`docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence".
-Only then can Phase 11C.1C-C-A move from **IN_REVIEW** to
-**ACCEPTED** and PR #40 be merged.
+The verbatim operator-VPS transcript is on file under
+`docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence
+(closeout)". Phase 11C.1C-C-A is now **ACCEPTED**.
 
-## 10. What Phase 11C.1C-C-A explicitly does NOT enable
+## 10. What Phase 11C.1C-C-A acceptance does NOT enable
 
-Acceptance of Phase 11C.1C-C-A — when and if it happens —
-does **not** authorise:
+Acceptance of Phase 11C.1C-C-A does **NOT** authorise:
 
   - Phase 11C.1C-C-B kickoff bypassing the standard gate.
   - Live trading.
@@ -360,7 +381,9 @@ does **not** authorise:
 
 Phase 11C.1C-C-B will be opened only via its own kickoff PR,
 with its own brief, its own scope, its own boundary table, its
-own forbidden list, and its own acceptance evidence — and only
-**after** Phase 11C.1C-C-A is fully ACCEPTED.
+own forbidden list, and its own acceptance evidence. Phase
+11C.1C-C-B is currently **NEXT_ALLOWED / NOT_STARTED**; it
+inherits every Phase 1 + Phase 11C.1B + Phase 11C.1C-A + Phase
+11C.1C-B + Phase 11C.1C-C-A forbidden item verbatim.
 
 Phase 12 (real money / live trading) remains **FORBIDDEN**.
