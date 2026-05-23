@@ -1,9 +1,10 @@
 # PR #42 — Phase 11C.1C-C-B-A: Strategy Validation Lab v0 & Cluster Exposure Control Contracts
 
-> **Status: IN_REVIEW (PR #42 open).** **NOT** ACCEPTED yet.
-> **NOT** live trading. **NOT** AI Learning. **NOT** the complete
-> Strategy Validation Lab. **NOT** automatic parameter
-> optimisation. **NOT** Phase 12.
+> **Status: ACCEPTED (closed 2026-05-23; PR #42 merged into
+> `main`, mergeCommit `cc18047`).** **NOT** live trading.
+> **NOT** AI Learning. **NOT** the complete Strategy
+> Validation Lab. **NOT** automatic parameter optimisation.
+> **NOT** reinforcement learning. **NOT** Phase 12.
 >
 > Phase 11C.1C-C-A — *MFE / MAE Label Queue Runtime & Tail Outcome
 > Tracking* — merged on 2026-05-23 (PR #40, mergeCommit `75d3c7c`)
@@ -14,27 +15,29 @@
 >
 > **Operator-VPS 10 min real public WS smoke PASSED.** The
 > operator ran the smoke from a Binance-reachable VPS against the
-> PR #42 head (commit `0bedcce`) and the verbatim evidence is
-> backfilled below under "Real WS smoke (operator-VPS 10 min,
-> PASSED)" and under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A
-> acceptance evidence (operator-VPS 10 min real public WS smoke
-> PASSED)". **PR #42 is ready for human review and may be merged
-> after reviewer confirms docs-only evidence backfill.** Phase
-> 11C.1C-C-B-A flips to ACCEPTED only after PR #42 merges, via
-> the standard closeout PR pattern (mirroring PR #36 → PR #37,
-> PR #38 → PR #39, PR #40 → PR #41); this PR does **NOT**
-> self-flip the phase to ACCEPTED.
+> PR #42 head (commit `0bedcce`); the verbatim evidence is filed
+> below under "Real WS smoke (operator-VPS 10 min, PASSED)" and
+> under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A acceptance
+> evidence (operator-VPS 10 min real public WS smoke PASSED)".
+> **PR #42 has merged into `main`** (mergeCommit `cc18047`,
+> merged 2026-05-23 UTC); the smoke evidence above was accepted;
+> the docs-only closeout PR
+> (branch `docs/phase-11c1c-c-b-a-closeout`) records Phase
+> 11C.1C-C-B-A as **ACCEPTED**, mirroring the PR #36 → PR #37,
+> PR #38 → PR #39, and PR #40 → PR #41 closeout pattern.
 
 ## Phase
 
   - **Phase 11C.1C-C-B-A** — paper-only Strategy Validation Lab v0
     + Cluster Exposure Control Contracts on top of the Phase
-    11C.1C-C-A `LabelTrackingRecord` outcomes. **IN_REVIEW.**
-  - **Phase 11C.1C-C-B-B** — `RESERVED / NOT_STARTED`. Reserved
-    for the deeper Lab follow-up (richer cohort comparisons,
-    extended cluster heuristics, longer-window correlations). NOT
-    authorised by Phase 11C.1C-C-B-A acceptance bypassing the
-    standard gate.
+    11C.1C-C-A `LabelTrackingRecord` outcomes. **ACCEPTED (closed
+    2026-05-23; PR #42 merged into `main`, mergeCommit
+    `cc18047`).**
+  - **Phase 11C.1C-C-B-B** — `NEXT_ALLOWED / NOT_STARTED`.
+    Reserved for the deeper Lab follow-up (richer cohort
+    comparisons, extended cluster heuristics, longer-window
+    correlations). NOT authorised by Phase 11C.1C-C-B-A
+    acceptance bypassing the standard gate.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
 ## Branch + commit
@@ -403,23 +406,30 @@ Phase 12                        : remains FORBIDDEN
     snapshot after the shutdown flush; it is **not** in scope for
     Phase 11C.1C-C-B-A.
 
-## Whether PR is ready for human review
+## Acceptance status (post-merge)
 
-**Yes.** Every brief-mandated test passes; the full pytest suite
-shows no regression vs. the post-PR-#41 main baseline; the new
-section renders correctly in the daily-report Markdown body; the
-Phase 1 safety lock is unchanged; Phase 12 remains FORBIDDEN. The
-**operator-VPS 10 min real public WS smoke PASSED** (commit
-`0bedcce`; verbatim evidence backfilled above) and confirms the
-runtime emits real `STRATEGY_VALIDATION_SAMPLE_CREATED` /
+**ACCEPTED.** Every brief-mandated test passed; the full pytest
+suite showed no regression vs. the post-PR-#41 main baseline;
+the new section rendered correctly in the daily-report Markdown
+body; the Phase 1 safety lock was unchanged; Phase 12 remained
+FORBIDDEN. The **operator-VPS 10 min real public WS smoke
+PASSED** (commit `0bedcce`; verbatim evidence above) and
+confirmed the runtime emits real
+`STRATEGY_VALIDATION_SAMPLE_CREATED` /
 `STRATEGY_VALIDATION_REPORT_GENERATED` /
 `STRATEGY_MODE_VALIDATED` / `CANDIDATE_STAGE_VALIDATED` /
 `SCORE_BUCKET_VALIDATED` / `CLUSTER_EXPOSURE_ASSESSED` /
 `CLUSTER_LEADER_VALIDATED` events end-to-end on real Binance
-public WS data. **PR #42 is ready for human review and may be
-merged after reviewer confirms the docs-only evidence
-backfill.** This PR does **not** flip Phase 11C.1C-C-B-A to
-ACCEPTED; the standard closeout PR (mirroring PR #36 → PR #37,
-PR #38 → PR #39, PR #40 → PR #41) records ACCEPTED only after
-PR #42 has merged. Phase 11C.1C-C-B-B remains **NOT_STARTED**;
-Phase 12 remains **FORBIDDEN**.
+public WS data. **PR #42 has merged into `main`** (mergeCommit
+`cc18047`, merged 2026-05-23 UTC); the smoke evidence above
+was accepted; the docs-only closeout PR
+(branch `docs/phase-11c1c-c-b-a-closeout`, mirroring the PR
+#36 → PR #37, PR #38 → PR #39, and PR #40 → PR #41 closeout
+pattern) records Phase 11C.1C-C-B-A as **ACCEPTED** under
+`docs/PROJECT_STATUS.md` / `docs/PHASE_GATE.md` /
+`docs/CHANGELOG.md`. Phase 11C.1C-C-B-B is now
+**NEXT_ALLOWED / NOT_STARTED**: Phase 11C.1C-C-B-A acceptance
+does **NOT** authorise Phase 11C.1C-C-B-B kickoff bypassing
+the standard gate; Phase 11C.1C-C-B-B will require its own
+kickoff PR, brief, scope, boundary table, forbidden list, and
+acceptance evidence. Phase 12 remains **FORBIDDEN**.
