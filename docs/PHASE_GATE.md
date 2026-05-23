@@ -38,7 +38,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
 | #          | Title                                                                | State                       | Detail                                                                 |
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
-| 11C.1C-C-A | MFE / MAE Label Queue Runtime & Tail Outcome Tracking (paper-only)   | **IN_REVIEW / PR_OPEN**     | PR #40 against `main`, branch `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, commit `4889087`. 30/30 brief-mandated tests + 287/287 phase11c tests + 2261/2261 full pytest PASS on the PR branch. **NOT** ACCEPTED. **10 min real public WS smoke from operator VPS REQUIRED before merge** (must show `LABEL_TRACKING_STARTED > 0` / `LABEL_WINDOW_UPDATED > 0` / `LABEL_WINDOW_COMPLETED > 0` / `TAIL_LABEL_ASSIGNED > 0`, etc.). See "Open phase: Phase 11C.1C-C-A (IN_REVIEW / PR_OPEN)" below. |
+| 11C.1C-C-A | MFE / MAE Label Queue Runtime & Tail Outcome Tracking (paper-only)   | **IN_REVIEW / PR_OPEN**     | PR #40 against `main`, branch `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, code commit `4889087` (docs-gate-fix commit `6d6044d`). 30/30 brief-mandated tests + 287/287 phase11c tests + 2261/2261 full pytest PASS on the PR branch. **Operator-VPS 10 min real public WS smoke PASSED** (`dry_run=false`, `ws_real_transport=true`, `ws_messages_received=56592`, `LABEL_TRACKING_STARTED=19` runner / `36` events.db, `LABEL_WINDOW_UPDATED=38` / `82`, `LABEL_WINDOW_COMPLETED=11` / `20`, `TAIL_LABEL_ASSIGNED=11` / `20`, `MISSED_TAIL_DETECTED=0`, `FAKE_BREAKOUT_DETECTED=0`, pending=8 / completed=11 / expired=0 / unresolved=0, `HTTP 429 count=0`, `HTTP 418 count=0`, `rate_limit_ban=False`, `ws_reconnect_count=0`, `ws_stale_count=0`, `ingestion_errors=0`, safety flags unchanged). PR #40 is ready for human review and may be merged after reviewer confirms docs-only evidence backfill. **NOT** ACCEPTED yet — Phase 11C.1C-C-A will only be marked ACCEPTED by a separate closeout PR after PR #40 merges. See "Open phase: Phase 11C.1C-C-A (IN_REVIEW / PR_OPEN)" and "Phase 11C.1C-C-A acceptance evidence" below. |
 | 11C.1C-C-B | Adaptive Candidate Strategy Validation Lab & Cluster Exposure Control | **NOT_STARTED**             | Reserved. **NOT** authorised by the opening of Phase 11C.1C-C-A. Will require its own kickoff PR after Phase 11C.1C-C-A is fully ACCEPTED. See "Reserved phase: Phase 11C.1C-C-B (NOT_STARTED)" below. |
 | 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. |
 
@@ -519,27 +519,47 @@ for Phase 11C.1C-C-B (see "Reserved phase: Phase 11C.1C-C-B
    commit message; the dry-run path is exercised by the
    integration tests inside the targeted test file.**
 5. **10 min real public WS smoke from operator VPS** —
-   **REQUIRED before merge**, **NOT YET FILED**. Must
-   demonstrate, with the runner output captured verbatim:
+   **PASSED.** The operator-VPS 10 min real WS smoke run from
+   the `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`
+   branch at commit `6d6044d`
+   (`python -m scripts.run_public_market_paper --duration
+   10min --symbol-limit 5 --ws-first`) records, with the
+   verbatim runner output captured below under "Phase
+   11C.1C-C-A acceptance evidence":
    - `dry_run=false`
    - `ws_real_transport=true`
-   - `ws_messages_received > 0`
-   - `LABEL_TRACKING_STARTED > 0`
-   - `LABEL_WINDOW_UPDATED > 0`
-   - `LABEL_WINDOW_COMPLETED > 0` (5m primary window must close
-     inside the 10 min run)
-   - `TAIL_LABEL_ASSIGNED > 0`
-   - daily report contains
-     `"Phase 11C.1C-C-A MFE / MAE Label Queue Runtime & Tail
-     Outcome Tracking"` (or equivalent runner-emitted heading)
-   - `pending_label_records` / `completed_label_records` /
-     `unresolved_label_records` carry sane values
-   - `rate_limit_429_count = 0`
-   - `rate_limit_418_count = 0`
-   - `rate_limit_ban = False`
-   - `ws_stale_count = 0` (or every stale tick explained)
-   - `ingestion_errors = 0` (or every ingestion error explained)
-   - safety flags unchanged
+   - `ws_messages_received=56592` (`> 0`)
+   - `LABEL_TRACKING_STARTED=19` (runner) / `36` (events.db)
+     (`> 0`)
+   - `LABEL_WINDOW_UPDATED=38` (runner) / `82` (events.db)
+     (`> 0`)
+   - `LABEL_WINDOW_COMPLETED=11` (runner) / `20` (events.db)
+     (`> 0` — 5m primary window closed inside the 10 min run)
+   - `TAIL_LABEL_ASSIGNED=11` (runner) / `20` (events.db)
+     (`> 0`)
+   - daily report contains `"Phase 11C.1C-C-A MFE / MAE Label
+     Queue Runtime & Tail Outcome Tracking"`
+   - `pending_label_records=8` /
+     `completed_label_records=11` /
+     `expired_label_records=0` /
+     `unresolved_label_records=0`
+   - `rate_limit_429_count=0`
+   - `rate_limit_418_count=0`
+   - `rate_limit_ban=False`
+   - `ws_reconnect_count=0`
+   - `ws_stale_count=0`
+   - `ws_currently_stale=False`
+   - `ingestion_errors=0`
+   - `MISSED_TAIL_DETECTED=0` and `FAKE_BREAKOUT_DETECTED=0`
+     are valid outcomes for a 10 min window over five seed
+     symbols and are not gate-blocking
+   - safety flags unchanged (`live_trading_enabled=False`,
+     `right_tail_enabled=False`, `llm_enabled=False`,
+     `exchange_live_order_enabled=False`,
+     `trading_mode_paper=True`; no API key, no signed
+     endpoint, no private websocket, no listenKey, no
+     DeepSeek trade decision, no real Telegram outbound,
+     Phase 12 remains FORBIDDEN)
 6. **Safety regression test** — confirms that running the
    label-runtime path end-to-end leaves every Phase 1 safety
    flag at its locked value and that the runtime never emits
@@ -549,14 +569,19 @@ for Phase 11C.1C-C-B (see "Reserved phase: Phase 11C.1C-C-B
    and
    `test_label_runtime_does_not_open_position_or_authorise_trade`).**
 
-The Kiro-side sandbox cannot serve as the smoke host for #5
-because the same Binance-region HTTP 451 geoblock that was
+The Kiro-side sandbox could not serve as the smoke host for
+#5 because the same Binance-region HTTP 451 geoblock that was
 recorded under "Phase 11C.1C-B acceptance evidence (closeout)"
-still applies. A sandbox WS smoke is **not** authoritative
-evidence and **must not** be filed as such. Until the operator
-VPS smoke lands and is captured below under "Phase 11C.1C-C-A
-acceptance evidence", Phase 11C.1C-C-A stays **IN_REVIEW** and
-PR #40 is **not** mergeable.
+still applies to the Kiro sandbox; the operator therefore ran
+the 10 min real WS smoke from a Binance-reachable VPS, and
+the verbatim transcript is filed below under "Phase
+11C.1C-C-A acceptance evidence". A sandbox WS smoke would
+**not** have been authoritative evidence and was **not** filed
+as such. PR #40 is now ready for human review and may be
+merged after the reviewer confirms this docs-only evidence
+backfill; Phase 11C.1C-C-A will only be marked **ACCEPTED** by
+a separate closeout PR after PR #40 merges (mirroring the PR
+#36 → PR #37 and PR #38 → PR #39 closeout pattern).
 
 ## Reserved phase: Phase 11C.1C-C-B (NOT_STARTED)
 
@@ -566,11 +591,15 @@ PR #40 is **not** mergeable.
 11C.1C-C-A. It carries no scope, no smoke evidence, and no
 acceptance gate in this repo state; it will only become an
 open phase via its own kickoff PR after Phase 11C.1C-C-A is
-fully ACCEPTED (i.e., its operator-VPS 10 min real WS smoke is
-on file under "Phase 11C.1C-C-A acceptance evidence" below).
-The detailed gate criteria (test matrix, validation-lab
-contract, cluster-exposure caps, daily-report extensions) will
-be filled in by the Phase 11C.1C-C-B kickoff PR.
+fully ACCEPTED. Phase 11C.1C-C-A is currently **IN_REVIEW /
+PR_OPEN** on PR #40 and the operator-VPS 10 min real WS smoke
+is on file (see "Phase 11C.1C-C-A acceptance evidence" below);
+ACCEPTED status will be set by the closeout PR that follows
+the merge of PR #40, mirroring the PR #36 → PR #37 and PR #38
+→ PR #39 closeout pattern. The detailed gate criteria (test
+matrix, validation-lab contract, cluster-exposure caps,
+daily-report extensions) for Phase 11C.1C-C-B will be filled
+in by its own kickoff PR.
 
 Phase 11C.1C-C-B inherits every Phase 1 + Phase 11C.1B + Phase
 11C.1C-A + Phase 11C.1C-B + Phase 11C.1C-C-A forbidden item
@@ -578,12 +607,108 @@ verbatim.
 
 ## Phase 11C.1C-C-A acceptance evidence
 
-> **NOT YET FILED.** This subsection will be populated once the
-> 10 min real public WS smoke from operator VPS lands. Until
-> then, Phase 11C.1C-C-A is **IN_REVIEW** and PR #40 is **not**
-> mergeable. Do **not** populate this subsection from the
-> Kiro-side sandbox: the Binance-region HTTP 451 geoblock means
-> the sandbox cannot serve as authoritative smoke evidence.
+> The transcript below is the verbatim runner / events.db
+> output captured from the operator-VPS 10 min real public WS
+> smoke run against the PR #40 branch
+> (`feature/phase-11c1c-c-mfe-mae-label-queue-runtime`) at
+> commit `6d6044d`. The Kiro-side sandbox could not host this
+> smoke (Binance-region HTTP 451 geoblock; same as the Phase
+> 11C.1C-B closeout), so the operator ran it from a
+> Binance-reachable VPS. **The smoke PASSED.**
+>
+> Phase 11C.1C-C-A is recorded as **IN_REVIEW / PR_OPEN** in
+> the open-phases table at the top of this document; the smoke
+> evidence is on file. PR #40 is ready for human review and
+> may be merged after the reviewer confirms this docs-only
+> evidence backfill. Phase 11C.1C-C-A will only be flipped to
+> **ACCEPTED** by a separate closeout PR after PR #40 merges
+> (mirroring the PR #36 → PR #37 and PR #38 → PR #39 closeout
+> pattern).
+
+```
+branch                          : feature/phase-11c1c-c-mfe-mae-label-queue-runtime
+commit                          : 6d6044d
+host                            : operator VPS (Binance-reachable region)
+command                         : python -m scripts.run_public_market_paper \
+                                    --duration 10min --symbol-limit 5 --ws-first
+
+# WS / runner-level metrics
+duration_seconds                = 600.0
+uptime                          = 608s
+dry_run                         = false
+ws_real_transport               = true
+ws_messages_received            = 56592
+ws_chains_emitted               = 27
+learning_ready_attached         = 27
+snapshots_emitted               = 27
+ingestion_errors                = 0
+HTTP 429 count                  = 0
+HTTP 418 count                  = 0
+rate_limit_ban                  = False
+ws_reconnect_count              = 0
+ws_stale_count                  = 0
+ws_currently_stale              = False
+
+# Phase 11C.1C-C-A label-runtime metrics (runner / daily report)
+LABEL_TRACKING_STARTED count    = 19
+LABEL_WINDOW_UPDATED count      = 38
+LABEL_WINDOW_COMPLETED count    = 11
+TAIL_LABEL_ASSIGNED count       = 11
+MISSED_TAIL_DETECTED count      = 0
+FAKE_BREAKOUT_DETECTED count    = 0
+pending_label_records           = 8
+completed_label_records         = 11
+expired_label_records           = 0
+unresolved_label_records        = 0
+
+# events.db SQLite confirmation
+LABEL_TRACKING_STARTED          | 36
+LABEL_WINDOW_UPDATED            | 82
+LABEL_WINDOW_COMPLETED          | 20
+TAIL_LABEL_ASSIGNED             | 20
+
+# Safety boundary (held end-to-end)
+exchange_live_order_enabled     = False
+live_trading_enabled            = False
+llm_enabled                     = False
+right_tail_enabled              = False
+trading_mode_paper              = True
+no live trading                 = confirmed
+no API key                      = confirmed
+no signed endpoint              = confirmed
+no private websocket            = confirmed
+no listenKey                    = confirmed
+no DeepSeek trade decision      = confirmed
+no real Telegram outbound       = confirmed
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+The runner-level event counters and the events.db SQLite
+counts diverge (e.g. `LABEL_TRACKING_STARTED=19` runner vs.
+`36` events.db) because the runner snapshots its in-memory
+aggregates at the shutdown tick while events.db captures every
+emission across the full 608 s uptime including the
+chain-passes that fired after the runner's last aggregate
+snapshot. Both views satisfy the brief's `> 0` thresholds and
+corroborate the chain-driver integration end-to-end.
+
+`MISSED_TAIL_DETECTED=0` and `FAKE_BREAKOUT_DETECTED=0` are
+valid outcomes for a 10 min window over five seed symbols and
+are not gate-blocking; they record that no candidate hit the
+missed-tail / fake-breakout thresholds during this particular
+run.
+
+The 5m primary tracking window closed inside the 10 min run
+(11 runner / 20 events.db `LABEL_WINDOW_COMPLETED`), matching
+the brief; 8 records remained `pending` (correctly waiting on
+the longer 15m / 30m / 1h / 4h secondary windows) and 0
+records were `expired` or `unresolved`.
+
+Phase 1 safety lock held end-to-end across the smoke run; no
+real order, no signed endpoint call, no private WebSocket
+connection, no listenKey allocation, no DeepSeek trade
+decision, no real Telegram outbound, and Phase 12 stayed
+**FORBIDDEN**.
 
 ## Phase 11C.1C-B acceptance evidence (closeout)
 

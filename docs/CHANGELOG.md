@@ -17,13 +17,19 @@ five tracking windows (5m primary, 15m / 30m / 1h / 4h
 secondary).
 
 > **Status: IN_REVIEW / PR_OPEN.** PR #40 (branch
-> `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, commit
-> `4889087`) is open against `main`. PR #40 has **not** been
-> merged. Phase 11C.1C-C-A is therefore **IN_REVIEW**, **NOT**
-> ACCEPTED. Phase 11C.1C-C-B (deeper Strategy Validation Lab +
-> Cluster Exposure Control) is **NOT_STARTED** and is **not**
-> authorised by the opening of Phase 11C.1C-C-A. Phase 12
-> remains **FORBIDDEN**.
+> `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, code
+> commit `4889087`, docs-gate-fix commit `6d6044d`) is open
+> against `main`. The operator-VPS 10 min real public WS smoke
+> has **PASSED** and is back-filled under
+> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence"
+> and `docs/PR40_DESCRIPTION.md`. PR #40 has **not** yet been
+> merged. Phase 11C.1C-C-A is therefore **IN_REVIEW / PR_OPEN**,
+> **NOT** ACCEPTED — ACCEPTED status will be set by a separate
+> closeout PR after PR #40 merges (mirroring the PR #36 → PR
+> #37 and PR #38 → PR #39 closeout pattern). Phase 11C.1C-C-B
+> (deeper Strategy Validation Lab + Cluster Exposure Control)
+> is **NOT_STARTED** and is **not** authorised by the opening
+> of Phase 11C.1C-C-A. Phase 12 remains **FORBIDDEN**.
 
 > **Phase 11C.1C-C-A is paper-only.**
 > **Phase 11C.1C-C-A is NOT live trading.**
@@ -134,10 +140,13 @@ a tail_label value.
 
 #### Phase 11C.1C-C-A acceptance gate
 
-The acceptance gate is **partially met** on the PR branch.
-Until the operator-VPS 10 min real public WS smoke is on
-file, Phase 11C.1C-C-A stays **IN_REVIEW** and PR #40 is
-**not** mergeable.
+The acceptance gate is now **fully on file** on the PR branch.
+PR #40 is ready for human review and may be merged after the
+reviewer confirms the docs-only evidence backfill on this
+branch. Phase 11C.1C-C-A will only be flipped to **ACCEPTED**
+by a separate closeout PR after PR #40 merges (mirroring the
+PR #36 → PR #37 and PR #38 → PR #39 closeout pattern); until
+then it remains **IN_REVIEW / PR_OPEN**.
 
 | Gate                                                                                | Status (PR #40 branch)                                              |
 | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -146,30 +155,52 @@ file, Phase 11C.1C-C-A stays **IN_REVIEW** and PR #40 is
 | `pytest tests/`                                                                     | **PASS - 2261 / 2261** (no regression vs. post-PR-#38 main 2231 baseline; +30 from new file) |
 | 30 s dry-run smoke (LABEL_TRACKING_STARTED emitted; 5m windows pending)             | claimed by PR #40 commit message; covered by integration tests inside the targeted test file |
 | Safety regression (Phase 1 flags unchanged; no `ORDER_*` / `POSITION_*` / `STOP_*` / `TELEGRAM_MESSAGE_SENT`) | **PASS** (covered by `test_no_live_trading_flags_unchanged` and `test_label_runtime_does_not_open_position_or_authorise_trade`) |
-| 10 min real public WS smoke from operator VPS                                        | **REQUIRED, NOT YET FILED.** Sandbox cannot serve as host (Binance-region HTTP 451 geoblock; same as Phase 11C.1C-B closeout). Must be sourced from operator VPS. |
+| 10 min real public WS smoke from operator VPS                                        | **PASSED.** Run from a Binance-reachable VPS against commit `6d6044d`. Verbatim transcript filed under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence" and `docs/PR40_DESCRIPTION.md` §"10 min real public WS smoke (operator-VPS, PASSED)". Headline numerics below. |
 
-The 10 min real public WS smoke from operator VPS must
-demonstrate, with the runner output captured verbatim:
+The operator-VPS 10 min real public WS smoke produced, with
+the runner output captured verbatim:
 
   - `dry_run = false`
   - `ws_real_transport = true`
-  - `ws_messages_received > 0`
-  - `LABEL_TRACKING_STARTED > 0`
-  - `LABEL_WINDOW_UPDATED > 0`
-  - `LABEL_WINDOW_COMPLETED > 0` (5m primary window must close
-    inside the 10 min run)
-  - `TAIL_LABEL_ASSIGNED > 0`
-  - daily report contains `"Phase 11C.1C-C-A MFE / MAE Label
-    Queue Runtime & Tail Outcome Tracking"` (or equivalent
-    runner-emitted heading)
-  - `pending_label_records` / `completed_label_records` /
-    `unresolved_label_records` carry sane values
-  - `rate_limit_429_count = 0`
-  - `rate_limit_418_count = 0`
+  - `duration_seconds = 600.0`, `uptime = 608s`
+  - `ws_messages_received = 56592`
+  - `ws_chains_emitted = 27`
+  - `learning_ready_attached = 27`
+  - `snapshots_emitted = 27`
+  - `LABEL_TRACKING_STARTED = 19` (runner) / `36` (events.db)
+  - `LABEL_WINDOW_UPDATED = 38` (runner) / `82` (events.db)
+  - `LABEL_WINDOW_COMPLETED = 11` (runner) / `20` (events.db)
+    — 5m primary window closed inside the 10 min run
+  - `TAIL_LABEL_ASSIGNED = 11` (runner) / `20` (events.db)
+  - `MISSED_TAIL_DETECTED = 0`, `FAKE_BREAKOUT_DETECTED = 0`
+    (valid outcomes for a 10 min window over five seed
+    symbols; not gate-blocking)
+  - `pending_label_records = 8`,
+    `completed_label_records = 11`,
+    `expired_label_records = 0`,
+    `unresolved_label_records = 0`
+  - daily report contains `"## Phase 11C.1C-C-A MFE / MAE
+    Label Queue Runtime & Tail Outcome Tracking"`
+  - `HTTP 429 count = 0`
+  - `HTTP 418 count = 0`
   - `rate_limit_ban = False`
-  - `ws_stale_count = 0` (or every stale tick explained)
-  - `ingestion_errors = 0` (or every ingestion error explained)
-  - safety flags unchanged
+  - `ws_reconnect_count = 0`
+  - `ws_stale_count = 0`
+  - `ws_currently_stale = False`
+  - `ingestion_errors = 0`
+  - safety flags unchanged (`live_trading_enabled=False`,
+    `right_tail_enabled=False`, `llm_enabled=False`,
+    `exchange_live_order_enabled=False`,
+    `trading_mode_paper=True`; no API key, no signed
+    endpoint, no private websocket, no listenKey, no
+    DeepSeek trade decision, no real Telegram outbound,
+    Phase 12 remains **FORBIDDEN**)
+
+The Kiro-side sandbox could **not** host this smoke
+(Binance-region HTTP 451 geoblock; same as the Phase 11C.1C-B
+closeout), so the operator ran it from a Binance-reachable
+VPS. A sandbox WS smoke would not have been authoritative
+evidence and was not filed as such.
 
 The operator-side runbook for the smoke run is captured in
 `docs/PR40_DESCRIPTION.md`. The full Phase 11C.1C-C-A scope,
