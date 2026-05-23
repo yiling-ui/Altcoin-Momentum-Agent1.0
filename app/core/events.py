@@ -290,6 +290,63 @@ class EventType(str, Enum):
     MISSED_TAIL_DETECTED = "MISSED_TAIL_DETECTED"
     FAKE_BREAKOUT_DETECTED = "FAKE_BREAKOUT_DETECTED"
 
+    # ---- Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster --------
+    # Exposure Control Contracts. The Phase 11C.1C-C-B-A runtime
+    # consumes the Phase 11C.1C-C-A label-tracking outcomes
+    # (``TAIL_LABEL_ASSIGNED`` / ``LABEL_WINDOW_COMPLETED`` /
+    # ``MISSED_TAIL_DETECTED`` / ``FAKE_BREAKOUT_DETECTED``) and
+    # produces:
+    #
+    #   - one :class:`StrategyValidationSample` per opportunity that
+    #     reached at least the primary tracking window;
+    #   - one :class:`StrategyValidationReport` per scheduled flush
+    #     (start-of-loop + shutdown);
+    #   - per-mode / per-stage / per-bucket cohort stats so a human
+    #     reviewer can audit "is the strategy_mode actually right?";
+    #   - per-cluster :class:`ClusterExposureAssessment` records so a
+    #     human reviewer can audit "are we accidentally building
+    #     exposure to one narrative?".
+    #
+    # Phase 11C.1C-C-B-A boundary:
+    # - The Lab is paper / report only. No event below authorises a
+    #   real trade, modifies a real position, or flips a Phase 1
+    #   safety flag.
+    # - ``suggested_cluster_action`` is descriptive (one of
+    #   ``leader_only`` / ``observe_followers`` / ``reject_cluster``
+    #   / ``no_action``); the Risk Engine remains the single
+    #   trade-decision gate.
+    # - Every payload carries ``schema_version`` so future PRs can
+    #   extend the shape; old events without the v0 sub-block remain
+    #   replayable verbatim.
+    #
+    #   STRATEGY_VALIDATION_SAMPLE_CREATED   - one sample emitted per
+    #                                          opportunity outcome.
+    #   STRATEGY_VALIDATION_REPORT_GENERATED - one report emitted per
+    #                                          scheduled flush.
+    #   STRATEGY_MODE_VALIDATED              - per-mode cohort stats
+    #                                          (follow / pullback /
+    #                                          observe / reject).
+    #   CANDIDATE_STAGE_VALIDATED            - per-stage cohort stats
+    #                                          (early / mid / late /
+    #                                          blowoff / dumped).
+    #   SCORE_BUCKET_VALIDATED               - per-bucket cohort stats
+    #                                          (opportunity_score +
+    #                                          early_tail_score).
+    #   CLUSTER_EXPOSURE_ASSESSED            - per-cluster exposure
+    #                                          assessment + paper-only
+    #                                          suggested_cluster_action.
+    #   CLUSTER_LEADER_VALIDATED             - per-cluster leader vs.
+    #                                          follower comparison.
+    STRATEGY_VALIDATION_SAMPLE_CREATED = "STRATEGY_VALIDATION_SAMPLE_CREATED"
+    STRATEGY_VALIDATION_REPORT_GENERATED = (
+        "STRATEGY_VALIDATION_REPORT_GENERATED"
+    )
+    STRATEGY_MODE_VALIDATED = "STRATEGY_MODE_VALIDATED"
+    CANDIDATE_STAGE_VALIDATED = "CANDIDATE_STAGE_VALIDATED"
+    SCORE_BUCKET_VALIDATED = "SCORE_BUCKET_VALIDATED"
+    CLUSTER_EXPOSURE_ASSESSED = "CLUSTER_EXPOSURE_ASSESSED"
+    CLUSTER_LEADER_VALIDATED = "CLUSTER_LEADER_VALIDATED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

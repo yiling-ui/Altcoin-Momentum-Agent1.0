@@ -7,45 +7,61 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-A = IN_REVIEW (PR #42 open).** Strategy
+> Validation Lab v0 + Cluster Exposure Control Contracts on top
+> of the Phase 11C.1C-C-A `LabelTrackingRecord` outcomes. **NOT**
+> ACCEPTED yet, **NOT** live trading, **NOT** AI Learning,
+> **NOT** the complete Strategy Validation Lab, **NOT**
+> automatic parameter optimisation, **NOT** Phase 12. Paper /
+> report only; 5 min / 10 min operator-VPS real public WS
+> smoke required before merge.
 > **Phase 11C.1C-C-A = ACCEPTED (closed 2026-05-23; PR #40 merged into `main`, mergeCommit `75d3c7c`).**
-> **Phase 11C.1C-C-B = NEXT_ALLOWED / NOT_STARTED.**
+> **Phase 11C.1C-C-B = IN_REVIEW (sub-phase Phase 11C.1C-C-B-A open).**
 > **Phase 11C.1C-B = ACCEPTED (closed 2026-05-22; PR #38 merged into `main`).**
 > **Phase 11C.1C-A = ACCEPTED (closed 2026-05-22; PR #36 merged via PR #37 docs closeout).**
 > **Phase 11C.1B = ACCEPTED (closed 2026-05-22).**
 > **Phase 12 (real money / live trading) = FORBIDDEN.**
 > **We are still in paper mode.**
 >
-> PR #40 — the Phase 11C.1C-C-A *MFE / MAE Label Queue Runtime
-> & Tail Outcome Tracking* branch
-> (`feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, code
-> commit `4889087`, docs-gate-fix commit `6d6044d`) — has
-> **merged into `main`** (mergeCommit `75d3c7c`, merged
-> 2026-05-23 UTC). The operator-VPS 10 min real public WS
-> smoke **PASSED** and is on file under
-> `docs/PHASE_GATE.md` §"Phase 11C.1C-C-A acceptance evidence
-> (closeout)". This docs-only closeout PR therefore flips
-> Phase 11C.1C-C-A to **ACCEPTED** under
-> `docs/PROJECT_STATUS.md` / `docs/PHASE_GATE.md` /
-> `docs/CHANGELOG.md`, mirroring the PR #36 → PR #37 and PR
-> #38 → PR #39 closeout pattern. Phase 11C.1C-C-B (deeper
-> Strategy Validation Lab + Cluster Exposure Control) is now
-> **NEXT_ALLOWED / NOT_STARTED**: it will require its own
-> kickoff PR, brief, scope, boundary table, forbidden list,
-> and acceptance evidence; **Phase 11C.1C-C-A acceptance does
-> NOT authorise Phase 11C.1C-C-B kickoff bypassing the
-> standard gate**. **Phase 11C.1C-C-A is paper-only**: it
-> shipped the MFE / MAE Label Queue Runtime + Tail Outcome
-> Tracking on top of the Phase 11C.1C-A `LabelQueueContract`
-> contract, and is **NOT** live trading, **NOT** AI Learning,
-> **NOT** the complete Strategy Validation Lab, **NOT** real
-> Telegram outbound, **NOT** real Binance trading API. The
-> `mfe_pct` / `mae_pct` / `tail_label` / `strategy_mode`
-> fields are descriptive labels only and **MUST NEVER trigger
-> a real trade**; the Risk Engine remains the single
-> trade-decision gate. **Phase 11C.1C-C-A acceptance does NOT
-> authorise live trading, API keys, private endpoints,
-> DeepSeek trade decisions, real Telegram outbound, or Phase
-> 12.** Phase 12 remains **FORBIDDEN**.
+> PR #42 — the Phase 11C.1C-C-B-A *Strategy Validation Lab v0
+> & Cluster Exposure Control Contracts* branch
+> (`feature/phase-11c1c-c-b-strategy-validation-cluster-control`)
+> — is open for human review. The branch ships the data
+> contracts (`StrategyValidationSample`,
+> `StrategyValidationReport`, `ClusterExposureAssessment`, …),
+> the pure aggregators
+> (`build_strategy_validation_report`, `aggregate_by_strategy_mode`,
+> `aggregate_by_candidate_stage`,
+> `aggregate_by_opportunity_score_bucket`,
+> `aggregate_by_early_tail_score_bucket`,
+> `aggregate_tail_label_distribution`,
+> `evaluate_cluster_leader_performance`,
+> `assess_cluster_exposure`), the runtime
+> (`StrategyValidationRuntime`), the seven new typed events
+> (`STRATEGY_VALIDATION_SAMPLE_CREATED` /
+> `STRATEGY_VALIDATION_REPORT_GENERATED` /
+> `STRATEGY_MODE_VALIDATED` / `CANDIDATE_STAGE_VALIDATED` /
+> `SCORE_BUCKET_VALIDATED` / `CLUSTER_EXPOSURE_ASSESSED` /
+> `CLUSTER_LEADER_VALIDATED`), the daily-report section, and
+> the wiring through `WSRadarChainDriver` +
+> `scripts/run_public_market_paper.py`. **Phase 11C.1C-C-B-A
+> is paper-only**: the `suggested_cluster_action` field on every
+> `ClusterExposureAssessment` is one of `leader_only` /
+> `observe_followers` / `reject_cluster` / `no_action` and
+> **MUST NEVER trigger a real trade**; the Risk Engine remains
+> the single trade-decision gate. Phase 11C.1C-C-B-A acceptance
+> does **NOT** authorise live trading, API keys, private
+> endpoints, DeepSeek trade decisions, real Telegram outbound,
+> or Phase 12. **Tests:** 25/25 brief-mandated tests PASS,
+> 312/312 phase11c\_ tests PASS, 2286/2286 full pytest PASS on
+> the PR branch (no regression vs. the post-PR-#41 main 2261
+> baseline). The 30 s dry-run is **contract-only** (the
+> smallest Phase 11C.1C-C-A tracking window is 5 min; a 30 s
+> run cannot complete a primary window); the 5 min / 10 min
+> operator-VPS real public WS smoke is the merge gate and must
+> be filed under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A
+> acceptance evidence" before Phase 11C.1C-C-B-A flips to
+> ACCEPTED. Phase 12 remains **FORBIDDEN**.
 
 The Phase 1 safety lock held end-to-end across the Phase 11C.1C-B
 acceptance evidence runs and remains in force on `main`:
@@ -61,6 +77,7 @@ single trade-decision gate.
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
+| 2026-05-23 | Phase 11C.1C-C-B-A | Strategy Validation Lab v0 & Cluster Exposure Control Contracts (paper / report-only first slice of Phase 11C.1C-C-B; ships data contracts + pure aggregators + runtime that emits seven new typed events on top of the Phase 11C.1C-C-A `LabelTrackingRecord` outcomes) | **IN_REVIEW (PR #42 open)** — `tests/unit/test_phase11c_1c_c_b_strategy_validation.py` 25 PASS (brief-mandated cases); `tests/unit -k phase11c_` 312 PASS (287 baseline + 25 new); full `tests/` 2286 PASS on the PR branch (no regression vs. post-PR-#41 main 2261 baseline). 30 s dry-run smoke is contract-only (smallest Phase 11C.1C-C-A tracking window is 5m and cannot complete in 30 s); the runtime emits an empty-but-well-formed `STRATEGY_VALIDATION_REPORT_GENERATED` so the daily report still renders the new section. **Operator-VPS 5 min / 10 min real public WS smoke is REQUIRED before merge** to confirm the runtime emits real `STRATEGY_VALIDATION_SAMPLE_CREATED` events for at least one completed primary 5 min window; the Kiro-side sandbox cannot host this smoke (Binance-region HTTP 451 geoblock; same as the Phase 11C.1C-B / Phase 11C.1C-C-A closeouts). The `suggested_cluster_action` field on every `ClusterExposureAssessment` is paper / report only (`leader_only` / `observe_followers` / `reject_cluster` / `no_action`) and **MUST NEVER trigger a real trade**; the Risk Engine remains the single trade-decision gate. Phase 11C.1C-C-B-A acceptance does **NOT** authorise Phase 11C.1C-C-B-B kickoff bypassing the standard gate. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_C_B_STRATEGY_VALIDATION_CLUSTER_CONTROL.md`; `docs/PR42_DESCRIPTION.md`; `tests/unit/test_phase11c_1c_c_b_strategy_validation.py`; `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-B-A (IN_REVIEW)" |
 | 2026-05-23 | Phase 11C.1C-C-A | MFE / MAE Label Queue Runtime & Tail Outcome Tracking (paper-only runtime that consumes the Phase 11C.1C-A `LABEL_QUEUE_ENQUEUED` contract and produces forward MFE / MAE / `tail_label` outcomes per ACTIVE candidate) | **ACCEPTED (closed 2026-05-23; PR #40 merged into `main`, mergeCommit `75d3c7c`)** — `tests/unit/test_phase11c_1c_c_a_label_queue_runtime.py` 30 PASS (brief-mandated cases); `tests/unit -k phase11c_` 287 PASS; full `tests/` 2261 PASS on the PR branch (no regression vs. post-PR-#38 main baseline). 30 s dry-run smoke is contract-only (the smallest tracking window is 5m and cannot complete in 30 s). **Operator-VPS 10 min real public WS smoke PASSED** (`duration_seconds=600.0`, `dry_run=false`, `ws_real_transport=true`, `ws_messages_received=56592`, `ws_chains_emitted=27`, `learning_ready_attached=27`, `snapshots_emitted=27`, `LABEL_TRACKING_STARTED=19` runner / `36` events.db, `LABEL_WINDOW_UPDATED=38` / `82`, `LABEL_WINDOW_COMPLETED=11` / `20`, `TAIL_LABEL_ASSIGNED=11` / `20`, `MISSED_TAIL_DETECTED=0`, `FAKE_BREAKOUT_DETECTED=0`, pending=8 / completed=11 / expired=0 / unresolved=0, `HTTP 429 count=0`, `HTTP 418 count=0`, `rate_limit_ban=False`, `ws_reconnect_count=0`, `ws_stale_count=0`, `ws_currently_stale=False`, `ingestion_errors=0`, safety flags unchanged); the Kiro sandbox could not host the smoke (Binance-region HTTP 451 geoblock, same as the Phase 11C.1C-B closeout), so the operator ran it from a Binance-reachable VPS. PR #40 has merged into `main` (mergeCommit `75d3c7c`); the smoke evidence above was accepted; Phase 11C.1C-C-A is therefore **ACCEPTED**. Phase 11C.1C-C-A acceptance does **NOT** authorise Phase 11C.1C-C-B kickoff bypassing the standard gate. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_C_MFE_MAE_LABEL_QUEUE_RUNTIME.md`; `docs/PR40_DESCRIPTION.md`; `tests/unit/test_phase11c_1c_c_a_label_queue_runtime.py`; `docs/PHASE_GATE.md` §"Closed phase: Phase 11C.1C-C-A (ACCEPTED)" + §"Phase 11C.1C-C-A acceptance evidence (closeout)" |
 | 2026-05-23 | Phase 11C.1C-C-B | Adaptive Candidate Strategy Validation Lab & Cluster Exposure Control (placeholder; reserved for Phase 11C.1C-C follow-up after Phase 11C.1C-C-A is ACCEPTED) | **NEXT_ALLOWED / NOT_STARTED** — Phase 11C.1C-C-A is now **ACCEPTED** (PR #40 merged into `main`, mergeCommit `75d3c7c`), so Phase 11C.1C-C-B is now **NEXT_ALLOWED**; no implementation has started. Phase 11C.1C-C-A acceptance does **NOT** authorise Phase 11C.1C-C-B kickoff bypassing the standard gate; Phase 11C.1C-C-B will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A forbidden item. | `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-B (NEXT_ALLOWED / NOT_STARTED)" |
 | 2026-05-22 | Phase 11C.1C-B | Adaptive Candidate Runtime Calibration & Early Tail Discovery v0 (paper-only runtime calibration metrics + Early Tail Discovery v0 + daily-report enhancements) | **ACCEPTED (closed 2026-05-22; PR #38 merged into `main`)** — `tests/unit/test_phase11c_1c_b_runtime_calibration.py` 12 PASS; `tests/unit -k phase11c_` 257 PASS; full `tests/` 2231 PASS with no regression vs. the post-PR-#37 main baseline; 30s dry-run produced a `runtime_calibration` block with all 15 fields on every adaptive event and `early_tail_score` per ACTIVE candidate; 5min real public WS smoke (`--ws-first`, no `--dry-run`) confirmed `dry_run=false`, `ws_real_transport=true`, `ws_messages_received=30526`, `ws_chains_emitted=12`, runtime calibration block present on every adaptive event, daily report contains `top_early_tail_candidates` / `top_late_chase_risk_candidates` / `early_tail_score_top_symbols` / `opportunity_score_distribution`, `label_queue` remains contract-only, `rate_limit_429_count=0`, `rate_limit_418_count=0`, `rate_limit_ban=False`, `ws_stale_count=0`, `ws_reconnect_count=0`, `ingestion_errors=12` (explainable: sandbox-region geoblock HTTP 451 on Binance REST; NOT a 429/418/ban; WS pump ran cleanly), safety flags unchanged. PR #38 merged into `main` (mergeCommit `ce4b6de`); the smoke evidence above was accepted; Phase 11C.1C-B is therefore **ACCEPTED**. Phase 11C.1C-C is now **NEXT_ALLOWED / NOT_STARTED**. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_B_RUNTIME_CALIBRATION.md`; `tests/unit/test_phase11c_1c_b_runtime_calibration.py`; `docs/PHASE_GATE.md` §"Phase 11C.1C-B acceptance evidence (closeout)" |

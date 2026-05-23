@@ -64,6 +64,7 @@ from app.adaptive import (
     compute_runtime_calibration,
 )
 from app.adaptive.label_runtime import LabelQueueRuntime
+from app.adaptive.strategy_validation_runtime import StrategyValidationRuntime
 from app.core.clock import now_ms
 from app.core.enums import (
     AnomalyReasonTag,
@@ -141,6 +142,7 @@ class WSRadarChainDriver:
         config_versions: ConfigVersions | None = None,
         candidate_pool=None,
         label_queue_runtime: LabelQueueRuntime | None = None,
+        strategy_validation_runtime: StrategyValidationRuntime | None = None,
     ) -> None:
         self._risk = risk_engine
         self._event_repo = event_repo
@@ -160,6 +162,18 @@ class WSRadarChainDriver:
         # ``LABEL_TRACKING_STARTED`` event. The runtime is paper /
         # virtual only; it does NOT open a position.
         self._label_queue_runtime = label_queue_runtime
+        # Phase 11C.1C-C-B-A - optional Strategy Validation Lab v0
+        # runtime. When supplied, the chain calls
+        # :meth:`StrategyValidationRuntime.observe_label_record`
+        # after the Phase 11C.1C-C-A label-tracking record is
+        # registered / refreshed so the Lab can build a
+        # :class:`StrategyValidationSample` and emit a
+        # ``STRATEGY_VALIDATION_SAMPLE_CREATED`` event. The runtime
+        # is paper / report only; it does NOT open a position and
+        # the resulting ``suggested_cluster_action`` field is
+        # descriptive only - the Risk Engine remains the single
+        # trade-decision gate.
+        self._strategy_validation_runtime = strategy_validation_runtime
         self._chain_count = 0
         self._risk_approved_count = 0
         self._risk_rejected_count = 0
@@ -247,6 +261,10 @@ class WSRadarChainDriver:
     @property
     def label_queue_runtime(self) -> LabelQueueRuntime | None:
         return self._label_queue_runtime
+
+    @property
+    def strategy_validation_runtime(self) -> StrategyValidationRuntime | None:
+        return self._strategy_validation_runtime
 
     def adaptive_metrics_payload(self) -> dict[str, Any]:
         """Return a JSON-safe dict of Phase 11C.1C-A adaptive metrics.
@@ -1128,9 +1146,10 @@ class WSRadarChainDriver:
         # a position. We pass the LABEL_QUEUE_ENQUEUED event id so
         # the LABEL_TRACKING_STARTED event can carry a deterministic
         # cross-reference back to its source.
+        label_record = None
         if self._label_queue_runtime is not None:
             try:
-                self._label_queue_runtime.observe(
+                label_record = self._label_queue_runtime.observe(
                     adaptive=adaptive,
                     source_event_id=str(label_queue_event_id or ""),
                 )
@@ -1138,6 +1157,32 @@ class WSRadarChainDriver:
                 logger.error(
                     "[phase11c.1c-c-a] label runtime observe failed "
                     "symbol={} opp={}: {}",
+                    symbol,
+                    adaptive.opportunity_id,
+                    exc,
+                )
+
+        # Phase 11C.1C-C-B-A - if a Strategy Validation Lab v0 runtime
+        # is wired in, build a :class:`StrategyValidationSample` from
+        # the Phase 11C.1C-C-A label-tracking record + the adaptive
+        # context. The Lab is paper / report only; it does NOT open
+        # a position and the resulting ``suggested_cluster_action``
+        # is a descriptive label that NEVER triggers a real trade.
+        if (
+            self._strategy_validation_runtime is not None
+            and label_record is not None
+        ):
+            try:
+                self._strategy_validation_runtime.observe_label_record(
+                    label_record=label_record,
+                    adaptive=adaptive,
+                    source_event_id=str(label_queue_event_id or ""),
+                    sample_created_ts=int(timestamp),
+                )
+            except Exception as exc:  # pragma: no cover - protective
+                logger.error(
+                    "[phase11c.1c-c-b-a] strategy validation observe "
+                    "failed symbol={} opp={}: {}",
                     symbol,
                     adaptive.opportunity_id,
                     exc,

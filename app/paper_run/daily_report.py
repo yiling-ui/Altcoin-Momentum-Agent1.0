@@ -211,6 +211,53 @@ class DailyReportSnapshot:
     missed_tail_symbols: list[dict[str, Any]] = field(default_factory=list)
     fake_breakout_symbols: list[dict[str, Any]] = field(default_factory=list)
     label_runtime_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster
+    # Exposure Control Contracts metrics. The runner passes the
+    # :meth:`StrategyValidationRuntime.metrics_payload` dict
+    # through ``strategy_validation_metrics``; the builder
+    # cross-checks the event-log counts of the seven new event
+    # types against those counters before rendering. Every value is
+    # paper / report only - the ``suggested_cluster_action`` on
+    # each cluster assessment is descriptive; the Risk Engine
+    # remains the single trade-decision gate.
+    strategy_validation_sample_count: int = 0
+    strategy_validation_sample_created_count: int = 0
+    strategy_validation_report_generated_count: int = 0
+    strategy_mode_validated_count: int = 0
+    candidate_stage_validated_count: int = 0
+    score_bucket_validated_count: int = 0
+    cluster_exposure_assessed_count: int = 0
+    cluster_leader_validated_count: int = 0
+    strategy_mode_validation: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    candidate_stage_validation: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    opportunity_score_bucket_validation: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    early_tail_score_bucket_validation: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    strategy_validation_tail_label_distribution: dict[str, Any] = field(
+        default_factory=dict
+    )
+    top_strategy_validation_symbols: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    cluster_exposure_assessments: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    cluster_leader_validation: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    cluster_leader_outperformance_count: int = 0
+    overexposure_warning_count: int = 0
+    strategy_validation_flagged_findings: list[str] = field(
+        default_factory=list
+    )
+    strategy_validation_metrics: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -409,6 +456,62 @@ class DailyReportSnapshot:
             "missed_tail_symbols": list(self.missed_tail_symbols),
             "fake_breakout_symbols": list(self.fake_breakout_symbols),
             "label_runtime_metrics": dict(self.label_runtime_metrics),
+            # Phase 11C.1C-C-B-A Strategy Validation Lab v0 + Cluster
+            # Exposure Control Contracts.
+            "strategy_validation_sample_count": int(
+                self.strategy_validation_sample_count
+            ),
+            "strategy_validation_sample_created_count": int(
+                self.strategy_validation_sample_created_count
+            ),
+            "strategy_validation_report_generated_count": int(
+                self.strategy_validation_report_generated_count
+            ),
+            "strategy_mode_validated_count": int(
+                self.strategy_mode_validated_count
+            ),
+            "candidate_stage_validated_count": int(
+                self.candidate_stage_validated_count
+            ),
+            "score_bucket_validated_count": int(
+                self.score_bucket_validated_count
+            ),
+            "cluster_exposure_assessed_count": int(
+                self.cluster_exposure_assessed_count
+            ),
+            "cluster_leader_validated_count": int(
+                self.cluster_leader_validated_count
+            ),
+            "strategy_mode_validation": dict(self.strategy_mode_validation),
+            "candidate_stage_validation": dict(
+                self.candidate_stage_validation
+            ),
+            "opportunity_score_bucket_validation": dict(
+                self.opportunity_score_bucket_validation
+            ),
+            "early_tail_score_bucket_validation": dict(
+                self.early_tail_score_bucket_validation
+            ),
+            "strategy_validation_tail_label_distribution": dict(
+                self.strategy_validation_tail_label_distribution
+            ),
+            "top_strategy_validation_symbols": list(
+                self.top_strategy_validation_symbols
+            ),
+            "cluster_exposure_assessments": list(
+                self.cluster_exposure_assessments
+            ),
+            "cluster_leader_validation": dict(self.cluster_leader_validation),
+            "cluster_leader_outperformance_count": int(
+                self.cluster_leader_outperformance_count
+            ),
+            "overexposure_warning_count": int(self.overexposure_warning_count),
+            "strategy_validation_flagged_findings": list(
+                self.strategy_validation_flagged_findings
+            ),
+            "strategy_validation_metrics": dict(
+                self.strategy_validation_metrics
+            ),
         }
 
 
@@ -455,6 +558,7 @@ class DailyReportBuilder:
         candidate_pool_metrics: Mapping[str, Any] | None = None,
         adaptive_metrics: Mapping[str, Any] | None = None,
         label_runtime_metrics: Mapping[str, Any] | None = None,
+        strategy_validation_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -491,6 +595,24 @@ class DailyReportBuilder:
         ``OPPORTUNITY_SCORED`` / ``STRATEGY_MODE_SELECTED`` /
         ``CLUSTER_CONTEXT_ATTACHED`` / ``LABEL_QUEUE_ENQUEUED``)
         against those counters before rendering.
+
+        Phase 11C.1C-C-B-A addition:
+
+        ``strategy_validation_metrics`` carries the
+        :meth:`StrategyValidationRuntime.metrics_payload` dict so the
+        builder can render the new
+        ``Phase 11C.1C-C-B-A Strategy Validation Lab v0 & Cluster
+        Exposure Control Contracts`` Markdown section. The builder
+        cross-checks the event-log counts of the seven new event
+        types
+        (``STRATEGY_VALIDATION_SAMPLE_CREATED`` /
+        ``STRATEGY_VALIDATION_REPORT_GENERATED`` /
+        ``STRATEGY_MODE_VALIDATED`` /
+        ``CANDIDATE_STAGE_VALIDATED`` / ``SCORE_BUCKET_VALIDATED`` /
+        ``CLUSTER_EXPOSURE_ASSESSED`` /
+        ``CLUSTER_LEADER_VALIDATED``) against those counters before
+        rendering. The section is paper / report only; nothing it
+        produces authorises a real trade.
         """
         finished_ms = (
             finished_at_ms
@@ -515,6 +637,9 @@ class DailyReportBuilder:
             candidate_pool_metrics=dict(candidate_pool_metrics or {}),
             adaptive_metrics=dict(adaptive_metrics or {}),
             label_runtime_metrics=dict(label_runtime_metrics or {}),
+            strategy_validation_metrics=dict(
+                strategy_validation_metrics or {}
+            ),
         )
 
         if write_to_disk:
@@ -542,6 +667,7 @@ class DailyReportBuilder:
         candidate_pool_metrics: Mapping[str, Any] | None = None,
         adaptive_metrics: Mapping[str, Any] | None = None,
         label_runtime_metrics: Mapping[str, Any] | None = None,
+        strategy_validation_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -1218,6 +1344,194 @@ class DailyReportBuilder:
                 or []
             ),
             label_runtime_metrics=dict(label_runtime_metrics or {}),
+            # Phase 11C.1C-C-B-A Strategy Validation Lab v0 + Cluster
+            # Exposure Control Contracts. Values come from the
+            # ``strategy_validation_metrics`` kwarg first; the
+            # event-log counts of the seven new event types are used
+            # as a cross-check / fall-back so a stale runner counter
+            # cannot under-report a real validation event.
+            strategy_validation_sample_count=int(
+                (strategy_validation_metrics or {}).get(
+                    "strategy_validation_sample_count", 0
+                )
+                or 0
+            ),
+            strategy_validation_sample_created_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "strategy_validation_sample_created_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_VALIDATION_SAMPLE_CREATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            strategy_validation_report_generated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "strategy_validation_report_generated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_VALIDATION_REPORT_GENERATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            strategy_mode_validated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "strategy_mode_validated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_MODE_VALIDATED.value, 0
+                        )
+                    ),
+                )
+            ),
+            candidate_stage_validated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "candidate_stage_validated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.CANDIDATE_STAGE_VALIDATED.value, 0
+                        )
+                    ),
+                )
+            ),
+            score_bucket_validated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "score_bucket_validated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.SCORE_BUCKET_VALIDATED.value, 0
+                        )
+                    ),
+                )
+            ),
+            cluster_exposure_assessed_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "cluster_exposure_assessed_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.CLUSTER_EXPOSURE_ASSESSED.value, 0
+                        )
+                    ),
+                )
+            ),
+            cluster_leader_validated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "cluster_leader_validated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.CLUSTER_LEADER_VALIDATED.value, 0
+                        )
+                    ),
+                )
+            ),
+            strategy_mode_validation=dict(
+                (strategy_validation_metrics or {}).get(
+                    "strategy_mode_validation", {}
+                )
+                or {}
+            ),
+            candidate_stage_validation=dict(
+                (strategy_validation_metrics or {}).get(
+                    "candidate_stage_validation", {}
+                )
+                or {}
+            ),
+            opportunity_score_bucket_validation=dict(
+                (strategy_validation_metrics or {}).get(
+                    "opportunity_score_bucket_validation", {}
+                )
+                or {}
+            ),
+            early_tail_score_bucket_validation=dict(
+                (strategy_validation_metrics or {}).get(
+                    "early_tail_score_bucket_validation", {}
+                )
+                or {}
+            ),
+            strategy_validation_tail_label_distribution=dict(
+                (strategy_validation_metrics or {}).get(
+                    "tail_label_distribution", {}
+                )
+                or {}
+            ),
+            top_strategy_validation_symbols=list(
+                (strategy_validation_metrics or {}).get(
+                    "top_strategy_validation_symbols", []
+                )
+                or []
+            ),
+            cluster_exposure_assessments=list(
+                (strategy_validation_metrics or {}).get(
+                    "cluster_exposure_assessments", []
+                )
+                or []
+            ),
+            cluster_leader_validation=dict(
+                (strategy_validation_metrics or {}).get(
+                    "cluster_leader_validation", {}
+                )
+                or {}
+            ),
+            cluster_leader_outperformance_count=int(
+                (strategy_validation_metrics or {}).get(
+                    "cluster_leader_outperformance_count", 0
+                )
+                or 0
+            ),
+            overexposure_warning_count=int(
+                (strategy_validation_metrics or {}).get(
+                    "overexposure_warning_count", 0
+                )
+                or 0
+            ),
+            strategy_validation_flagged_findings=list(
+                (strategy_validation_metrics or {}).get(
+                    "flagged_findings", []
+                )
+                or []
+            ),
+            strategy_validation_metrics=dict(
+                strategy_validation_metrics or {}
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -1548,6 +1862,169 @@ class DailyReportBuilder:
             snapshot.late_chase_risk_bucket_outcomes
         )
 
+        # ---- Phase 11C.1C-C-B-A Strategy Validation Lab v0 + Cluster
+        # Exposure Control Contracts. Paper / report only. The
+        # ``suggested_cluster_action`` field on every cluster
+        # assessment is descriptive; the Risk Engine remains the
+        # single trade-decision gate.
+        sv_block = (
+            f"- STRATEGY_VALIDATION_SAMPLE_CREATED count: "
+            f"**{snapshot.strategy_validation_sample_created_count}**\n"
+            f"- STRATEGY_VALIDATION_REPORT_GENERATED count: "
+            f"**{snapshot.strategy_validation_report_generated_count}**\n"
+            f"- STRATEGY_MODE_VALIDATED count: "
+            f"**{snapshot.strategy_mode_validated_count}**\n"
+            f"- CANDIDATE_STAGE_VALIDATED count: "
+            f"**{snapshot.candidate_stage_validated_count}**\n"
+            f"- SCORE_BUCKET_VALIDATED count: "
+            f"**{snapshot.score_bucket_validated_count}**\n"
+            f"- CLUSTER_EXPOSURE_ASSESSED count: "
+            f"**{snapshot.cluster_exposure_assessed_count}**\n"
+            f"- CLUSTER_LEADER_VALIDATED count: "
+            f"**{snapshot.cluster_leader_validated_count}**\n"
+            f"- Validation samples in latest report: "
+            f"**{snapshot.strategy_validation_sample_count}**\n"
+            f"- Cluster leader outperformance count: "
+            f"**{snapshot.cluster_leader_outperformance_count}**\n"
+            f"- Overexposure warning count: "
+            f"**{snapshot.overexposure_warning_count}**\n"
+        )
+
+        if snapshot.strategy_validation_sample_count == 0:
+            sv_empty_line = (
+                "- (no samples in this window; empty Strategy "
+                "Validation Lab v0 report - this is expected when "
+                "no Phase 11C.1C-C-A primary window completed during "
+                "the run)\n"
+            )
+        else:
+            sv_empty_line = ""
+
+        def _sv_cohort_lines(
+            buckets: dict[str, dict[str, Any]],
+            *,
+            label_field: str,
+        ) -> str:
+            if not buckets:
+                return "- (no cohort entries in this window)"
+            lines: list[str] = []
+            for key in sorted(buckets):
+                stats = buckets.get(key) or {}
+                if not isinstance(stats, dict):
+                    continue
+                count = int(stats.get("sample_count", 0) or 0)
+                avg_mfe = float(stats.get("avg_mfe", 0.0) or 0.0)
+                avg_mae = float(stats.get("avg_mae", 0.0) or 0.0)
+                fake_rate = float(stats.get("fake_breakout_rate", 0.0) or 0.0)
+                missed_rate = float(stats.get("missed_tail_rate", 0.0) or 0.0)
+                strong_rate = float(stats.get("strong_tail_rate", 0.0) or 0.0)
+                p2r = float(stats.get("p_reached_2r", 0.0) or 0.0)
+                p3r = float(stats.get("p_reached_3r", 0.0) or 0.0)
+                p5r = float(stats.get("p_reached_5r", 0.0) or 0.0)
+                lines.append(
+                    f"- `{label_field}={key}` n={count} "
+                    f"avg_mfe={avg_mfe:.4f} avg_mae={avg_mae:.4f} "
+                    f"strong={strong_rate:.3f} fake={fake_rate:.3f} "
+                    f"missed={missed_rate:.3f} "
+                    f"p2r={p2r:.3f} p3r={p3r:.3f} p5r={p5r:.3f}"
+                )
+            return "\n".join(lines)
+
+        sv_strategy_mode_lines = _sv_cohort_lines(
+            snapshot.strategy_mode_validation, label_field="strategy_mode"
+        )
+        sv_candidate_stage_lines = _sv_cohort_lines(
+            snapshot.candidate_stage_validation,
+            label_field="candidate_stage",
+        )
+        sv_opp_bucket_lines = _sv_cohort_lines(
+            snapshot.opportunity_score_bucket_validation,
+            label_field="opportunity_score_bucket",
+        )
+        sv_ets_bucket_lines = _sv_cohort_lines(
+            snapshot.early_tail_score_bucket_validation,
+            label_field="early_tail_score_bucket",
+        )
+        sv_tail_dist = snapshot.strategy_validation_tail_label_distribution
+        sv_tail_dist_counts = (
+            sv_tail_dist.get("counts", {})
+            if isinstance(sv_tail_dist, dict)
+            else {}
+        )
+        if sv_tail_dist_counts:
+            sv_tail_dist_lines = "\n".join(
+                f"- `{label}` x {int(count)}"
+                for label, count in sorted(
+                    sv_tail_dist_counts.items(),
+                    key=lambda r: (-int(r[1]), str(r[0])),
+                )
+            )
+        else:
+            sv_tail_dist_lines = (
+                "- (no tail labels in this Strategy Validation Lab "
+                "report)"
+            )
+        if snapshot.top_strategy_validation_symbols:
+            sv_top_symbol_lines = "\n".join(
+                f"- `{row.get('symbol', '?')}` "
+                f"mfe={float(row.get('mfe', 0.0)) * 100.0:.2f}% "
+                f"mae={float(row.get('mae', 0.0)) * 100.0:.2f}% "
+                f"mode={row.get('strategy_mode', '?')} "
+                f"stage={row.get('candidate_stage', '?')} "
+                f"label={row.get('tail_label', '?')} "
+                f"opp={row.get('opportunity_id', '?')}"
+                for row in snapshot.top_strategy_validation_symbols[:10]
+            )
+        else:
+            sv_top_symbol_lines = (
+                "- (no validation samples in this window)"
+            )
+        if snapshot.cluster_exposure_assessments:
+            sv_cluster_lines = "\n".join(
+                f"- cluster=`{row.get('cluster_id', '?')}` "
+                f"size={int(row.get('cluster_size', 0) or 0)} "
+                f"correlated={int(row.get('correlated_candidate_count', 0) or 0)} "
+                f"leader=`{row.get('leader_symbol') or '-'}` "
+                f"mfe_mean={float(row.get('cluster_mfe_mean', 0.0)) * 100.0:.2f}% "
+                f"leader_outperformed={row.get('leader_outperformed_followers', False)} "
+                f"overexposure={row.get('overexposure_warning', False)} "
+                f"action=`{row.get('suggested_cluster_action', 'no_action')}`"
+                for row in snapshot.cluster_exposure_assessments[:10]
+            )
+        else:
+            sv_cluster_lines = (
+                "- (no cluster exposure assessments in this window)"
+            )
+        if snapshot.cluster_leader_validation:
+            sv_leader_lines = "\n".join(
+                (
+                    f"- cluster=`{cluster}` "
+                    f"leader=`{(stats or {}).get('leader_symbol') or '-'}` "
+                    f"leader_n={int((stats or {}).get('leader_sample_count', 0) or 0)} "
+                    f"follower_n={int((stats or {}).get('follower_sample_count', 0) or 0)} "
+                    f"leader_mfe={float((stats or {}).get('leader_avg_mfe', 0.0)) * 100.0:.2f}% "
+                    f"follower_mfe={float((stats or {}).get('follower_avg_mfe', 0.0)) * 100.0:.2f}% "
+                    f"outperformed={(stats or {}).get('leader_outperformed_followers', False)}"
+                )
+                for cluster, stats in sorted(
+                    snapshot.cluster_leader_validation.items()
+                )
+            )
+        else:
+            sv_leader_lines = (
+                "- (no cluster leader validation in this window)"
+            )
+        if snapshot.strategy_validation_flagged_findings:
+            sv_findings_lines = "\n".join(
+                f"- `{f}`"
+                for f in snapshot.strategy_validation_flagged_findings
+            )
+        else:
+            sv_findings_lines = (
+                "- (no flagged findings in this Strategy Validation "
+                "Lab v0 report)"
+            )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -1650,6 +2127,35 @@ class DailyReportBuilder:
             f"{strategy_mode_outcome_lines}\n\n"
             f"### Outcome by late_chase_risk bucket\n"
             f"{late_chase_outcome_lines}\n\n"
+            f"## Phase 11C.1C-C-B-A Strategy Validation Lab v0 "
+            f"& Cluster Exposure Control Contracts\n"
+            f"_Strategy Validation Lab v0 sub-blocks are paper / "
+            f"report only. Validation samples / cohort stats / "
+            f"cluster assessments are descriptive; the "
+            f"`suggested_cluster_action` on every cluster "
+            f"assessment is one of `leader_only` / "
+            f"`observe_followers` / `reject_cluster` / `no_action` "
+            f"and **MUST NEVER trigger a real trade**. The Risk "
+            f"Engine remains the single trade-decision gate. This "
+            f"is **NOT** the complete Strategy Validation Lab, "
+            f"**NOT** AI Learning, and **NOT** automatic parameter "
+            f"optimisation; Phase 12 remains FORBIDDEN._\n\n"
+            f"{sv_block}{sv_empty_line}\n"
+            f"### Strategy mode validation (follow / pullback / "
+            f"observe / reject)\n{sv_strategy_mode_lines}\n\n"
+            f"### Candidate stage validation (early / mid / late / "
+            f"blowoff / dumped)\n{sv_candidate_stage_lines}\n\n"
+            f"### Opportunity score bucket validation\n"
+            f"{sv_opp_bucket_lines}\n\n"
+            f"### Early tail score bucket validation\n"
+            f"{sv_ets_bucket_lines}\n\n"
+            f"### Strategy Validation Lab v0 tail label distribution\n"
+            f"{sv_tail_dist_lines}\n\n"
+            f"### Top strategy validation symbols\n"
+            f"{sv_top_symbol_lines}\n\n"
+            f"### Cluster exposure assessments\n{sv_cluster_lines}\n\n"
+            f"### Cluster leader validation\n{sv_leader_lines}\n\n"
+            f"### Flagged findings\n{sv_findings_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

@@ -90,6 +90,10 @@ from app.adaptive.label_runtime import (  # noqa: E402
     LabelQueueRuntime,
     LabelQueueRuntimeConfig,
 )
+from app.adaptive.strategy_validation_runtime import (  # noqa: E402
+    StrategyValidationRuntime,
+    StrategyValidationRuntimeConfig,
+)
 
 from app.market_data_public import (  # noqa: E402
     AllMarketRadarBuffer,
@@ -551,6 +555,11 @@ class _Phase11CRunStats:
     # Populated from :meth:`LabelQueueRuntime.metrics_payload` on
     # every loop tick after the chain drives a candidate.
     label_runtime_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-C-B-A - Strategy Validation Lab v0 metrics.
+    # Populated from
+    # :meth:`StrategyValidationRuntime.metrics_payload` on every
+    # loop tick after the chain drives a candidate.
+    strategy_validation_metrics: dict[str, Any] = field(default_factory=dict)
     ws_chains_emitted: int = 0
     ws_risk_rejected: int = 0
     ws_learning_ready_attached: int = 0
@@ -1194,6 +1203,12 @@ def main(argv: list[str] | None = None) -> int:
                     settings.label_queue_runtime
                 ),
             ),
+            strategy_validation_runtime=StrategyValidationRuntime(
+                event_repo=event_repo,
+                config=StrategyValidationRuntimeConfig.from_settings_section(
+                    settings.strategy_validation
+                ),
+            ),
         )
 
     # 9. Set up signal handling for graceful shutdown.
@@ -1430,6 +1445,20 @@ def main(argv: list[str] | None = None) -> int:
                             f"label_runtime_tick_error:"
                             f"{type(exc).__name__}"
                         )
+                # Phase 11C.1C-C-B-A - snapshot strategy validation
+                # metrics every loop tick. The runtime is paper /
+                # report only; reading metrics never authorises a
+                # real trade.
+                if ws_chain.strategy_validation_runtime is not None:
+                    try:
+                        stats.strategy_validation_metrics = (
+                            ws_chain.strategy_validation_runtime.metrics_payload()
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        stats.notes.append(
+                            f"strategy_validation_metrics_error:"
+                            f"{type(exc).__name__}"
+                        )
             if radar_buffer is not None:
                 stats.liquidation_events_seen = (
                     radar_buffer.liquidation_events_seen
@@ -1548,6 +1577,25 @@ def main(argv: list[str] | None = None) -> int:
                         f"label_runtime_shutdown_tick_error:"
                         f"{type(exc).__name__}"
                     )
+            # Phase 11C.1C-C-B-A - flush a final
+            # :class:`StrategyValidationReport` on shutdown so the
+            # daily report gets the complete cohort + cluster
+            # aggregates. The runtime is paper / report only; the
+            # final flush never authorises a real trade.
+            if ws_chain.strategy_validation_runtime is not None:
+                try:
+                    ws_chain.strategy_validation_runtime.flush_report(
+                        generated_at_ms=int(now_ms()),
+                        emit_events=True,
+                    )
+                    stats.strategy_validation_metrics = (
+                        ws_chain.strategy_validation_runtime.metrics_payload()
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    stats.notes.append(
+                        f"strategy_validation_shutdown_flush_error:"
+                        f"{type(exc).__name__}"
+                    )
         if radar_buffer is not None:
             stats.liquidation_events_seen = (
                 radar_buffer.liquidation_events_seen
@@ -1615,6 +1663,9 @@ def main(argv: list[str] | None = None) -> int:
                 candidate_pool_metrics=dict(stats.candidate_pool_metrics),
                 adaptive_metrics=dict(stats.adaptive_metrics),
                 label_runtime_metrics=dict(stats.label_runtime_metrics),
+                strategy_validation_metrics=dict(
+                    stats.strategy_validation_metrics
+                ),
             )
             daily_report_path = (
                 daily_dir / f"{snapshot.date}-phase11c-public-market.md"

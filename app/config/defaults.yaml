@@ -159,3 +159,22 @@ label_queue_runtime:
   dumped_max_mfe_pct: 0.01
   stopped_before_tail_pct: -0.04
   missed_tail_min_mfe_pct: 0.05
+
+
+strategy_validation:
+  # Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster
+  # Exposure Control Contracts. The runtime turns Phase 11C.1C-C-A
+  # MFE / MAE / tail_label outcomes into per-mode / per-stage /
+  # per-bucket cohort stats + per-cluster exposure assessments.
+  #
+  # Phase 11C.1C-C-B-A boundary: this section is paper / report
+  # only. Nothing under it can flip a Phase 1 safety flag, open a
+  # private API socket, or call an LLM / Telegram outbound. The
+  # ``suggested_cluster_action`` produced by the runtime is a
+  # descriptive label; the Risk Engine remains the single
+  # trade-decision gate.
+  enabled: true
+  max_samples: 2000
+  primary_window: "5m"
+  overexposure_warning_threshold: 3
+  top_symbol_limit: 10

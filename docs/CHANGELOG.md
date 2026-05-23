@@ -7,6 +7,167 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster Exposure Control Contracts
+
+**Version:** `1.4.0a11c.1c.c.b.a` - Phase 11C.1C-C-B-A. Tracks the
+**paper / report-only first slice** of the deeper Phase 11C.1C-C-B
+Strategy Validation Lab work. Ships the data contracts + pure
+aggregators + the runtime that emits the seven new typed events so
+a human reviewer can audit `early_tail_score` /
+`opportunity_score` / `strategy_mode` / `candidate_stage` /
+cluster-leader behaviour against the Phase 11C.1C-C-A forward
+MFE / MAE / `tail_label` outcomes.
+
+> **Status: IN_REVIEW (PR #42 open).** **NOT** ACCEPTED. **NOT**
+> live trading. **NOT** AI Learning. **NOT** the complete Strategy
+> Validation Lab. **NOT** automatic parameter optimisation.
+> **NOT** Phase 12.
+>
+> Phase 11C.1C-C-A — *MFE / MAE Label Queue Runtime & Tail
+> Outcome Tracking* — merged on 2026-05-23 (PR #40,
+> mergeCommit `75d3c7c`) and is the gating predecessor.
+> Phase 11C.1C-C-B-A is the **first slice** of the deeper
+> Phase 11C.1C-C-B Strategy Validation Lab work; it ships only
+> the contracts + aggregators + runtime that emit the seven
+> typed events. A 5 min / 10 min operator-VPS real public WS
+> smoke is **required before merge** to confirm the runtime
+> produces real samples; the Kiro-side sandbox is geoblocked
+> (HTTP 451) so the smoke must run from a Binance-reachable
+> VPS, mirroring the Phase 11C.1C-C-A closeout pattern.
+
+#### Phase 11C.1C-C-B-A scope
+
+  - **Strategy Validation Lab v0 contracts**
+    (`app/adaptive/strategy_validation.py`):
+    `StrategyValidationSample`,
+    `StrategyValidationWindowStats`,
+    `StrategyModeValidationStats`,
+    `CandidateStageValidationStats`,
+    `OpportunityScoreBucketStats`,
+    `EarlyTailScoreBucketStats`,
+    `TailLabelDistribution`,
+    `ClusterLeaderValidationStats`,
+    `ClusterExposureAssessment`,
+    `StrategyValidationReport`. Schema version
+    `phase_11c_1c_c_b_a.strategy_validation.v1`.
+  - **Pure aggregators**:
+    `build_strategy_validation_sample`,
+    `aggregate_by_strategy_mode`,
+    `aggregate_by_candidate_stage`,
+    `aggregate_by_opportunity_score_bucket`,
+    `aggregate_by_early_tail_score_bucket`,
+    `aggregate_tail_label_distribution`,
+    `evaluate_cluster_leader_performance`,
+    `assess_cluster_exposure`,
+    `build_strategy_validation_report`.
+  - **Runtime**
+    (`app/adaptive/strategy_validation_runtime.py`):
+    `StrategyValidationRuntimeConfig` (every threshold
+    configurable) + `StrategyValidationRuntime` (idempotent
+    per `opportunity_id`).
+  - **Seven new event types**:
+    `STRATEGY_VALIDATION_SAMPLE_CREATED`,
+    `STRATEGY_VALIDATION_REPORT_GENERATED`,
+    `STRATEGY_MODE_VALIDATED`,
+    `CANDIDATE_STAGE_VALIDATED`,
+    `SCORE_BUCKET_VALIDATED`,
+    `CLUSTER_EXPOSURE_ASSESSED`,
+    `CLUSTER_LEADER_VALIDATED`. Every payload carries
+    `schema_version` + identity + the four versioning fields.
+  - **Wiring**: `WSRadarChainDriver` accepts a
+    `strategy_validation_runtime` kwarg and calls
+    `runtime.observe_label_record(...)` after the Phase
+    11C.1C-C-A `LabelQueueRuntime.observe(...)` returns the
+    `LabelTrackingRecord`.
+    `scripts/run_public_market_paper.py` instantiates the
+    runtime from `settings.strategy_validation`, snapshots
+    metrics on every loop tick, and
+    `flush_report(emit_events=True)` on shutdown.
+  - **Daily-report enhancements**: new section
+    `## Phase 11C.1C-C-B-A Strategy Validation Lab v0 &
+    Cluster Exposure Control Contracts` with paper / report-only
+    boundary preamble, headline counts, per-mode / per-stage /
+    per-bucket cohort lines, tail label distribution, top
+    symbols, cluster exposure assessments (showing
+    `suggested_cluster_action`), cluster leader validation, and
+    flagged findings.
+  - **Configuration**: `StrategyValidationSection` Pydantic
+    schema; `strategy_validation:` block in
+    `app/config/defaults.yaml`; `Settings.strategy_validation`
+    accessor.
+  - **Score buckets**: `opportunity_score`
+    `0-49 / 50-64 / 65-79 / 80-100`; `early_tail_score`
+    `0-24 / 25-49 / 50-74 / 75-100`.
+  - **Cluster actions** (paper / report only):
+    `leader_only` / `observe_followers` / `reject_cluster` /
+    `no_action`. **MUST NEVER trigger a real trade.**
+
+#### Phase 11C.1C-C-B-A boundary
+
+  - `mode = paper`, `live_trading = False`,
+    `exchange_live_orders = False`, `right_tail = False`,
+    `llm = False`, `telegram_outbound_enabled = False`,
+    `binance_private_api_enabled = False`. Phase 1 safety lock
+    unchanged.
+  - **NO** Binance API key / secret. **NO** signed endpoint /
+    private WS / `listenKey`. **NO** account / order / position
+    / leverage / margin endpoint. **NO** DeepSeek trade
+    decision. **NO** real Telegram outbound.
+  - **NOT** real trading. **NOT** live trading. **NOT** an
+    LLM / AI deciding direction / position size / leverage /
+    stop / target / execution. **NOT** automatic parameter
+    optimisation. **NOT** reinforcement learning. **NOT** a
+    validation result triggering a real order. **NOT** the
+    complete Strategy Validation Lab. **NOT** Phase 12.
+
+#### Phase 11C.1C-C-B-A tests
+
+  - `tests/unit/test_phase11c_1c_c_b_strategy_validation.py`
+    (NEW, 25 tests) — covers: sample creation; runtime
+    sample-created event emission with idempotency; cohort
+    aggregators (with `observe` + `reject` cohorts); candidate
+    stage aggregator (with `dumped`); opportunity / early-tail
+    score buckets; tail-label distribution; cluster leader
+    validation; cluster exposure (`leader_only`,
+    `observe_followers`, `reject_cluster`, `no_action`);
+    `dumped` is not a long opportunity; empty report;
+    `observe` / `reject` validated without trade authorisation;
+    chain wiring; flush_report emits all seven event types;
+    daily report contains metrics; events exportable; replay
+    reads new events; replay handles missing
+    `schema_version`; safety boundary; `phase_12_remains_forbidden`;
+    runtime disabled returns None; max_samples capacity bounded.
+  - `tests/unit/test_phase11b_no_network.py` allow-list
+    updated with the seven new event types.
+  - **Test counts**: 25/25 new tests PASS, 312/312 phase11c\_
+    tests PASS (287 baseline + 25 new), 2286/2286 full pytest
+    PASS (2261 baseline + 25 new). No regression vs. post-PR-#41
+    main baseline.
+
+#### Phase 11C.1C-C-B-A acceptance gate
+
+  - `python -m pytest tests/unit/test_phase11c_1c_c_b_strategy_validation.py -q`
+    → 25/25 PASS.
+  - `python -m pytest tests/unit/ -k "phase11c_" -q`
+    → 312/312 PASS.
+  - `python -m pytest tests/ -q`
+    → 2286/2286 PASS.
+  - **30 s dry-run smoke is contract-only** (the smallest Phase
+    11C.1C-C-A tracking window is 5 min; a 30 s dry-run cannot
+    complete the primary window). The runner explicitly logs an
+    "empty Strategy Validation Lab v0 report" line when the
+    sample buffer is empty so the daily-report section still
+    renders correctly.
+  - **5 min / 10 min operator-VPS real public WS smoke is
+    REQUIRED before merge** to confirm the runtime emits real
+    `STRATEGY_VALIDATION_SAMPLE_CREATED` events for at least one
+    completed primary 5 min window. The Kiro-side sandbox cannot
+    host this smoke (Binance-region HTTP 451 geoblock; same as
+    the Phase 11C.1C-B / Phase 11C.1C-C-A closeouts), so the
+    smoke must run from a Binance-reachable VPS and the verbatim
+    transcript must be filed under `docs/PHASE_GATE.md`
+    §"Phase 11C.1C-C-B-A acceptance evidence" before merge.
+
 ### Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime & Tail Outcome Tracking
 
 **Version:** `1.4.0a11c.1c.c.a` - Phase 11C.1C-C-A. Tracks the
