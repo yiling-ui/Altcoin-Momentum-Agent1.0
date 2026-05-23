@@ -2028,3 +2028,45 @@ by:
   - Operational evidence the four write surfaces, the No-Trade Gate,
     and the Reconciliation loop have held under real-data load
   - Explicit operator sign-off; Phase 12 is never auto-promoted
+
+
+
+## Architecture governance reference (guidance-only)
+
+A new architecture governance document has been added at
+`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md` ("AMA-RT
+Adaptive Market Operating System Governance / 自适应市场操作系统
+架构治理文档"). It records the long-term architecture
+principles for AMA-RT V1.4 — anti-AI-hallucination,
+anti-context-drift, anti-overfitting, anti-black-box-decision,
+and anti-AI-bypass-of-Risk-Engine — and is referenced here so
+the Phase Gate ledger has a single pointer to the governing
+architecture document.
+
+The new document is **guidance-only**:
+
+  - It does **NOT** change any current Phase Gate state.
+    Phase 11C.1C-C-B-A remains **ACCEPTED**; Phase
+    11C.1C-C-B-B remains **NEXT_ALLOWED / NOT_STARTED**;
+    every previously-closed phase entry in the Closed Phases
+    table is preserved verbatim.
+  - It does **NOT** change any Phase 1 safety flag
+    (`mode=paper`, `live_trading=False`, `right_tail=False`,
+    `llm=False`, `exchange_live_orders=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False` are unchanged).
+  - It does **NOT** authorise live trading, API keys, private
+    endpoints, DeepSeek trade decisions, real Telegram
+    outbound, AI Learning that decides trades, automatic
+    parameter optimisation, reinforcement learning that
+    drives trade decisions, Phase 11C.1C-C-B-B kickoff
+    bypassing the standard gate, or Phase 12.
+  - It does **NOT** authorise any new runtime behaviour and
+    does **NOT** modify any code under `app/`, `scripts/`,
+    `tests/`, or any runtime configuration.
+  - **Phase 12 remains FORBIDDEN.** Phase 12 continues to
+    require the Spec §41 Go/No-Go checklist; this governance
+    document does not initiate that path.
+
+For the full content, see
+`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`.

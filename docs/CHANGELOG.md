@@ -7,6 +7,162 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Architecture governance reference - AMA-RT Adaptive Market Operating System Governance (docs-only, guidance-only)
+
+**Type:** Architecture governance / docs-only / guidance-only.
+**Not** a phase transition. **Not** an acceptance record.
+**Not** a runtime change. **Not** a safety-flag change.
+**Not** a Phase 12 authorisation.
+
+A new architecture governance document has been added at
+`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md` ("AMA-RT
+Adaptive Market Operating System Governance / 自适应市场操作系统
+架构治理文档"). It records the long-term architecture
+principles for AMA-RT V1.4 — anti-AI-hallucination,
+anti-context-drift, anti-overfitting, anti-black-box-decision,
+and anti-AI-bypass-of-Risk-Engine — including:
+
+  - Core positioning (AMA-RT is an Adaptive Market Operating
+    System, not an auto-trading bot).
+  - Core philosophy (markets are dynamic adversarial systems;
+    fixed strategies decay; the system studies absorption /
+    liquidity / structure rather than raw price prediction).
+  - The AI authority boundary (allowed: market explanation,
+    narrative interpretation, regime interpretation,
+    structural anomaly explanation, replay / reflection
+    summarisation, evidence compression; forbidden: any order
+    placement / close / leverage / size / stop / target
+    modification, any bypass of the Risk Engine / Execution
+    FSM / Phase Gate, any real trade triggering, any
+    treatment of AI text as training fact).
+  - Stateless AI cognition (no chat-context-as-truth, no
+    self-training-from-self, no prior assistant response as
+    fact) and the fact-source priority order (exchange public
+    market data > `EventRepository` > replay / export >
+    structured reports > human-approved phase docs > AI text
+    as commentary only).
+  - The Truth Layer schema (price / volume / OI / funding /
+    spread / depth / liquidation / spot-perp divergence /
+    `candidate_first_seen` / MFE / MAE / `tail_label` / risk
+    rejection reason / `strategy_mode` / cluster context /
+    `report_id` / `opportunity_id` / `scan_batch_id`) and
+    its rules (AI judgements must cite Truth Layer fields; no
+    Truth Layer evidence ⇒ no claim of effectiveness).
+  - The Reality Check Layer (hard rules outrank AI explanation
+    and Strategy Selector output; downgrade / reject when
+    funding overheated / spread widened / depth collapsed /
+    spot volume falling / `late_chase_risk` high / data
+    stale or degraded / Risk Engine rejected).
+  - Anti-overfitting governance (no automatic loosening from
+    a small sample; no global rewrite from a single demon-coin
+    case; no leverage / size increase from sample fit; no
+    parameter optimisation from AI text labels; all changes
+    must pass the dataset sample-count gate / validation
+    quality gate / replay / paper-only shadow validation /
+    human review / Phase Gate approval).
+  - Feedback isolation (allowed learning targets: MFE / MAE /
+    `tail_label` / `fake_breakout` / `missed_tail` /
+    `late_chase_failure` / risk-rejection outcomes /
+    replay-verified results; forbidden learning targets: AI
+    narrative / AI confidence / prior speculative AI text /
+    Telegram copy / unverified subjective human evaluations).
+  - Architecture layers status table (Observation / Market
+    Intelligence / Regime Engine / Strategy Orchestrator /
+    Risk Allocation Engine / Execution FSM / Replay-
+    Verification / Truth Layer / Reality Check Layer) with
+    `trade_authority = NONE` recorded for every observation /
+    interpretation layer; the Risk Engine remains the single
+    trade-decision gate.
+  - Future backlog / not-implemented-yet table (Regime
+    Transition Prediction / Liquidity Intelligence / Market
+    Structure Memory / Narrative Acceleration / Social
+    Saturation / Bot Amplification / Cross-exchange Flow /
+    Lead-lag Relationships / Spot-perp Divergence /
+    Stablecoin Inflow / Iceberg-Spoof Detection /
+    Narrative-aware Cluster Taxonomy / AI Market Intelligence
+    Layer / AI Interpretation Sandbox / AI Reality Check
+    Scoring) — every item recorded as
+    `status = NOT_STARTED / FUTURE_RESEARCH` and
+    `trade_authority = NONE`.
+  - Explicit rejections (AI autonomous trading; AI direct
+    price prediction as trade authority; reinforcement
+    learning live trading; black-box parameter optimisation;
+    infinite auto-optimisation; AI bypassing Risk Engine; AI
+    modifying leverage / size / stop / target; direct Phase
+    12 jump).
+  - Link to current phase (Phase 11C paper-only, late stage:
+    `Phase 11C.1C-C-B-A = ACCEPTED`,
+    `Phase 11C.1C-C-B-B = NEXT_ALLOWED / NOT_STARTED`; the
+    document does **not** change any phase state and does
+    **not** authorise Phase 12).
+  - Safety boundary preserved verbatim (Phase 1 lock
+    unchanged: `mode=paper`, `live_trading=False`,
+    `right_tail=False`, `llm=False`,
+    `exchange_live_orders=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`; no Binance API key,
+    no Binance API secret, no signed endpoint, no account /
+    order / position / leverage / margin endpoint, no private
+    websocket, no listenKey, no DeepSeek trade decision, no
+    real Telegram outbound; **Phase 12 remains FORBIDDEN**).
+
+Companion guidance-only references (append-only, single
+section, no phase content rewritten) have been added to:
+
+  - `docs/PROJECT_STATUS.md` (under "Architecture governance
+    reference (guidance-only)")
+  - `docs/PHASE_GATE.md` (under "Architecture governance
+    reference (guidance-only)")
+
+The new document and its references are **guidance-only**:
+
+  - **No** runtime code change. No file under `app/`,
+    `scripts/`, `tests/`, configs (`app/config/`),
+    `app/risk/`, `app/execution/`, `app/learning/` (LLM-side),
+    Telegram surface, exchange surface, or any strategy
+    runtime is modified.
+  - **No** phase state change. Phase 11C.1C-C-B-A remains
+    **ACCEPTED**; Phase 11C.1C-C-B-B remains
+    **NEXT_ALLOWED / NOT_STARTED**; every previously-closed
+    phase entry is preserved verbatim.
+  - **No** safety-flag change. Every Phase 1 safety flag is
+    unchanged.
+  - **No** authorisation. The document does not authorise
+    live trading, API keys, private endpoints, DeepSeek trade
+    decisions, real Telegram outbound, AI Learning that
+    decides trades, automatic parameter optimisation,
+    reinforcement learning that drives trade decisions,
+    Phase 11C.1C-C-B-B kickoff bypassing the standard gate,
+    or Phase 12.
+  - **Phase 12 remains FORBIDDEN.**
+
+> **This is a docs-only governance reference. It does not
+> change runtime behaviour, does not change any phase state,
+> does not change any safety flag, and does not authorise
+> Phase 12.**
+
+#### Safety flags after this docs-only governance entry (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+---
+
 ### Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster Exposure Control Contracts
 
 **Version:** `1.4.0a11c.1c.c.b.a` - Phase 11C.1C-C-B-A. Tracks the

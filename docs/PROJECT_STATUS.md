@@ -766,3 +766,45 @@ acceptance path.
 | `--ws-first --dry-run` (default)          | In-process pump, deterministic synthetic messages, no socket, full event chain.                                        |
 | `--ws-first` (no `--dry-run`)             | Real `MultiTransportPublicWSManager` opening routed PUBLIC (`/public/stream`) + MARKET (`/market/stream`) endpoints. RC=2 if the factory cannot produce one - never silently falls back to REST. |
 | `--ws-disabled`                           | PR-A bootstrap-only REST path. Documented as **not** the Phase 11C.1B all-market demon-radar acceptance path.          |
+
+
+
+## Architecture governance reference (guidance-only)
+
+A new architecture governance document has been added at
+`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md` ("AMA-RT
+Adaptive Market Operating System Governance / 自适应市场操作系统
+架构治理文档"). It records the long-term architecture
+principles for AMA-RT V1.4 — anti-AI-hallucination,
+anti-context-drift, anti-overfitting, anti-black-box-decision,
+and anti-AI-bypass-of-Risk-Engine — including the AI authority
+boundary, stateless AI cognition rules, the Truth Layer + the
+Reality Check Layer, the anti-overfitting gate stack, the
+feedback isolation rules, the architecture-layer status table,
+the future-backlog status / `trade_authority` table, and the
+explicit rejections list.
+
+The new document is **guidance-only**:
+
+  - It does **NOT** change any current phase state. Phase
+    11C.1C-C-B-A remains **ACCEPTED**; Phase 11C.1C-C-B-B
+    remains **NEXT_ALLOWED / NOT_STARTED**.
+  - It does **NOT** change any Phase 1 safety flag
+    (`mode=paper`, `live_trading=False`, `right_tail=False`,
+    `llm=False`, `exchange_live_orders=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False` are unchanged).
+  - It does **NOT** authorise live trading, API keys, private
+    endpoints, DeepSeek trade decisions, real Telegram
+    outbound, AI Learning that decides trades, automatic
+    parameter optimisation that self-modifies the runtime
+    configuration, reinforcement learning that drives trade
+    decisions, Phase 11C.1C-C-B-B kickoff bypassing the
+    standard gate, or Phase 12.
+  - It does **NOT** authorise any new runtime behaviour and
+    does **NOT** modify any code under `app/`, `scripts/`,
+    `tests/`, or any runtime configuration.
+  - **Phase 12 remains FORBIDDEN.**
+
+For the full content, see
+`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`.
