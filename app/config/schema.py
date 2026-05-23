@@ -287,6 +287,87 @@ class MarketDataConfig(BaseModel):
         return value
 
 
+class LabelQueueRuntimeSection(BaseModel):
+    """Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime configuration.
+
+    Every threshold the runtime consumes lives here so the brief's
+    "thresholds must be configurable, not hard-coded" rule holds at
+    the YAML / boot layer too. Defaults match
+    :class:`app.adaptive.label_runtime.LabelQueueRuntimeConfig`.
+
+    Phase 11C.1C-C-A boundary - this section is paper / virtual only.
+    Nothing under it can flip a Phase 1 safety flag, open a socket,
+    or read a private API. The runner builds the runtime from this
+    section, but the runtime itself is read-only on settings.
+    """
+
+    enabled: bool = True
+    max_pending_records: int = 500
+    grace_period_seconds: int = 5 * 60
+    primary_window_for_tail_label: str = "5m"
+    window_seconds_map: dict[str, int] = Field(
+        default_factory=lambda: {
+            "5m": 300,
+            "15m": 900,
+            "30m": 1800,
+            "1h": 3600,
+            "4h": 14400,
+        }
+    )
+    strong_tail_min_r_multiple: float = 5.0
+    strong_tail_max_mae_pct: float = -0.04
+    moderate_tail_min_r_multiple: float = 3.0
+    weak_tail_min_r_multiple: float = 2.0
+    fake_breakout_min_mfe_pct: float = 0.03
+    fake_breakout_min_drawdown_after_mfe_pct: float = -0.02
+    fake_breakout_max_final_pct: float = 0.005
+    late_chase_failure_min_late_chase_risk: float = 60.0
+    late_chase_failure_max_mfe_pct: float = 0.005
+    dumped_min_mae_drop_pct: float = -0.05
+    dumped_max_mfe_pct: float = 0.01
+    stopped_before_tail_pct: float = -0.04
+    missed_tail_min_mfe_pct: float = 0.05
+
+    @field_validator("max_pending_records")
+    @classmethod
+    def _max_pending_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "label_queue_runtime.max_pending_records must be > 0"
+            )
+        return value
+
+    @field_validator("grace_period_seconds")
+    @classmethod
+    def _grace_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                "label_queue_runtime.grace_period_seconds must be >= 0"
+            )
+        return value
+
+    @field_validator("primary_window_for_tail_label")
+    @classmethod
+    def _primary_must_be_in_map(cls, value: str, info) -> str:
+        # Defer cross-field validation: the model_validator below runs
+        # AFTER both fields are populated.
+        return str(value)
+
+    @field_validator("window_seconds_map")
+    @classmethod
+    def _windows_positive(cls, value: dict[str, int]) -> dict[str, int]:
+        if not value:
+            raise ValueError(
+                "label_queue_runtime.window_seconds_map must not be empty"
+            )
+        for k, v in value.items():
+            if int(v) <= 0:
+                raise ValueError(
+                    f"label_queue_runtime.window_seconds_map[{k}] must be > 0"
+                )
+        return {str(k): int(v) for k, v in value.items()}
+
+
 class SafetyConfig(BaseModel):
     """Phase 11C - public-market safety guard rails.
 
@@ -343,6 +424,9 @@ class DefaultsConfig(BaseModel):
     capital: CapitalConfig = Field(default_factory=CapitalConfig)
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
+    label_queue_runtime: LabelQueueRuntimeSection = Field(
+        default_factory=LabelQueueRuntimeSection
+    )
 
 
 class RiskThresholds(BaseModel):

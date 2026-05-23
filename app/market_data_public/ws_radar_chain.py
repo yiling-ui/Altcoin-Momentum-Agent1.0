@@ -63,6 +63,7 @@ from app.adaptive import (
     build_adaptive_candidate_context,
     compute_runtime_calibration,
 )
+from app.adaptive.label_runtime import LabelQueueRuntime
 from app.core.clock import now_ms
 from app.core.enums import (
     AnomalyReasonTag,
@@ -139,6 +140,7 @@ class WSRadarChainDriver:
         event_repo: EventRepository,
         config_versions: ConfigVersions | None = None,
         candidate_pool=None,
+        label_queue_runtime: LabelQueueRuntime | None = None,
     ) -> None:
         self._risk = risk_engine
         self._event_repo = event_repo
@@ -150,6 +152,14 @@ class WSRadarChainDriver:
         # ``None`` keeps the existing 11C.1C-A unit tests working
         # without a pool.
         self._candidate_pool = candidate_pool
+        # Phase 11C.1C-C-A - optional label-tracking runtime. When
+        # supplied, the chain calls
+        # :meth:`LabelQueueRuntime.observe` after the
+        # ``LABEL_QUEUE_ENQUEUED`` event lands so the runtime can
+        # start a :class:`LabelTrackingRecord` and emit the
+        # ``LABEL_TRACKING_STARTED`` event. The runtime is paper /
+        # virtual only; it does NOT open a position.
+        self._label_queue_runtime = label_queue_runtime
         self._chain_count = 0
         self._risk_approved_count = 0
         self._risk_rejected_count = 0
@@ -233,6 +243,10 @@ class WSRadarChainDriver:
     @property
     def label_queue_enqueued_count(self) -> int:
         return self._label_queue_enqueued_count
+
+    @property
+    def label_queue_runtime(self) -> LabelQueueRuntime | None:
+        return self._label_queue_runtime
 
     def adaptive_metrics_payload(self) -> dict[str, Any]:
         """Return a JSON-safe dict of Phase 11C.1C-A adaptive metrics.
@@ -1100,13 +1114,34 @@ class WSRadarChainDriver:
             **identity_block,
             "label_queue": adaptive.label_queue.to_payload(),
         }
-        self._emit(
+        label_queue_event_id = self._emit(
             EventType.LABEL_QUEUE_ENQUEUED,
             symbol=symbol,
             timestamp=timestamp,
             payload=attach_learning_ready(label_payload, learning_context),
         )
         self._label_queue_enqueued_count += 1
+
+        # Phase 11C.1C-C-A - if a label-tracking runtime is wired in,
+        # start (or refresh) a :class:`LabelTrackingRecord` for this
+        # candidate. The runtime is paper / virtual; it does NOT open
+        # a position. We pass the LABEL_QUEUE_ENQUEUED event id so
+        # the LABEL_TRACKING_STARTED event can carry a deterministic
+        # cross-reference back to its source.
+        if self._label_queue_runtime is not None:
+            try:
+                self._label_queue_runtime.observe(
+                    adaptive=adaptive,
+                    source_event_id=str(label_queue_event_id or ""),
+                )
+            except Exception as exc:  # pragma: no cover - protective
+                logger.error(
+                    "[phase11c.1c-c-a] label runtime observe failed "
+                    "symbol={} opp={}: {}",
+                    symbol,
+                    adaptive.opportunity_id,
+                    exc,
+                )
 
     # ------------------------------------------------------------------
     # Event emission helpers
@@ -1118,17 +1153,17 @@ class WSRadarChainDriver:
         symbol: str,
         timestamp: int,
         payload: dict[str, Any],
-    ) -> None:
+    ) -> str | None:
         try:
-            self._event_repo.append(
-                Event(
-                    event_type=event_type,
-                    source_module=self.SOURCE_MODULE,
-                    symbol=symbol,
-                    timestamp=timestamp,
-                    payload=payload,
-                )
+            event = Event(
+                event_type=event_type,
+                source_module=self.SOURCE_MODULE,
+                symbol=symbol,
+                timestamp=timestamp,
+                payload=payload,
             )
+            self._event_repo.append(event)
+            return event.event_id
         except Exception as exc:  # pragma: no cover - protective
             logger.error(
                 "[phase11c.1b] failed to emit {} for {}: {}",
@@ -1136,6 +1171,7 @@ class WSRadarChainDriver:
                 symbol,
                 exc,
             )
+            return None
 
     def _emit_state_transition(
         self,

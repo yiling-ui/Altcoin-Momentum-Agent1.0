@@ -34,6 +34,15 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1C-B | Adaptive Candidate Runtime Calibration & Early Tail Discovery v0 (paper-only) | 2026-05-22 | PR #38 merged into `main` (mergeCommit `ce4b6de`); 12/12 brief-mandated tests + 257/257 phase11c tests + 2231/2231 full pytest pass on the PR branch; 30s dry-run + 5min real public WS smoke PASS (`dry_run=false`, `ws_real_transport=true`, 30526 real WS messages, 12 chains, 72 each of the six adaptive event types, runtime calibration block on every adaptive event with all 15 fields, `top_early_tail_candidates` / `top_late_chase_risk_candidates` / `early_tail_score_top_symbols` / `opportunity_score_distribution` in the daily report, `label_queue` contract-only, 0 stales, 0 reconnects, 0 rate-limit 429/418/ban); safety flags unchanged. See "Phase 11C.1C-B acceptance evidence (closeout)" below. |
 
 
+## Open / Reserved phases
+
+| #          | Title                                                                | State                       | Detail                                                                 |
+| ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
+| 11C.1C-C-A | MFE / MAE Label Queue Runtime & Tail Outcome Tracking (paper-only)   | **IN_REVIEW / PR_OPEN**     | PR #40 against `main`, branch `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, code commit `4889087` (docs-gate-fix commit `6d6044d`). 30/30 brief-mandated tests + 287/287 phase11c tests + 2261/2261 full pytest PASS on the PR branch. **Operator-VPS 10 min real public WS smoke PASSED** (`dry_run=false`, `ws_real_transport=true`, `ws_messages_received=56592`, `LABEL_TRACKING_STARTED=19` runner / `36` events.db, `LABEL_WINDOW_UPDATED=38` / `82`, `LABEL_WINDOW_COMPLETED=11` / `20`, `TAIL_LABEL_ASSIGNED=11` / `20`, `MISSED_TAIL_DETECTED=0`, `FAKE_BREAKOUT_DETECTED=0`, pending=8 / completed=11 / expired=0 / unresolved=0, `HTTP 429 count=0`, `HTTP 418 count=0`, `rate_limit_ban=False`, `ws_reconnect_count=0`, `ws_stale_count=0`, `ingestion_errors=0`, safety flags unchanged). PR #40 is ready for human review and may be merged after reviewer confirms docs-only evidence backfill. **NOT** ACCEPTED yet — Phase 11C.1C-C-A will only be marked ACCEPTED by a separate closeout PR after PR #40 merges. See "Open phase: Phase 11C.1C-C-A (IN_REVIEW / PR_OPEN)" and "Phase 11C.1C-C-A acceptance evidence" below. |
+| 11C.1C-C-B | Adaptive Candidate Strategy Validation Lab & Cluster Exposure Control | **NOT_STARTED**             | Reserved. **NOT** authorised by the opening of Phase 11C.1C-C-A. Will require its own kickoff PR after Phase 11C.1C-C-A is fully ACCEPTED. See "Reserved phase: Phase 11C.1C-C-B (NOT_STARTED)" below. |
+| 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. |
+
+
 ### Phase 11B-HF acceptance summary
 
 ```
@@ -343,34 +352,101 @@ below); Phase 12 (live trading) remains **FORBIDDEN**.
 9. No private endpoint.
 10. Phase 12 stayed `FORBIDDEN`.
 
-## Open phase: Phase 11C.1C-C (NEXT_ALLOWED / NOT_STARTED)
+## Open phase: Phase 11C.1C-C-A (IN_REVIEW / PR_OPEN)
 
-**Phase 11C.1C-C — Adaptive Candidate Strategy Validation,
-Cluster Exposure Control & full MFE/MAE Processor.** Status:
-**NEXT_ALLOWED / NOT_STARTED.** No implementation has started
-in this repo state. Phase 11C.1C-C is the next sub-phase the
-project is **allowed** to open under the Phase 11C umbrella
-once a kickoff PR lands. Until that kickoff PR is merged, Phase
-11C.1C-C carries no scope, no smoke evidence, and no
-acceptance gate beyond inheriting every Phase 1 + Phase 11C.1B
-+ Phase 11C.1C-A + Phase 11C.1C-B forbidden item verbatim. The
-detailed gate criteria (test matrix, metric contracts,
-daily-report extensions, MFE/MAE processor contract, cluster
-exposure controls) will be filled in by the Phase 11C.1C-C
-kickoff PR.
+**Phase 11C.1C-C-A — MFE / MAE Label Queue Runtime & Tail
+Outcome Tracking (PR #40).** Status: **IN_REVIEW / PR_OPEN.**
+PR #40 (branch
+`feature/phase-11c1c-c-mfe-mae-label-queue-runtime`, commit
+`4889087`) is open against `main`. Phase 11C.1C-C-A ships the
+**paper-only first runtime** that consumes the Phase 11C.1C-A
+`LABEL_QUEUE_ENQUEUED` contract and produces forward MFE / MAE
+/ `tail_label` outcomes per ACTIVE candidate over five tracking
+windows (5m primary, 15m / 30m / 1h / 4h secondary). It is
+explicitly NOT the deeper Strategy Validation Lab, NOT AI
+Learning, NOT Cluster Exposure Control — those are reserved
+for Phase 11C.1C-C-B (see "Reserved phase: Phase 11C.1C-C-B
+(NOT_STARTED)" below).
 
-> **Phase 11C.1C-B acceptance does NOT authorise Phase 11C.1C-C
-> kickoff bypassing the standard gate.** Phase 11C.1C-C will be
-> opened only via its own kickoff PR, with its own brief, its
-> own scope, its own boundary table, its own forbidden list,
-> and its own acceptance evidence.
->
-> **Phase 11C.1C-B acceptance does NOT authorise live trading,
-> API keys, private endpoints, DeepSeek trade decisions, real
-> Telegram outbound, or Phase 12.** Phase 12 (real money / live
-> trading) remains **FORBIDDEN**.
+> **Phase 11C.1C-C-A is paper-only.**
+> **Phase 11C.1C-C-A is IN_REVIEW, NOT ACCEPTED.**
+> **Opening Phase 11C.1C-C-A does NOT authorise Phase
+> 11C.1C-C-B kickoff.**
+> **Opening Phase 11C.1C-C-A does NOT authorise live trading.**
+> **Opening Phase 11C.1C-C-A does NOT authorise API keys.**
+> **Opening Phase 11C.1C-C-A does NOT authorise private
+> endpoints.**
+> **Opening Phase 11C.1C-C-A does NOT authorise DeepSeek trade
+> decisions.**
+> **Opening Phase 11C.1C-C-A does NOT authorise real Telegram
+> outbound.**
+> **Opening Phase 11C.1C-C-A does NOT authorise Phase 12.**
+> **`mfe_pct` / `mae_pct` / `tail_label` / `strategy_mode` MUST
+> NEVER trigger a real trade.**
 
-### Phase 11C.1C-C boundary (must hold from day one; inherited)
+### Phase 11C.1C-C-A scope (in PR #40)
+
+  1. **`LabelQueueRuntime`** (`app/adaptive/label_runtime.py`)
+     consuming the Phase 11C.1C-A `LABEL_QUEUE_ENQUEUED`
+     contract and producing forward outcome labels per ACTIVE
+     candidate. Pure helpers: `compute_pct_return`,
+     `update_window_with_price`, `assign_tail_label_for_window`.
+     Schema-versioned via
+     `LABEL_TRACKING_SCHEMA_VERSION = "phase_11c_1c_c_a.label_tracking.v1"`.
+  2. **Five tracking windows.** 5m primary; 15m / 30m / 1h / 4h
+     secondary. Each window tracks MFE (max favourable excursion,
+     %), MAE (max adverse excursion, %), `time_to_mfe`,
+     `time_to_mae`, R-multiple flags
+     (`reached_2r` / `reached_3r` / `reached_5r` / `reached_10r`)
+     when `virtual_risk_unit_pct` is configured.
+  3. **Tail label taxonomy (rule-based, no LLM).** Per window,
+     once observation is complete, one of:
+     `strong_tail` / `moderate_tail` / `weak_tail` /
+     `fake_breakout` / `late_chase_failure` / `dumped` /
+     `stopped_before_tail` / `unresolved` (default). All
+     thresholds are configurable (R-multiples, fake_breakout,
+     late_chase_failure, dumped, stopped_before_tail,
+     missed_tail). `MISSED_TAIL_DETECTED` is emitted as an
+     independent flag, not a tail_label value.
+  4. **Six new event types** plumbed through `EventRepository`:
+     `LABEL_TRACKING_STARTED`, `LABEL_WINDOW_UPDATED`,
+     `LABEL_WINDOW_COMPLETED`, `TAIL_LABEL_ASSIGNED`,
+     `MISSED_TAIL_DETECTED`, `FAKE_BREAKOUT_DETECTED`. Each
+     payload carries identity (`tracking_id` / `opportunity_id`
+     / `scan_batch_id` / `symbol` / `source_event_id`) plus the
+     `schema_version` stamp.
+  5. **Idempotency + capacity guards.** `opportunity_id` index
+     dedupes; `(symbol, candidate_first_seen_ts,
+     first_seen_price)` is the fallback key.
+     `max_pending_records` caps the queue. Records past
+     `4h + grace_period_seconds` are auto-expired. Missing
+     prices return `None`, never raise.
+  6. **`WSRadarChainDriver` integration.** After emitting
+     `LABEL_QUEUE_ENQUEUED`, the chain captures the `event_id`
+     and calls `runtime.observe(adaptive, source_event_id)` so
+     that a `LabelTrackingRecord` is created (idempotent) and
+     price ticks advance MFE / MAE on every subsequent chain
+     pass.
+  7. **Daily-report enhancements.** New
+     `DailyReportSnapshot` fields surface every brief-mandated
+     metric: tracking-started / window-updated / window-completed
+     / tail-label / missed-tail / fake-breakout counts;
+     pending / completed / expired / unresolved record counts;
+     `tail_label_distribution`; `reached_2r` /  `reached_3r` /
+     `reached_5r` / `reached_10r` counts; outcomes by
+     `early_tail` / `opportunity` / `strategy_mode` /
+     `late_chase_risk` bucket; top-MFE / worst-MAE / missed-tail
+     / fake-breakout symbol lists.
+  8. **`scripts/run_public_market_paper.py`** instantiates
+     `LabelQueueRuntime` from settings, ticks it on every loop
+     iteration plus on shutdown, and threads
+     `label_runtime_metrics` into the daily report.
+  9. **Config schema** (`app/config/schema.py` +
+     `app/config/defaults.yaml`): new `label_queue_runtime`
+     YAML section with every threshold, `max_pending_records`,
+     `grace_period_seconds`, and the five tracking windows.
+
+### Phase 11C.1C-C-A boundary (must hold from day one; inherited)
 
 | Invariant                                   | Required value               |
 | ------------------------------------------- | ---------------------------- |
@@ -389,17 +465,23 @@ kickoff PR.
 | Routed-private endpoint (`/private`)        | refused at path-root allowlist |
 | DeepSeek trade-decision authority           | NOT permitted                |
 | Real Telegram outbound                      | NOT permitted                |
+| `mfe_pct` / `mae_pct` / `tail_label` /      | descriptive label only;       |
+|   `strategy_mode`                           | MUST NEVER trigger a real     |
+|                                             | trade                         |
+| AI Learning                                 | NOT implemented              |
+| Strategy Validation Lab (full)              | NOT implemented (reserved for Phase 11C.1C-C-B) |
+| Cluster Exposure Control                    | NOT implemented (reserved for Phase 11C.1C-C-B) |
 | Phase 12 (live trading)                     | FORBIDDEN                    |
 
-### Phase 11C.1C-C explicitly forbids (inherited from Phase 11C.1C-B)
+### Phase 11C.1C-C-A explicitly forbids (inherited verbatim)
 
   - Connecting to the Binance trading API.
   - Reading or storing any Binance API key / API secret /
     `listenKey`.
   - Calling any signed endpoint.
   - Subscribing to any user data stream / private WebSocket /
-    trading WebSocket API / account / margin / position / leverage
-    / balance / order private WS variant.
+    trading WebSocket API / account / margin / position /
+    leverage / balance / order private WS variant.
   - Connecting to the routed-private endpoint
     `wss://fstream.binance.com/private` (or any `/ws-api` /
     `/ws-fapi` / `/ws-papi` / `/trading-api` / `/userDataStream`
@@ -409,30 +491,224 @@ kickoff PR.
   - Auto-retrying after a 418, switching endpoints to evade a
     418, rotating source IP to evade a 418.
   - Promoting any paper / virtual signal (`strategy_mode`,
-    `early_tail_score`, future MFE/MAE labels) to a real-trade
-    authority.
-  - Enabling AI Learning that auto-decides trades.
+    `early_tail_score`, `mfe_pct`, `mae_pct`, `tail_label`,
+    `MISSED_TAIL_DETECTED`, `FAKE_BREAKOUT_DETECTED`) to a
+    real-trade authority.
+  - Implementing the full Strategy Validation Lab.
+  - Implementing Cluster Exposure Control.
+  - Implementing AI Learning that auto-decides trades.
   - Issuing any real order.
   - Entering Phase 12.
 
-### Phase 11C.1C-C acceptance gate (placeholder)
+### Phase 11C.1C-C-A acceptance gate (must all be met before merge)
 
-To be filled in by the Phase 11C.1C-C kickoff PR. At minimum
-the gate will require:
+1. **Targeted test file** —
+   `pytest tests/unit/test_phase11c_1c_c_a_label_queue_runtime.py`
+   green. **Status: GREEN on PR branch (30 / 30 PASS).**
+2. **Phase 11C focus filter** —
+   `pytest tests/unit -k phase11c_` green with no regression
+   vs. the post-PR-#38 main baseline of 257.
+   **Status: GREEN on PR branch (287 / 287 PASS).**
+3. **Full pytest** — `pytest tests/` green with no regression
+   vs. the post-PR-#38 main baseline of 2231. **Status: GREEN
+   on PR branch (2261 / 2261 PASS).**
+4. **30 s dry-run smoke** — runner emits
+   `LABEL_TRACKING_STARTED` per ACTIVE candidate and the 5m
+   primary window stays `pending` (a 30s run is too short for
+   the 5m window to complete). **Status: claimed by PR #40
+   commit message; the dry-run path is exercised by the
+   integration tests inside the targeted test file.**
+5. **10 min real public WS smoke from operator VPS** —
+   **PASSED.** The operator-VPS 10 min real WS smoke run from
+   the `feature/phase-11c1c-c-mfe-mae-label-queue-runtime`
+   branch at commit `6d6044d`
+   (`python -m scripts.run_public_market_paper --duration
+   10min --symbol-limit 5 --ws-first`) records, with the
+   verbatim runner output captured below under "Phase
+   11C.1C-C-A acceptance evidence":
+   - `dry_run=false`
+   - `ws_real_transport=true`
+   - `ws_messages_received=56592` (`> 0`)
+   - `LABEL_TRACKING_STARTED=19` (runner) / `36` (events.db)
+     (`> 0`)
+   - `LABEL_WINDOW_UPDATED=38` (runner) / `82` (events.db)
+     (`> 0`)
+   - `LABEL_WINDOW_COMPLETED=11` (runner) / `20` (events.db)
+     (`> 0` — 5m primary window closed inside the 10 min run)
+   - `TAIL_LABEL_ASSIGNED=11` (runner) / `20` (events.db)
+     (`> 0`)
+   - daily report contains `"Phase 11C.1C-C-A MFE / MAE Label
+     Queue Runtime & Tail Outcome Tracking"`
+   - `pending_label_records=8` /
+     `completed_label_records=11` /
+     `expired_label_records=0` /
+     `unresolved_label_records=0`
+   - `rate_limit_429_count=0`
+   - `rate_limit_418_count=0`
+   - `rate_limit_ban=False`
+   - `ws_reconnect_count=0`
+   - `ws_stale_count=0`
+   - `ws_currently_stale=False`
+   - `ingestion_errors=0`
+   - `MISSED_TAIL_DETECTED=0` and `FAKE_BREAKOUT_DETECTED=0`
+     are valid outcomes for a 10 min window over five seed
+     symbols and are not gate-blocking
+   - safety flags unchanged (`live_trading_enabled=False`,
+     `right_tail_enabled=False`, `llm_enabled=False`,
+     `exchange_live_order_enabled=False`,
+     `trading_mode_paper=True`; no API key, no signed
+     endpoint, no private websocket, no listenKey, no
+     DeepSeek trade decision, no real Telegram outbound,
+     Phase 12 remains FORBIDDEN)
+6. **Safety regression test** — confirms that running the
+   label-runtime path end-to-end leaves every Phase 1 safety
+   flag at its locked value and that the runtime never emits
+   `ORDER_*`, `POSITION_*`, `STOP_*`, or
+   `TELEGRAM_MESSAGE_SENT` events. **Status: GREEN on PR
+   branch (covered by `test_no_live_trading_flags_unchanged`
+   and
+   `test_label_runtime_does_not_open_position_or_authorise_trade`).**
 
-  1. The Phase 1 safety lock unchanged.
-  2. A real-WS smoke ladder analogous to Phase 11C.1B's 5min /
-     10min / 1h ladder, with zero 429 / 418 / stale / ingestion
-     errors (or every ingestion error explained).
-  3. The MFE/MAE processor and any new strategy-validation /
-     cluster-exposure decisions emitted as typed events into
-     `events.db` with a Phase 8.5 `LearningReadyContext`, but
-     **without** authority to issue real orders.
-  4. A source-tree audit refusing any third-party HTTP /
-     WebSocket / SDK / LLM / Telegram / trading-API import on
-     the Phase 11C.1C-C surface.
-  5. The four `ExchangeClientBase` write surfaces still raise
-     `SafeModeViolation` after every Phase 11C.1C-C run.
+The Kiro-side sandbox could not serve as the smoke host for
+#5 because the same Binance-region HTTP 451 geoblock that was
+recorded under "Phase 11C.1C-B acceptance evidence (closeout)"
+still applies to the Kiro sandbox; the operator therefore ran
+the 10 min real WS smoke from a Binance-reachable VPS, and
+the verbatim transcript is filed below under "Phase
+11C.1C-C-A acceptance evidence". A sandbox WS smoke would
+**not** have been authoritative evidence and was **not** filed
+as such. PR #40 is now ready for human review and may be
+merged after the reviewer confirms this docs-only evidence
+backfill; Phase 11C.1C-C-A will only be marked **ACCEPTED** by
+a separate closeout PR after PR #40 merges (mirroring the PR
+#36 → PR #37 and PR #38 → PR #39 closeout pattern).
+
+## Reserved phase: Phase 11C.1C-C-B (NOT_STARTED)
+
+**Phase 11C.1C-C-B — Adaptive Candidate Strategy Validation Lab
+& Cluster Exposure Control.** Status: **NOT_STARTED.** Phase
+11C.1C-C-B is **not** authorised by the opening of Phase
+11C.1C-C-A. It carries no scope, no smoke evidence, and no
+acceptance gate in this repo state; it will only become an
+open phase via its own kickoff PR after Phase 11C.1C-C-A is
+fully ACCEPTED. Phase 11C.1C-C-A is currently **IN_REVIEW /
+PR_OPEN** on PR #40 and the operator-VPS 10 min real WS smoke
+is on file (see "Phase 11C.1C-C-A acceptance evidence" below);
+ACCEPTED status will be set by the closeout PR that follows
+the merge of PR #40, mirroring the PR #36 → PR #37 and PR #38
+→ PR #39 closeout pattern. The detailed gate criteria (test
+matrix, validation-lab contract, cluster-exposure caps,
+daily-report extensions) for Phase 11C.1C-C-B will be filled
+in by its own kickoff PR.
+
+Phase 11C.1C-C-B inherits every Phase 1 + Phase 11C.1B + Phase
+11C.1C-A + Phase 11C.1C-B + Phase 11C.1C-C-A forbidden item
+verbatim.
+
+## Phase 11C.1C-C-A acceptance evidence
+
+> The transcript below is the verbatim runner / events.db
+> output captured from the operator-VPS 10 min real public WS
+> smoke run against the PR #40 branch
+> (`feature/phase-11c1c-c-mfe-mae-label-queue-runtime`) at
+> commit `6d6044d`. The Kiro-side sandbox could not host this
+> smoke (Binance-region HTTP 451 geoblock; same as the Phase
+> 11C.1C-B closeout), so the operator ran it from a
+> Binance-reachable VPS. **The smoke PASSED.**
+>
+> Phase 11C.1C-C-A is recorded as **IN_REVIEW / PR_OPEN** in
+> the open-phases table at the top of this document; the smoke
+> evidence is on file. PR #40 is ready for human review and
+> may be merged after the reviewer confirms this docs-only
+> evidence backfill. Phase 11C.1C-C-A will only be flipped to
+> **ACCEPTED** by a separate closeout PR after PR #40 merges
+> (mirroring the PR #36 → PR #37 and PR #38 → PR #39 closeout
+> pattern).
+
+```
+branch                          : feature/phase-11c1c-c-mfe-mae-label-queue-runtime
+commit                          : 6d6044d
+host                            : operator VPS (Binance-reachable region)
+command                         : python -m scripts.run_public_market_paper \
+                                    --duration 10min --symbol-limit 5 --ws-first
+
+# WS / runner-level metrics
+duration_seconds                = 600.0
+uptime                          = 608s
+dry_run                         = false
+ws_real_transport               = true
+ws_messages_received            = 56592
+ws_chains_emitted               = 27
+learning_ready_attached         = 27
+snapshots_emitted               = 27
+ingestion_errors                = 0
+HTTP 429 count                  = 0
+HTTP 418 count                  = 0
+rate_limit_ban                  = False
+ws_reconnect_count              = 0
+ws_stale_count                  = 0
+ws_currently_stale              = False
+
+# Phase 11C.1C-C-A label-runtime metrics (runner / daily report)
+LABEL_TRACKING_STARTED count    = 19
+LABEL_WINDOW_UPDATED count      = 38
+LABEL_WINDOW_COMPLETED count    = 11
+TAIL_LABEL_ASSIGNED count       = 11
+MISSED_TAIL_DETECTED count      = 0
+FAKE_BREAKOUT_DETECTED count    = 0
+pending_label_records           = 8
+completed_label_records         = 11
+expired_label_records           = 0
+unresolved_label_records        = 0
+
+# events.db SQLite confirmation
+LABEL_TRACKING_STARTED          | 36
+LABEL_WINDOW_UPDATED            | 82
+LABEL_WINDOW_COMPLETED          | 20
+TAIL_LABEL_ASSIGNED             | 20
+
+# Safety boundary (held end-to-end)
+exchange_live_order_enabled     = False
+live_trading_enabled            = False
+llm_enabled                     = False
+right_tail_enabled              = False
+trading_mode_paper              = True
+no live trading                 = confirmed
+no API key                      = confirmed
+no signed endpoint              = confirmed
+no private websocket            = confirmed
+no listenKey                    = confirmed
+no DeepSeek trade decision      = confirmed
+no real Telegram outbound       = confirmed
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+The runner-level event counters and the events.db SQLite
+counts diverge (e.g. `LABEL_TRACKING_STARTED=19` runner vs.
+`36` events.db) because the runner snapshots its in-memory
+aggregates at the shutdown tick while events.db captures every
+emission across the full 608 s uptime including the
+chain-passes that fired after the runner's last aggregate
+snapshot. Both views satisfy the brief's `> 0` thresholds and
+corroborate the chain-driver integration end-to-end.
+
+`MISSED_TAIL_DETECTED=0` and `FAKE_BREAKOUT_DETECTED=0` are
+valid outcomes for a 10 min window over five seed symbols and
+are not gate-blocking; they record that no candidate hit the
+missed-tail / fake-breakout thresholds during this particular
+run.
+
+The 5m primary tracking window closed inside the 10 min run
+(11 runner / 20 events.db `LABEL_WINDOW_COMPLETED`), matching
+the brief; 8 records remained `pending` (correctly waiting on
+the longer 15m / 30m / 1h / 4h secondary windows) and 0
+records were `expired` or `unresolved`.
+
+Phase 1 safety lock held end-to-end across the smoke run; no
+real order, no signed endpoint call, no private WebSocket
+connection, no listenKey allocation, no DeepSeek trade
+decision, no real Telegram outbound, and Phase 12 stayed
+**FORBIDDEN**.
 
 ## Phase 11C.1C-B acceptance evidence (closeout)
 

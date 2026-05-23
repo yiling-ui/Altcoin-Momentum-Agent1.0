@@ -121,3 +121,41 @@ safety:
   forbid_right_tail: true
   forbid_llm_trade_decisions: true
   forbid_telegram_outbound: true
+
+
+label_queue_runtime:
+  # Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime & Tail Outcome
+  # Tracking. The runtime starts a paper / virtual label-tracking
+  # record per ACTIVE candidate, advances per-window MFE / MAE on
+  # every fresh price tick, and assigns a rule-based tail label when
+  # each window completes.
+  #
+  # Phase 11C.1C-C-A boundary: this section is paper / virtual only.
+  # Nothing under it can flip a Phase 1 safety flag, open a private
+  # API socket, or call an LLM / Telegram outbound. Strategy
+  # validation conclusions are reserved for the future Strategy
+  # Validation Lab.
+  enabled: true
+  max_pending_records: 500
+  grace_period_seconds: 300                  # 5 min after the 4h window
+  primary_window_for_tail_label: "5m"
+  window_seconds_map:
+    "5m": 300
+    "15m": 900
+    "30m": 1800
+    "1h": 3600
+    "4h": 14400
+  # Tail-label thresholds (configurable; rule-based; no LLM).
+  strong_tail_min_r_multiple: 5.0
+  strong_tail_max_mae_pct: -0.04
+  moderate_tail_min_r_multiple: 3.0
+  weak_tail_min_r_multiple: 2.0
+  fake_breakout_min_mfe_pct: 0.03
+  fake_breakout_min_drawdown_after_mfe_pct: -0.02
+  fake_breakout_max_final_pct: 0.005
+  late_chase_failure_min_late_chase_risk: 60.0
+  late_chase_failure_max_mfe_pct: 0.005
+  dumped_min_mae_drop_pct: -0.05
+  dumped_max_mfe_pct: 0.01
+  stopped_before_tail_pct: -0.04
+  missed_tail_min_mfe_pct: 0.05

@@ -405,6 +405,19 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "STRATEGY_MODE_SELECTED",
         "CLUSTER_CONTEXT_ATTACHED",
         "LABEL_QUEUE_ENQUEUED",
+        # Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime + tail
+        # outcome tracking. Emission lives in
+        # app/adaptive/label_runtime.py; the paper_run daily-report
+        # builder counts these events as a cross-check against the
+        # runtime's runner-side ``metrics_payload``. None of these
+        # events authorise a real trade; the runtime is paper /
+        # virtual only.
+        "LABEL_TRACKING_STARTED",
+        "LABEL_WINDOW_UPDATED",
+        "LABEL_WINDOW_COMPLETED",
+        "TAIL_LABEL_ASSIGNED",
+        "MISSED_TAIL_DETECTED",
+        "FAKE_BREAKOUT_DETECTED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (
