@@ -347,6 +347,51 @@ class EventType(str, Enum):
     CLUSTER_EXPOSURE_ASSESSED = "CLUSTER_EXPOSURE_ASSESSED"
     CLUSTER_LEADER_VALIDATED = "CLUSTER_LEADER_VALIDATED"
 
+    # ---- Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder &
+    # Quality Gate v0. The Phase 11C.1C-C-B-B-A runtime turns the
+    # Phase 11C.1C-C-B-A :class:`StrategyValidationSample` artefacts
+    # into a dataset that is exportable, replayable, and auditable.
+    # The first version of the quality gate is a *sample trust*
+    # gate, not a *strategy quality* gate; it does NOT judge whether
+    # the strategy is profitable.
+    #
+    # Phase 11C.1C-C-B-B-A boundary:
+    # - Every event below is paper / report only. None of them
+    #   authorises a real trade, modifies a real position, or flips
+    #   a Phase 1 safety flag.
+    # - The ``gate_status`` carried by
+    #   ``STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED`` is a
+    #   *descriptive* label - one of ``pass`` / ``warn`` / ``fail``.
+    #   It is NEVER an input to a trade-decision pipeline; the Risk
+    #   Engine remains the single trade-decision gate.
+    # - Every payload carries ``schema_version`` so future PRs can
+    #   extend the shape; old events without the v0 sub-block remain
+    #   replayable verbatim.
+    #
+    #   STRATEGY_VALIDATION_DATASET_BUILT          - one
+    #     :class:`StrategyValidationDataset` was assembled from the
+    #     most recent :class:`StrategyValidationReport`. The payload
+    #     carries the dataset summary + record count + every
+    #     brief-mandated identity field.
+    #   STRATEGY_VALIDATION_DATASET_EXPORTED       - the dataset
+    #     payload was successfully serialised through
+    #     ``export_validation_dataset_payload`` (paper / report only;
+    #     no Telegram outbound, no real upload). The payload is
+    #     descriptive: a downstream auditor can replay the dataset
+    #     by feeding the export bundle's events.jsonl through
+    #     ``load_validation_dataset_payload``.
+    #   STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED - the quality
+    #     gate v0 produced a ``gate_status`` of ``pass`` / ``warn``
+    #     / ``fail`` plus the diagnostic reasons. The result is
+    #     descriptive only and MUST NEVER trigger a real trade.
+    STRATEGY_VALIDATION_DATASET_BUILT = "STRATEGY_VALIDATION_DATASET_BUILT"
+    STRATEGY_VALIDATION_DATASET_EXPORTED = (
+        "STRATEGY_VALIDATION_DATASET_EXPORTED"
+    )
+    STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED = (
+        "STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED"
+    )
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

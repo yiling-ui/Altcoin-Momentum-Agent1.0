@@ -258,6 +258,29 @@ class DailyReportSnapshot:
         default_factory=list
     )
     strategy_validation_metrics: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder &
+    # Quality Gate v0. The runner passes the
+    # :meth:`StrategyValidationRuntime.metrics_payload` dict through
+    # ``strategy_validation_metrics``; the dataset / gate sub-block
+    # below is read from that dict. Every value is paper / report
+    # only - the ``validation_quality_gate_status`` is a descriptive
+    # label and **MUST NEVER trigger a real trade**; the Risk Engine
+    # remains the single trade-decision gate.
+    validation_dataset_built_count: int = 0
+    validation_dataset_exported_count: int = 0
+    validation_quality_gate_evaluated_count: int = 0
+    validation_dataset_records: int = 0
+    validation_dataset_symbols: list[str] = field(default_factory=list)
+    validation_dataset_tail_label_counts: dict[str, int] = field(
+        default_factory=dict
+    )
+    validation_quality_gate_status: str = ""
+    validation_quality_gate_reasons: list[str] = field(default_factory=list)
+    validation_dataset_export_ready: bool = False
+    validation_dataset_replay_ready: bool = False
+    validation_quality_gate_result: dict[str, Any] = field(
+        default_factory=dict
+    )
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -511,6 +534,40 @@ class DailyReportSnapshot:
             ),
             "strategy_validation_metrics": dict(
                 self.strategy_validation_metrics
+            ),
+            # Phase 11C.1C-C-B-B-A dataset / quality-gate fields.
+            "validation_dataset_built_count": int(
+                self.validation_dataset_built_count
+            ),
+            "validation_dataset_exported_count": int(
+                self.validation_dataset_exported_count
+            ),
+            "validation_quality_gate_evaluated_count": int(
+                self.validation_quality_gate_evaluated_count
+            ),
+            "validation_dataset_records": int(
+                self.validation_dataset_records
+            ),
+            "validation_dataset_symbols": list(
+                self.validation_dataset_symbols
+            ),
+            "validation_dataset_tail_label_counts": dict(
+                self.validation_dataset_tail_label_counts
+            ),
+            "validation_quality_gate_status": str(
+                self.validation_quality_gate_status
+            ),
+            "validation_quality_gate_reasons": list(
+                self.validation_quality_gate_reasons
+            ),
+            "validation_dataset_export_ready": bool(
+                self.validation_dataset_export_ready
+            ),
+            "validation_dataset_replay_ready": bool(
+                self.validation_dataset_replay_ready
+            ),
+            "validation_quality_gate_result": dict(
+                self.validation_quality_gate_result
             ),
         }
 
@@ -1532,6 +1589,105 @@ class DailyReportBuilder:
             strategy_validation_metrics=dict(
                 strategy_validation_metrics or {}
             ),
+            # Phase 11C.1C-C-B-B-A - dataset / quality-gate sub-block
+            # read off the runtime metrics payload. Event-log counts
+            # of the three new event types are used as the
+            # cross-check / fall-back so a stale runner counter
+            # cannot under-report a real dataset / gate event.
+            validation_dataset_built_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "validation_dataset_built_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_VALIDATION_DATASET_BUILT.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            validation_dataset_exported_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "validation_dataset_exported_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_VALIDATION_DATASET_EXPORTED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            validation_quality_gate_evaluated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "validation_quality_gate_evaluated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            validation_dataset_records=int(
+                (strategy_validation_metrics or {}).get(
+                    "validation_dataset_records", 0
+                )
+                or 0
+            ),
+            validation_dataset_symbols=list(
+                (strategy_validation_metrics or {}).get(
+                    "validation_dataset_symbols", []
+                )
+                or []
+            ),
+            validation_dataset_tail_label_counts=dict(
+                (strategy_validation_metrics or {}).get(
+                    "validation_dataset_tail_label_counts", {}
+                )
+                or {}
+            ),
+            validation_quality_gate_status=str(
+                (strategy_validation_metrics or {}).get(
+                    "validation_quality_gate_status", ""
+                )
+                or ""
+            ),
+            validation_quality_gate_reasons=list(
+                (strategy_validation_metrics or {}).get(
+                    "validation_quality_gate_reasons", []
+                )
+                or []
+            ),
+            validation_dataset_export_ready=bool(
+                (strategy_validation_metrics or {}).get(
+                    "validation_dataset_export_ready", False
+                )
+            ),
+            validation_dataset_replay_ready=bool(
+                (strategy_validation_metrics or {}).get(
+                    "validation_dataset_replay_ready", False
+                )
+            ),
+            validation_quality_gate_result=dict(
+                (strategy_validation_metrics or {}).get(
+                    "validation_quality_gate_result", {}
+                )
+                or {}
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -2025,6 +2181,61 @@ class DailyReportBuilder:
                 "Lab v0 report)"
             )
 
+        # ---- Phase 11C.1C-C-B-B-A Strategy Validation Dataset
+        # Builder & Quality Gate v0. Paper / report only. The
+        # ``validation_quality_gate_status`` is a *descriptive*
+        # label (one of ``pass`` / ``warn`` / ``fail``) and **MUST
+        # NEVER trigger a real trade**; the Risk Engine remains the
+        # single trade-decision gate.
+        sv_dataset_block = (
+            f"- STRATEGY_VALIDATION_DATASET_BUILT count: "
+            f"**{snapshot.validation_dataset_built_count}**\n"
+            f"- STRATEGY_VALIDATION_DATASET_EXPORTED count: "
+            f"**{snapshot.validation_dataset_exported_count}**\n"
+            f"- STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED count: "
+            f"**{snapshot.validation_quality_gate_evaluated_count}**\n"
+            f"- Validation dataset records: "
+            f"**{snapshot.validation_dataset_records}**\n"
+            f"- Validation dataset symbols: "
+            f"**{len(snapshot.validation_dataset_symbols)}**\n"
+            f"- Quality gate status: "
+            f"**{snapshot.validation_quality_gate_status or '(not evaluated)'}**\n"
+            f"- Validation dataset export ready: "
+            f"**{snapshot.validation_dataset_export_ready}**\n"
+            f"- Validation dataset replay ready: "
+            f"**{snapshot.validation_dataset_replay_ready}**\n"
+        )
+        if snapshot.validation_dataset_tail_label_counts:
+            sv_dataset_tail_lines = "\n".join(
+                f"- `{label}` x {int(count)}"
+                for label, count in sorted(
+                    snapshot.validation_dataset_tail_label_counts.items(),
+                    key=lambda r: (-int(r[1]), str(r[0])),
+                )
+            )
+        else:
+            sv_dataset_tail_lines = (
+                "- (no validation dataset tail labels in this window)"
+            )
+        if snapshot.validation_dataset_symbols:
+            sv_dataset_symbol_lines = "\n".join(
+                f"- `{s}`"
+                for s in snapshot.validation_dataset_symbols[:20]
+            )
+        else:
+            sv_dataset_symbol_lines = (
+                "- (no validation dataset symbols in this window)"
+            )
+        if snapshot.validation_quality_gate_reasons:
+            sv_dataset_reason_lines = "\n".join(
+                f"- `{r}`"
+                for r in snapshot.validation_quality_gate_reasons
+            )
+        else:
+            sv_dataset_reason_lines = (
+                "- (no quality gate reasons in this window)"
+            )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -2156,6 +2367,24 @@ class DailyReportBuilder:
             f"### Cluster exposure assessments\n{sv_cluster_lines}\n\n"
             f"### Cluster leader validation\n{sv_leader_lines}\n\n"
             f"### Flagged findings\n{sv_findings_lines}\n\n"
+            f"## Phase 11C.1C-C-B-B-A Strategy Validation Dataset "
+            f"Builder & Quality Gate v0\n"
+            f"_Strategy Validation Dataset / Quality Gate v0 sub-blocks "
+            f"are paper / report only. The "
+            f"`validation_quality_gate_status` is a **descriptive** "
+            f"label (one of `pass` / `warn` / `fail`) and **MUST NEVER "
+            f"trigger a real trade**. The Risk Engine remains the "
+            f"single trade-decision gate. This is **NOT** the complete "
+            f"Strategy Validation Lab follow-up (Phase 11C.1C-C-B-B-B), "
+            f"**NOT** AI Learning, and **NOT** automatic parameter "
+            f"optimisation; Phase 12 remains FORBIDDEN._\n\n"
+            f"{sv_dataset_block}\n"
+            f"### Validation dataset symbols\n"
+            f"{sv_dataset_symbol_lines}\n\n"
+            f"### Validation dataset tail label counts\n"
+            f"{sv_dataset_tail_lines}\n\n"
+            f"### Validation quality gate reasons\n"
+            f"{sv_dataset_reason_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"
