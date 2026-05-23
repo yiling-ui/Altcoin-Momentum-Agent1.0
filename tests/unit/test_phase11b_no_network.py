@@ -418,6 +418,24 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "TAIL_LABEL_ASSIGNED",
         "MISSED_TAIL_DETECTED",
         "FAKE_BREAKOUT_DETECTED",
+        # Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster
+        # Exposure Control Contracts. Emission lives in
+        # app/adaptive/strategy_validation_runtime.py; the paper_run
+        # daily-report builder counts these events as a cross-check
+        # against the runtime's runner-side ``metrics_payload``.
+        # None of these events authorise a real trade; the runtime
+        # is paper / report only and the
+        # ``suggested_cluster_action`` field is descriptive
+        # (``leader_only`` / ``observe_followers`` /
+        # ``reject_cluster`` / ``no_action``). The Risk Engine
+        # remains the single trade-decision gate.
+        "STRATEGY_VALIDATION_SAMPLE_CREATED",
+        "STRATEGY_VALIDATION_REPORT_GENERATED",
+        "STRATEGY_MODE_VALIDATED",
+        "CANDIDATE_STAGE_VALIDATED",
+        "SCORE_BUCKET_VALIDATED",
+        "CLUSTER_EXPOSURE_ASSESSED",
+        "CLUSTER_LEADER_VALIDATED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (

@@ -90,6 +90,11 @@ class Settings:
         return self.defaults.label_queue_runtime
 
     @property
+    def strategy_validation(self):
+        """Phase 11C.1C-C-B-A - Strategy Validation Lab v0 config."""
+        return self.defaults.strategy_validation
+
+    @property
     def telegram_outbound_enabled(self) -> bool:
         """Phase 11C real-outbound gate.
 

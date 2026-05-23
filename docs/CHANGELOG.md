@@ -7,6 +7,265 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster Exposure Control Contracts
+
+**Version:** `1.4.0a11c.1c.c.b.a` - Phase 11C.1C-C-B-A. Tracks the
+**paper / report-only first slice** of the deeper Phase 11C.1C-C-B
+Strategy Validation Lab work. Ships the data contracts + pure
+aggregators + the runtime that emits the seven new typed events so
+a human reviewer can audit `early_tail_score` /
+`opportunity_score` / `strategy_mode` / `candidate_stage` /
+cluster-leader behaviour against the Phase 11C.1C-C-A forward
+MFE / MAE / `tail_label` outcomes.
+
+> **Status: IN_REVIEW (PR #42 open).** **NOT** ACCEPTED yet.
+> **NOT** live trading. **NOT** AI Learning. **NOT** the
+> complete Strategy Validation Lab. **NOT** automatic
+> parameter optimisation. **NOT** Phase 12.
+>
+> Phase 11C.1C-C-A — *MFE / MAE Label Queue Runtime & Tail
+> Outcome Tracking* — merged on 2026-05-23 (PR #40,
+> mergeCommit `75d3c7c`) and is the gating predecessor.
+> Phase 11C.1C-C-B-A is the **first slice** of the deeper
+> Phase 11C.1C-C-B Strategy Validation Lab work; it ships
+> only the contracts + aggregators + runtime that emit the
+> seven typed events.
+>
+> **Operator-VPS 10 min real public WS smoke PASSED.** The
+> operator ran the smoke from a Binance-reachable VPS
+> against the PR #42 head (commit `0bedcce`) and the
+> verbatim transcript + the authoritative SQLite event-count
+> query are filed under `docs/PHASE_GATE.md` §"Phase
+> 11C.1C-C-B-A acceptance evidence (operator-VPS 10 min real
+> public WS smoke PASSED)" and `docs/PR42_DESCRIPTION.md`
+> §"Real WS smoke (operator-VPS 10 min, PASSED)". The Kiro
+> sandbox could not host this smoke (Binance-region HTTP
+> 451 geoblock — historical context only, not the current
+> blocker; same as the Phase 11C.1C-B / Phase 11C.1C-C-A
+> closeouts), so the operator ran it from a Binance-reachable
+> VPS, mirroring the Phase 11C.1C-C-A closeout pattern.
+> **PR #42 is ready for human review and may be merged after
+> reviewer confirms the docs-only evidence backfill;** Phase
+> 11C.1C-C-B-A flips to ACCEPTED only after PR #42 merges,
+> via the standard docs-only closeout PR (mirroring PR #36 →
+> PR #37, PR #38 → PR #39, PR #40 → PR #41); this docs-only
+> evidence backfill does **not** self-flip the phase to
+> ACCEPTED. Phase 11C.1C-C-B-B remains **NOT_STARTED**;
+> Phase 12 remains **FORBIDDEN**.
+
+#### Phase 11C.1C-C-B-A scope
+
+  - **Strategy Validation Lab v0 contracts**
+    (`app/adaptive/strategy_validation.py`):
+    `StrategyValidationSample`,
+    `StrategyValidationWindowStats`,
+    `StrategyModeValidationStats`,
+    `CandidateStageValidationStats`,
+    `OpportunityScoreBucketStats`,
+    `EarlyTailScoreBucketStats`,
+    `TailLabelDistribution`,
+    `ClusterLeaderValidationStats`,
+    `ClusterExposureAssessment`,
+    `StrategyValidationReport`. Schema version
+    `phase_11c_1c_c_b_a.strategy_validation.v1`.
+  - **Pure aggregators**:
+    `build_strategy_validation_sample`,
+    `aggregate_by_strategy_mode`,
+    `aggregate_by_candidate_stage`,
+    `aggregate_by_opportunity_score_bucket`,
+    `aggregate_by_early_tail_score_bucket`,
+    `aggregate_tail_label_distribution`,
+    `evaluate_cluster_leader_performance`,
+    `assess_cluster_exposure`,
+    `build_strategy_validation_report`.
+  - **Runtime**
+    (`app/adaptive/strategy_validation_runtime.py`):
+    `StrategyValidationRuntimeConfig` (every threshold
+    configurable) + `StrategyValidationRuntime` (idempotent
+    per `opportunity_id`).
+  - **Seven new event types**:
+    `STRATEGY_VALIDATION_SAMPLE_CREATED`,
+    `STRATEGY_VALIDATION_REPORT_GENERATED`,
+    `STRATEGY_MODE_VALIDATED`,
+    `CANDIDATE_STAGE_VALIDATED`,
+    `SCORE_BUCKET_VALIDATED`,
+    `CLUSTER_EXPOSURE_ASSESSED`,
+    `CLUSTER_LEADER_VALIDATED`. Every payload carries
+    `schema_version` + identity + the four versioning fields.
+  - **Wiring**: `WSRadarChainDriver` accepts a
+    `strategy_validation_runtime` kwarg and calls
+    `runtime.observe_label_record(...)` after the Phase
+    11C.1C-C-A `LabelQueueRuntime.observe(...)` returns the
+    `LabelTrackingRecord`.
+    `scripts/run_public_market_paper.py` instantiates the
+    runtime from `settings.strategy_validation`, snapshots
+    metrics on every loop tick, and
+    `flush_report(emit_events=True)` on shutdown.
+  - **Daily-report enhancements**: new section
+    `## Phase 11C.1C-C-B-A Strategy Validation Lab v0 &
+    Cluster Exposure Control Contracts` with paper / report-only
+    boundary preamble, headline counts, per-mode / per-stage /
+    per-bucket cohort lines, tail label distribution, top
+    symbols, cluster exposure assessments (showing
+    `suggested_cluster_action`), cluster leader validation, and
+    flagged findings.
+  - **Configuration**: `StrategyValidationSection` Pydantic
+    schema; `strategy_validation:` block in
+    `app/config/defaults.yaml`; `Settings.strategy_validation`
+    accessor.
+  - **Score buckets**: `opportunity_score`
+    `0-49 / 50-64 / 65-79 / 80-100`; `early_tail_score`
+    `0-24 / 25-49 / 50-74 / 75-100`.
+  - **Cluster actions** (paper / report only):
+    `leader_only` / `observe_followers` / `reject_cluster` /
+    `no_action`. **MUST NEVER trigger a real trade.**
+
+#### Phase 11C.1C-C-B-A boundary
+
+  - `mode = paper`, `live_trading = False`,
+    `exchange_live_orders = False`, `right_tail = False`,
+    `llm = False`, `telegram_outbound_enabled = False`,
+    `binance_private_api_enabled = False`. Phase 1 safety lock
+    unchanged.
+  - **NO** Binance API key / secret. **NO** signed endpoint /
+    private WS / `listenKey`. **NO** account / order / position
+    / leverage / margin endpoint. **NO** DeepSeek trade
+    decision. **NO** real Telegram outbound.
+  - **NOT** real trading. **NOT** live trading. **NOT** an
+    LLM / AI deciding direction / position size / leverage /
+    stop / target / execution. **NOT** automatic parameter
+    optimisation. **NOT** reinforcement learning. **NOT** a
+    validation result triggering a real order. **NOT** the
+    complete Strategy Validation Lab. **NOT** Phase 12.
+
+#### Phase 11C.1C-C-B-A tests
+
+  - `tests/unit/test_phase11c_1c_c_b_strategy_validation.py`
+    (NEW, 25 tests) — covers: sample creation; runtime
+    sample-created event emission with idempotency; cohort
+    aggregators (with `observe` + `reject` cohorts); candidate
+    stage aggregator (with `dumped`); opportunity / early-tail
+    score buckets; tail-label distribution; cluster leader
+    validation; cluster exposure (`leader_only`,
+    `observe_followers`, `reject_cluster`, `no_action`);
+    `dumped` is not a long opportunity; empty report;
+    `observe` / `reject` validated without trade authorisation;
+    chain wiring; flush_report emits all seven event types;
+    daily report contains metrics; events exportable; replay
+    reads new events; replay handles missing
+    `schema_version`; safety boundary; `phase_12_remains_forbidden`;
+    runtime disabled returns None; max_samples capacity bounded.
+  - `tests/unit/test_phase11b_no_network.py` allow-list
+    updated with the seven new event types.
+  - **Test counts**: 25/25 new tests PASS, 312/312 phase11c\_
+    tests PASS (287 baseline + 25 new), 2286/2286 full pytest
+    PASS (2261 baseline + 25 new). No regression vs. post-PR-#41
+    main baseline.
+
+#### Phase 11C.1C-C-B-A acceptance gate
+
+  - `python -m pytest tests/unit/test_phase11c_1c_c_b_strategy_validation.py -q`
+    → 25/25 PASS.
+  - `python -m pytest tests/unit/ -k "phase11c_" -q`
+    → 312/312 PASS.
+  - `python -m pytest tests/ -q`
+    → 2286/2286 PASS.
+  - **30 s dry-run smoke is contract-only** (the smallest Phase
+    11C.1C-C-A tracking window is 5 min; a 30 s dry-run cannot
+    complete the primary window). The runner explicitly logs an
+    "empty Strategy Validation Lab v0 report" line when the
+    sample buffer is empty so the daily-report section still
+    renders correctly.
+  - **Operator-VPS 10 min real public WS smoke PASSED** on
+    2026-05-23 against the PR #42 head (commit `0bedcce`,
+    branch
+    `feature/phase-11c1c-c-b-strategy-validation-cluster-control`).
+    Command actually used:
+
+        ```
+        python -m scripts.run_public_market_paper \
+            --duration 10min \
+            --symbol-limit 5 \
+            --ws-first
+        ```
+
+    > Note: the runner does **not** support `--emit-banner`. The
+    > banner is emitted by default; pass `--no-banner` to
+    > suppress.
+
+    Headline runner numerics: `duration_seconds=600.0`,
+    `uptime=611s`, `dry_run=false`, `ws_real_transport=true`,
+    `ws_messages_received=76324`, `ws_chains_emitted=27`,
+    `learning_ready_attached=27`, `snapshots_emitted=27`,
+    `ingestion_errors=0`, `HTTP 429 count=0`,
+    `HTTP 418 count=0`, `rate_limit_ban=False`,
+    `ws_reconnect_count=0`, `ws_stale_count=0`,
+    `ws_currently_stale=False`.
+
+    Authoritative SQLite event-count query
+    (`SELECT event_type, COUNT(*) FROM events GROUP BY event_type;`,
+    captured **after** shutdown flush):
+    `STRATEGY_VALIDATION_SAMPLE_CREATED=24`,
+    `STRATEGY_VALIDATION_REPORT_GENERATED=1`,
+    `STRATEGY_MODE_VALIDATED=4`,
+    `CANDIDATE_STAGE_VALIDATED=5`,
+    `SCORE_BUCKET_VALIDATED=8`,
+    `CLUSTER_EXPOSURE_ASSESSED=1`,
+    `CLUSTER_LEADER_VALIDATED=1`.
+
+    Daily-report section "Phase 11C.1C-C-B-A Strategy Validation
+    Lab v0 & Cluster Exposure Control Contracts" rendered with
+    non-empty cohort lines (`strategy_mode=reject n=24`;
+    `candidate_stage=early n=24`;
+    `opportunity_score_bucket=0-49 n=13` / `50-64 n=11`;
+    `early_tail_score_bucket=0-24 n=24`;
+    `cluster=USDT size=22 correlated=24 leader=PAXGUSDT action=no_action`);
+    `tail_label_distribution = unresolved x 24` (5 m primary
+    windows still in-flight at the 10 min boundary, as
+    expected).
+
+    > **Important note on the daily report's top event-count
+    > lines.** The daily report's top event-count lines may
+    > show `STRATEGY_VALIDATION_REPORT_GENERATED` /
+    > `STRATEGY_MODE_VALIDATED` /
+    > `CANDIDATE_STAGE_VALIDATED` /
+    > `SCORE_BUCKET_VALIDATED` / `CLUSTER_*` counts as **0**
+    > because those event counters appear to be snapshotted
+    > **before** shutdown flush. The **authoritative** event
+    > repository SQLite query (above) confirms those events
+    > were emitted. The daily report **section itself**
+    > rendered the Strategy Validation cohorts non-empty and
+    > correctly. This snapshot-vs-flush gap is a daily-report
+    > instrumentation nuance that does **not** invalidate the
+    > smoke; the SQLite ground truth is conclusive. A future
+    > daily-report polish can move the counter snapshot after
+    > the shutdown flush; it is **not** in scope for Phase
+    > 11C.1C-C-B-A.
+
+    Safety boundary held end-to-end across the smoke run:
+    `exchange_live_order_enabled=False`,
+    `live_trading_enabled=False`, `llm_enabled=False`,
+    `right_tail_enabled=False`, `trading_mode_paper=True`; no
+    live trading; no API key; no signed endpoint; no private
+    websocket; no listenKey; no DeepSeek trade decision; no
+    real Telegram outbound; **Phase 12 remains FORBIDDEN**.
+
+    The Kiro-side sandbox could not host this smoke
+    (Binance-region HTTP 451 geoblock — historical context;
+    same as the Phase 11C.1C-B / Phase 11C.1C-C-A closeouts),
+    so the operator ran it from a Binance-reachable VPS. The
+    full verbatim transcript is filed under
+    `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A acceptance
+    evidence (operator-VPS 10 min real public WS smoke
+    PASSED)" and the operator-side description is in
+    `docs/PR42_DESCRIPTION.md` §"Real WS smoke (operator-VPS
+    10 min, PASSED)". **PR #42 is ready for human review and
+    may be merged after reviewer confirms docs-only evidence
+    backfill;** this docs-only backfill does **not** self-flip
+    Phase 11C.1C-C-B-A to ACCEPTED — that flip happens via
+    the standard docs-only closeout PR after PR #42 has
+    merged.
+
 ### Phase 11C.1C-C-A - MFE / MAE Label Queue Runtime & Tail Outcome Tracking
 
 **Version:** `1.4.0a11c.1c.c.a` - Phase 11C.1C-C-A. Tracks the

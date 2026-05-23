@@ -368,6 +368,57 @@ class LabelQueueRuntimeSection(BaseModel):
         return {str(k): int(v) for k, v in value.items()}
 
 
+class StrategyValidationSection(BaseModel):
+    """Phase 11C.1C-C-B-A - Strategy Validation Lab v0 configuration.
+
+    Every threshold the runtime consumes lives here so the brief's
+    "thresholds must be configurable, not hard-coded" rule holds at
+    the YAML / boot layer too. Defaults match
+    :class:`app.adaptive.strategy_validation_runtime.StrategyValidationRuntimeConfig`.
+
+    Phase 11C.1C-C-B-A boundary - this section is paper / report
+    only. Nothing under it can flip a Phase 1 safety flag, open a
+    private API socket, or call an LLM / Telegram outbound. The
+    ``suggested_cluster_action`` produced by the runtime is
+    descriptive; the Risk Engine remains the single trade-decision
+    gate.
+    """
+
+    enabled: bool = True
+    max_samples: int = 2_000
+    primary_window: str = "5m"
+    overexposure_warning_threshold: int = 3
+    top_symbol_limit: int = 10
+
+    @field_validator("max_samples")
+    @classmethod
+    def _max_samples_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "strategy_validation.max_samples must be > 0"
+            )
+        return value
+
+    @field_validator("overexposure_warning_threshold")
+    @classmethod
+    def _overexposure_threshold_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "strategy_validation.overexposure_warning_threshold "
+                "must be > 0"
+            )
+        return value
+
+    @field_validator("top_symbol_limit")
+    @classmethod
+    def _top_symbol_limit_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "strategy_validation.top_symbol_limit must be > 0"
+            )
+        return value
+
+
 class SafetyConfig(BaseModel):
     """Phase 11C - public-market safety guard rails.
 
@@ -426,6 +477,9 @@ class DefaultsConfig(BaseModel):
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     label_queue_runtime: LabelQueueRuntimeSection = Field(
         default_factory=LabelQueueRuntimeSection
+    )
+    strategy_validation: StrategyValidationSection = Field(
+        default_factory=StrategyValidationSection
     )
 
 
