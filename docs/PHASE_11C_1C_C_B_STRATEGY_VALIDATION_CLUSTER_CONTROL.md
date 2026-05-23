@@ -1,27 +1,46 @@
 # Phase 11C.1C-C-B-A — Strategy Validation Lab v0 & Cluster Exposure Control Contracts
 
-> **Status:** IN_REVIEW (PR open). **NOT** ACCEPTED yet. **NOT** live
-> trading. **NOT** AI Learning. **NOT** the complete Strategy
-> Validation Lab. **NOT** automatic parameter optimisation.
+> **Status:** ACCEPTED (closed 2026-05-23; PR #42 merged into `main`,
+> mergeCommit `cc18047`). **NOT** live trading. **NOT** AI Learning.
+> **NOT** the complete Strategy Validation Lab. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning. **NOT**
+> Phase 12. Paper / report only.
 >
 > Phase 11C.1C-C-A — *MFE / MAE Label Queue Runtime & Tail Outcome
 > Tracking* — is the gating predecessor; it merged on 2026-05-23 as
-> PR #40. Phase 11C.1C-C-B-A is the **first slice** of the deeper
-> Phase 11C.1C-C-B Strategy Validation Lab work and ships only the
-> data contracts + pure aggregators + the seven typed events that
-> let the Lab v0 run through the existing Phase 8.5 export +
-> Phase 10A replay machinery without inventing a new pipeline.
+> PR #40 (mergeCommit `75d3c7c`). Phase 11C.1C-C-B-A is the **first
+> slice** of the deeper Phase 11C.1C-C-B Strategy Validation Lab
+> work and ships only the data contracts + pure aggregators + the
+> seven typed events that let the Lab v0 run through the existing
+> Phase 8.5 export + Phase 10A replay machinery without inventing a
+> new pipeline.
+>
+> The acceptance gate is **fully on file**: 25/25 brief-mandated
+> tests + 312/312 phase11c\_ tests + 2286/2286 full pytest PASS on
+> the PR branch (no regression vs. the post-PR-#41 main 2261
+> baseline); the **operator-VPS 10 min real public WS smoke
+> PASSED** on 2026-05-23 against the PR #42 head (commit
+> `0bedcce`); PR #42 has merged into `main` (mergeCommit
+> `cc18047`); the smoke evidence was accepted; this docs-only
+> closeout PR records Phase 11C.1C-C-B-A as **ACCEPTED**, mirroring
+> the PR #36 → PR #37, PR #38 → PR #39, and PR #40 → PR #41
+> closeout pattern. Phase 11C.1C-C-B-B is now **NEXT_ALLOWED /
+> NOT_STARTED**: Phase 11C.1C-C-B-A acceptance does **NOT**
+> authorise Phase 11C.1C-C-B-B kickoff bypassing the standard
+> gate. Phase 12 remains **FORBIDDEN**.
 
 ## Phase
 
   - **Phase 11C.1C-C-B-A** — Strategy Validation Lab v0 + Cluster
     Exposure Control Contracts on top of the Phase 11C.1C-C-A
     `LabelTrackingRecord` outcomes. **Paper / report only.**
-  - **Phase 11C.1C-C-B-B** — `RESERVED / NOT_STARTED`. Reserved for
-    the deeper Lab follow-up (richer cohort comparisons, extended
-    cluster heuristics, longer-window correlations). **NOT**
-    authorised by Phase 11C.1C-C-B-A acceptance bypassing the
-    standard gate.
+    **ACCEPTED (closed 2026-05-23; PR #42 merged into `main`,
+    mergeCommit `cc18047`).**
+  - **Phase 11C.1C-C-B-B** — `NEXT_ALLOWED / NOT_STARTED`.
+    Reserved for the deeper Lab follow-up (richer cohort
+    comparisons, extended cluster heuristics, longer-window
+    correlations). **NOT** authorised by Phase 11C.1C-C-B-A
+    acceptance bypassing the standard gate.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
 ## Goal
