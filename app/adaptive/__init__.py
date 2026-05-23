@@ -172,6 +172,27 @@ from app.adaptive.strategy_validation_runtime import (
     StrategyValidationRuntime,
     StrategyValidationRuntimeConfig,
 )
+from app.adaptive.strategy_validation_dataset import (
+    CANONICAL_CANDIDATE_STAGES,
+    CANONICAL_STRATEGY_MODES,
+    COMPLETED_TAIL_LABELS,
+    KNOWN_STRATEGY_VALIDATION_DATASET_SCHEMA_VERSIONS,
+    QUALITY_GATE_STATUSES,
+    REQUIRED_DATASET_RECORD_FIELDS,
+    STRATEGY_VALIDATION_DATASET_SCHEMA_VERSION,
+    STRATEGY_VALIDATION_DATASET_SOURCE_PHASE,
+    STRATEGY_VALIDATION_DATASET_VERSION,
+    StrategyValidationDataset,
+    StrategyValidationDatasetRecord,
+    StrategyValidationDatasetSummary,
+    StrategyValidationQualityGate,
+    StrategyValidationQualityGateResult,
+    build_validation_dataset_from_samples,
+    evaluate_validation_dataset_quality,
+    export_validation_dataset_payload,
+    load_validation_dataset_payload,
+    summarize_validation_dataset,
+)
 
 __all__ = [
     # Models / value objects
@@ -262,6 +283,27 @@ __all__ = [
     "early_tail_score_bucket_for",
     "StrategyValidationRuntime",
     "StrategyValidationRuntimeConfig",
+    # Phase 11C.1C-C-B-B-A Strategy Validation Dataset Builder &
+    # Quality Gate v0
+    "STRATEGY_VALIDATION_DATASET_SCHEMA_VERSION",
+    "STRATEGY_VALIDATION_DATASET_VERSION",
+    "STRATEGY_VALIDATION_DATASET_SOURCE_PHASE",
+    "KNOWN_STRATEGY_VALIDATION_DATASET_SCHEMA_VERSIONS",
+    "QUALITY_GATE_STATUSES",
+    "CANONICAL_STRATEGY_MODES",
+    "CANONICAL_CANDIDATE_STAGES",
+    "COMPLETED_TAIL_LABELS",
+    "REQUIRED_DATASET_RECORD_FIELDS",
+    "StrategyValidationDatasetRecord",
+    "StrategyValidationDatasetSummary",
+    "StrategyValidationDataset",
+    "StrategyValidationQualityGate",
+    "StrategyValidationQualityGateResult",
+    "build_validation_dataset_from_samples",
+    "summarize_validation_dataset",
+    "evaluate_validation_dataset_quality",
+    "export_validation_dataset_payload",
+    "load_validation_dataset_payload",
     # Payload helpers
     "candidate_stage_assessment_to_payload",
     "cluster_context_to_payload",

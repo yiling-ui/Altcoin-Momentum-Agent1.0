@@ -72,6 +72,17 @@ from app.adaptive.strategy_validation import (
     build_strategy_validation_sample,
     evaluate_cluster_leader_performance,
 )
+from app.adaptive.strategy_validation_dataset import (
+    STRATEGY_VALIDATION_DATASET_SCHEMA_VERSION,
+    STRATEGY_VALIDATION_DATASET_SOURCE_PHASE,
+    STRATEGY_VALIDATION_DATASET_VERSION,
+    StrategyValidationDataset,
+    StrategyValidationQualityGate,
+    StrategyValidationQualityGateResult,
+    build_validation_dataset_from_samples,
+    evaluate_validation_dataset_quality,
+    export_validation_dataset_payload,
+)
 from app.core.clock import now_ms
 from app.core.events import Event, EventType
 from app.database.repositories import EventRepository
@@ -84,6 +95,13 @@ class StrategyValidationRuntimeConfig:
     Every threshold the runtime consumes lives here so the brief's
     "thresholds must be configurable, not hard-coded" rule holds at
     the YAML / boot layer too.
+
+    Phase 11C.1C-C-B-B-A extends the config with five quality-gate
+    thresholds. The defaults match
+    :class:`StrategyValidationQualityGate`. Setting
+    ``dataset_enabled=False`` disables the Phase 11C.1C-C-B-B-A
+    dataset / quality-gate slice without affecting the
+    Phase 11C.1C-C-B-A Lab v0 contract.
     """
 
     enabled: bool = True
@@ -93,6 +111,17 @@ class StrategyValidationRuntimeConfig:
         DEFAULT_OVEREXPOSURE_WARNING_THRESHOLD
     )
     top_symbol_limit: int = 10
+    # Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder &
+    # Quality Gate v0 thresholds. Paper / report only; do NOT
+    # authorise real trades.
+    dataset_enabled: bool = True
+    quality_gate_min_total_samples: int = 20
+    quality_gate_min_completed_tail_labels: int = 10
+    quality_gate_min_strategy_mode_coverage: int = 2
+    quality_gate_min_candidate_stage_coverage: int = 2
+    quality_gate_min_score_bucket_coverage: int = 2
+    quality_gate_require_export_roundtrip: bool = True
+    quality_gate_require_replay_readable: bool = True
 
     @staticmethod
     def from_mapping(
@@ -107,6 +136,14 @@ class StrategyValidationRuntimeConfig:
             "primary_window",
             "overexposure_warning_threshold",
             "top_symbol_limit",
+            "dataset_enabled",
+            "quality_gate_min_total_samples",
+            "quality_gate_min_completed_tail_labels",
+            "quality_gate_min_strategy_mode_coverage",
+            "quality_gate_min_candidate_stage_coverage",
+            "quality_gate_min_score_bucket_coverage",
+            "quality_gate_require_export_roundtrip",
+            "quality_gate_require_replay_readable",
         ):
             if f in mapping and mapping[f] is not None:
                 kwargs[f] = mapping[f]
@@ -131,10 +168,44 @@ class StrategyValidationRuntimeConfig:
             "primary_window",
             "overexposure_warning_threshold",
             "top_symbol_limit",
+            "dataset_enabled",
+            "quality_gate_min_total_samples",
+            "quality_gate_min_completed_tail_labels",
+            "quality_gate_min_strategy_mode_coverage",
+            "quality_gate_min_candidate_stage_coverage",
+            "quality_gate_min_score_bucket_coverage",
+            "quality_gate_require_export_roundtrip",
+            "quality_gate_require_replay_readable",
         ):
             if hasattr(section, f):
                 attrs[f] = getattr(section, f)
         return StrategyValidationRuntimeConfig.from_mapping(attrs)
+
+    def quality_gate(self) -> StrategyValidationQualityGate:
+        """Build the :class:`StrategyValidationQualityGate` carried
+        by this config so the runtime / pure functions consume the
+        same thresholds."""
+        return StrategyValidationQualityGate(
+            min_total_samples=int(self.quality_gate_min_total_samples),
+            min_completed_tail_labels=int(
+                self.quality_gate_min_completed_tail_labels
+            ),
+            min_strategy_mode_coverage=int(
+                self.quality_gate_min_strategy_mode_coverage
+            ),
+            min_candidate_stage_coverage=int(
+                self.quality_gate_min_candidate_stage_coverage
+            ),
+            min_score_bucket_coverage=int(
+                self.quality_gate_min_score_bucket_coverage
+            ),
+            require_export_roundtrip=bool(
+                self.quality_gate_require_export_roundtrip
+            ),
+            require_replay_readable=bool(
+                self.quality_gate_require_replay_readable
+            ),
+        )
 
 
 @dataclass
@@ -199,6 +270,21 @@ class StrategyValidationRuntime:
         # without re-flushing.
         self._latest_report: StrategyValidationReport | None = None
         self._latest_report_metrics: dict[str, Any] | None = None
+        # Phase 11C.1C-C-B-B-A - dataset / quality-gate counters +
+        # the most-recent dataset payload + gate result so the
+        # daily-report builder can render the new section.
+        self._dataset_built_count = 0
+        self._dataset_exported_count = 0
+        self._quality_gate_evaluated_count = 0
+        self._latest_dataset: StrategyValidationDataset | None = None
+        self._latest_quality_gate_result: (
+            StrategyValidationQualityGateResult | None
+        ) = None
+        # ``opportunity_id`` -> originating
+        # ``STRATEGY_VALIDATION_SAMPLE_CREATED`` event id. Built as
+        # samples are emitted so dataset records carry
+        # ``source_event_id`` without re-querying events.db.
+        self._sample_event_ids: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     @property
@@ -224,6 +310,32 @@ class StrategyValidationRuntime:
     @property
     def report_generated_count(self) -> int:
         return self._report_generated_count
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-A - dataset / quality-gate accessors. Read-
+    # only views; mutations happen exclusively in flush_report().
+    # ------------------------------------------------------------------
+    @property
+    def latest_dataset(self) -> StrategyValidationDataset | None:
+        return self._latest_dataset
+
+    @property
+    def latest_quality_gate_result(
+        self,
+    ) -> StrategyValidationQualityGateResult | None:
+        return self._latest_quality_gate_result
+
+    @property
+    def dataset_built_count(self) -> int:
+        return self._dataset_built_count
+
+    @property
+    def dataset_exported_count(self) -> int:
+        return self._dataset_exported_count
+
+    @property
+    def quality_gate_evaluated_count(self) -> int:
+        return self._quality_gate_evaluated_count
 
     # ------------------------------------------------------------------
     def observe_label_record(
@@ -304,6 +416,8 @@ class StrategyValidationRuntime:
         report_id: str | None = None,
         generated_at_ms: int | None = None,
         emit_events: bool = True,
+        build_dataset: bool | None = None,
+        evaluate_quality_gate: bool | None = None,
     ) -> StrategyValidationReport:
         """Build the latest :class:`StrategyValidationReport` and emit
         the per-cohort + per-cluster events.
@@ -311,6 +425,18 @@ class StrategyValidationRuntime:
         Phase 11C.1C-C-B-A boundary - the report is paper / report
         only. ``emit_events=True`` does NOT authorise any real trade;
         the seven new event types are descriptive.
+
+        Phase 11C.1C-C-B-B-A extension - when ``build_dataset`` (or
+        ``evaluate_quality_gate``) is True, this method also builds
+        the :class:`StrategyValidationDataset`, emits
+        ``STRATEGY_VALIDATION_DATASET_BUILT`` /
+        ``STRATEGY_VALIDATION_DATASET_EXPORTED``, evaluates the
+        quality gate, and emits
+        ``STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED``. When the
+        kwargs are left at ``None``, the runtime falls back to the
+        config-level ``dataset_enabled`` flag so the runner does not
+        need to opt in explicitly. None of the new events authorises
+        a real trade; ``gate_status`` is a descriptive label only.
         """
         ts_value = (
             int(generated_at_ms)
@@ -334,6 +460,36 @@ class StrategyValidationRuntime:
         self._latest_report_metrics = self._build_metrics_payload(report)
         if emit_events:
             self._emit_report_events(report=report, ts_ms=ts_value)
+
+        # Phase 11C.1C-C-B-B-A - dataset / quality-gate slice. When
+        # the runtime config opts in (default True), build the
+        # dataset and evaluate the gate so the daily-report builder
+        # can render the new section without an extra runner hook.
+        do_dataset = (
+            self._config.dataset_enabled
+            if build_dataset is None
+            else bool(build_dataset)
+        )
+        do_gate = (
+            self._config.dataset_enabled
+            if evaluate_quality_gate is None
+            else bool(evaluate_quality_gate)
+        )
+        if emit_events and (do_dataset or do_gate):
+            self._build_and_emit_dataset_events(
+                report=report,
+                ts_ms=ts_value,
+                build_dataset=do_dataset,
+                evaluate_quality_gate=do_gate,
+            )
+            # Rebuild metrics so the daily-report builder sees the
+            # latest dataset / quality-gate fields. Without this
+            # refresh, a metrics_payload() call after the flush
+            # would return the pre-dataset snapshot.
+            self._latest_report_metrics = self._build_metrics_payload(
+                report
+            )
+
         return report
 
     # ------------------------------------------------------------------
@@ -377,6 +533,29 @@ class StrategyValidationRuntime:
                 "flagged_findings": [],
                 "report_id": "",
                 "is_empty_report": True,
+                # Phase 11C.1C-C-B-B-A - empty dataset / quality-gate
+                # block so the daily-report builder can still render
+                # the new section.
+                "validation_dataset_schema_version": (
+                    STRATEGY_VALIDATION_DATASET_SCHEMA_VERSION
+                ),
+                "validation_dataset_built_count": int(
+                    self._dataset_built_count
+                ),
+                "validation_dataset_exported_count": int(
+                    self._dataset_exported_count
+                ),
+                "validation_quality_gate_evaluated_count": int(
+                    self._quality_gate_evaluated_count
+                ),
+                "validation_dataset_records": 0,
+                "validation_dataset_symbols": [],
+                "validation_dataset_tail_label_counts": {},
+                "validation_quality_gate_status": "",
+                "validation_quality_gate_reasons": [],
+                "validation_dataset_export_ready": False,
+                "validation_dataset_replay_ready": False,
+                "validation_quality_gate_result": {},
             }
         report = build_strategy_validation_report(
             samples,
@@ -461,6 +640,67 @@ class StrategyValidationRuntime:
             "cluster_leader_validated_count": int(
                 self._cluster_leader_validated_count
             ),
+            # Phase 11C.1C-C-B-B-A - dataset / quality-gate aggregates
+            # the daily-report builder consumes. The fields are
+            # paper / report only; ``validation_quality_gate_status``
+            # is descriptive and MUST NEVER trigger a real trade.
+            "validation_dataset_schema_version": (
+                STRATEGY_VALIDATION_DATASET_SCHEMA_VERSION
+            ),
+            "validation_dataset_built_count": int(
+                self._dataset_built_count
+            ),
+            "validation_dataset_exported_count": int(
+                self._dataset_exported_count
+            ),
+            "validation_quality_gate_evaluated_count": int(
+                self._quality_gate_evaluated_count
+            ),
+            "validation_dataset_records": int(
+                len(self._latest_dataset.records)
+                if self._latest_dataset is not None
+                else 0
+            ),
+            "validation_dataset_symbols": list(
+                self._latest_dataset.summary.symbols
+                if self._latest_dataset is not None
+                else ()
+            ),
+            "validation_dataset_tail_label_counts": (
+                {
+                    k: int(v)
+                    for k, v in sorted(
+                        self._latest_dataset.summary.tail_label_counts.items()
+                    )
+                }
+                if self._latest_dataset is not None
+                else {}
+            ),
+            "validation_quality_gate_status": (
+                str(self._latest_quality_gate_result.gate_status)
+                if self._latest_quality_gate_result is not None
+                else ""
+            ),
+            "validation_quality_gate_reasons": list(
+                self._latest_quality_gate_result.reasons
+                if self._latest_quality_gate_result is not None
+                else ()
+            ),
+            "validation_dataset_export_ready": bool(
+                self._latest_quality_gate_result.export_roundtrip_ok
+                if self._latest_quality_gate_result is not None
+                else False
+            ),
+            "validation_dataset_replay_ready": bool(
+                self._latest_quality_gate_result.replay_readable
+                if self._latest_quality_gate_result is not None
+                else False
+            ),
+            "validation_quality_gate_result": (
+                self._latest_quality_gate_result.to_payload()
+                if self._latest_quality_gate_result is not None
+                else {}
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -521,13 +761,19 @@ class StrategyValidationRuntime:
             **identity,
             "sample": sample.to_payload(),
         }
-        self._emit(
+        emitted_event_id = self._emit(
             EventType.STRATEGY_VALIDATION_SAMPLE_CREATED,
             symbol=sample.symbol or None,
             timestamp=sample.sample_created_ts,
             payload=payload,
         )
         self._sample_created_count += 1
+        # Phase 11C.1C-C-B-B-A - record the originating event_id so
+        # the dataset builder can stamp ``source_event_id`` on every
+        # row without re-querying events.db.
+        opp_id = str(sample.opportunity_id or "")
+        if opp_id and emitted_event_id:
+            self._sample_event_ids[opp_id] = str(emitted_event_id)
 
     def _emit_report_events(
         self,
@@ -672,6 +918,176 @@ class StrategyValidationRuntime:
             )
             self._cluster_leader_validated_count += 1
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-A - dataset / quality-gate emission
+    # ------------------------------------------------------------------
+    def _build_and_emit_dataset_events(
+        self,
+        *,
+        report: StrategyValidationReport,
+        ts_ms: int,
+        build_dataset: bool,
+        evaluate_quality_gate: bool,
+    ) -> None:
+        """Build the Phase 11C.1C-C-B-B-A dataset, emit the BUILT /
+        EXPORTED / QUALITY_GATE_EVALUATED events, and cache the
+        artefacts on the runtime for the daily-report builder.
+
+        Phase 11C.1C-C-B-B-A boundary - this method is paper /
+        report only. None of the events it emits authorises a real
+        trade; ``gate_status`` is a descriptive label only.
+        """
+        if not build_dataset and not evaluate_quality_gate:
+            return
+        try:
+            dataset = build_validation_dataset_from_samples(
+                self.samples,
+                report_id=report.report_id,
+                generated_at_ms=int(ts_ms),
+                source_event_ids=self._sample_event_ids,
+                strategy_version=str(report.strategy_version),
+                scoring_version=str(report.scoring_version),
+                risk_config_version=str(report.risk_config_version),
+                state_machine_version=str(report.state_machine_version),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "[phase11c.1c-c-b-b-a] build_validation_dataset_from_samples"
+                " failed: {}",
+                exc,
+            )
+            return
+        self._latest_dataset = dataset
+
+        # 1. STRATEGY_VALIDATION_DATASET_BUILT.
+        if build_dataset:
+            payload = {
+                **self._dataset_identity_block(
+                    report_id=report.report_id, ts_ms=ts_ms
+                ),
+                "dataset_summary": dataset.summary.to_payload(),
+                "record_count": int(len(dataset.records)),
+                "symbols": list(dataset.summary.symbols),
+                "tail_label_counts": {
+                    k: int(v)
+                    for k, v in sorted(
+                        dataset.summary.tail_label_counts.items()
+                    )
+                },
+            }
+            self._emit(
+                EventType.STRATEGY_VALIDATION_DATASET_BUILT,
+                symbol=None,
+                timestamp=ts_ms,
+                payload=payload,
+            )
+            self._dataset_built_count += 1
+
+        # 2. STRATEGY_VALIDATION_DATASET_EXPORTED. Paper / report
+        #    only; the runner / daily-report builder writes the
+        #    actual bytes. We emit the event with a hash-free
+        #    descriptor so a downstream auditor can cross-reference
+        #    the dataset against the bundle on disk.
+        export_ok = False
+        export_record_count = 0
+        try:
+            exported_payload = export_validation_dataset_payload(dataset)
+            export_record_count = int(
+                len(exported_payload.get("records") or [])
+            )
+            export_ok = True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "[phase11c.1c-c-b-b-a] export_validation_dataset_payload"
+                " failed: {}",
+                exc,
+            )
+        if build_dataset:
+            payload = {
+                **self._dataset_identity_block(
+                    report_id=report.report_id, ts_ms=ts_ms
+                ),
+                "export_ok": bool(export_ok),
+                "record_count": int(export_record_count),
+            }
+            self._emit(
+                EventType.STRATEGY_VALIDATION_DATASET_EXPORTED,
+                symbol=None,
+                timestamp=ts_ms,
+                payload=payload,
+            )
+            self._dataset_exported_count += 1
+
+        # 3. STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED. The gate
+        #    result is descriptive; ``gate_status`` MUST NEVER
+        #    trigger a real trade.
+        if evaluate_quality_gate:
+            try:
+                gate_result = evaluate_validation_dataset_quality(
+                    dataset, gate=self._config.quality_gate()
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error(
+                    "[phase11c.1c-c-b-b-a] evaluate_validation_dataset_"
+                    "quality failed: {}",
+                    exc,
+                )
+                gate_result = None
+            if gate_result is not None:
+                self._latest_quality_gate_result = gate_result
+                payload = {
+                    **self._dataset_identity_block(
+                        report_id=report.report_id, ts_ms=ts_ms
+                    ),
+                    "gate_status": str(gate_result.gate_status),
+                    "reasons": list(gate_result.reasons),
+                    "sample_count": int(gate_result.sample_count),
+                    "completed_tail_label_count": int(
+                        gate_result.completed_tail_label_count
+                    ),
+                    "missing_modes": list(gate_result.missing_modes),
+                    "missing_stages": list(gate_result.missing_stages),
+                    "missing_buckets": list(gate_result.missing_buckets),
+                    "missing_required_fields": list(
+                        gate_result.missing_required_fields
+                    ),
+                    "export_roundtrip_ok": bool(
+                        gate_result.export_roundtrip_ok
+                    ),
+                    "replay_readable": bool(gate_result.replay_readable),
+                    "gate": gate_result.gate.to_payload(),
+                }
+                self._emit(
+                    EventType.STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED,
+                    symbol=None,
+                    timestamp=ts_ms,
+                    payload=payload,
+                )
+                self._quality_gate_evaluated_count += 1
+
+    def _dataset_identity_block(
+        self,
+        *,
+        report_id: str,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        """Build the Phase 11C.1C-C-B-B-A identity block carried by
+        every dataset / quality-gate event. Mirrors
+        :meth:`_identity_block` but stamps the dataset schema_version
+        + dataset version label so a downstream auditor can group
+        on them."""
+        return {
+            "schema_version": STRATEGY_VALIDATION_DATASET_SCHEMA_VERSION,
+            "dataset_version": STRATEGY_VALIDATION_DATASET_VERSION,
+            "source_phase": STRATEGY_VALIDATION_DATASET_SOURCE_PHASE,
+            "report_id": str(report_id),
+            "timestamp": int(ts_ms),
+            "strategy_version": "phase_11c_1c_a.strategy.v1",
+            "scoring_version": "phase_11c_1c_a.scoring.v1",
+            "risk_config_version": "phase_11c_1c_a.risk_config.v1",
+            "state_machine_version": "phase_11c_1c_a.state_machine.v1",
+        }
+
     def _emit(
         self,
         event_type: EventType,
@@ -679,7 +1095,11 @@ class StrategyValidationRuntime:
         symbol: str | None,
         timestamp: int,
         payload: dict[str, Any],
-    ) -> None:
+    ) -> str:
+        """Emit one event through the EventRepository. Returns the
+        ``event_id`` of the appended event so callers can cross-
+        reference it later (used by Phase 11C.1C-C-B-B-A dataset
+        records). Returns the empty string on failure."""
         try:
             event = Event(
                 event_type=event_type,
@@ -689,6 +1109,7 @@ class StrategyValidationRuntime:
                 payload=payload,
             )
             self._event_repo.append(event)
+            return str(event.event_id)
         except Exception as exc:  # pragma: no cover - protective
             logger.error(
                 "[phase11c.1c-c-b-a] failed to emit {} symbol={}: {}",
@@ -696,6 +1117,7 @@ class StrategyValidationRuntime:
                 symbol,
                 exc,
             )
+            return ""
 
 
 __all__ = [

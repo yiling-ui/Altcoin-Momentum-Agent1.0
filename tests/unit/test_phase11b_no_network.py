@@ -436,6 +436,18 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "SCORE_BUCKET_VALIDATED",
         "CLUSTER_EXPOSURE_ASSESSED",
         "CLUSTER_LEADER_VALIDATED",
+        # Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder
+        # & Quality Gate v0. Emission lives in
+        # app/adaptive/strategy_validation_runtime.py; the paper_run
+        # daily-report builder counts these events as a cross-check
+        # against the runtime's runner-side ``metrics_payload``.
+        # None of these events authorise a real trade; the
+        # ``gate_status`` field is descriptive (``pass`` / ``warn``
+        # / ``fail``) and **MUST NEVER trigger a real trade**. The
+        # Risk Engine remains the single trade-decision gate.
+        "STRATEGY_VALIDATION_DATASET_BUILT",
+        "STRATEGY_VALIDATION_DATASET_EXPORTED",
+        "STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (

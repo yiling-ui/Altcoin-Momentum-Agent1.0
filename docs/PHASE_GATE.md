@@ -40,8 +40,9 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
 | #          | Title                                                                | State                       | Detail                                                                 |
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
-| 11C.1C-C-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-A (PR #42) merged into `main` on 2026-05-23 (mergeCommit `cc18047`); the operator-VPS 10 min real public WS smoke evidence under §"Phase 11C.1C-C-B-A acceptance evidence (operator-VPS 10 min real public WS smoke PASSED)" was accepted; Phase 11C.1C-C-B-A is therefore **ACCEPTED**, and Phase 11C.1C-C-B-B is now **NEXT_ALLOWED**. NOT authorised by Phase 11C.1C-C-B-A acceptance bypassing the standard gate; will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A forbidden item verbatim. |
-| 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B, or any other Phase 11C sub-phase). |
+| 11C.1C-C-B-B-A | Strategy Validation Dataset Builder & Quality Gate v0 (paper / report-only first slice of Phase 11C.1C-C-B-B) | **IN_REVIEW (PR #44 open)** | Phase 11C.1C-C-B-A (PR #42) merged into `main` on 2026-05-23 (mergeCommit `cc18047`) and is the gating predecessor. PR #44 ships the **first slice** of the Phase 11C.1C-C-B-B work: dataset record / dataset / summary / quality-gate v0 contracts + pure builders + the runtime hook that emits three new typed events (`STRATEGY_VALIDATION_DATASET_BUILT`, `STRATEGY_VALIDATION_DATASET_EXPORTED`, `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED`). 27/27 brief-mandated tests + 339/339 phase11c tests + 2313/2313 full pytest PASS on the PR branch (no regression vs. post-PR-#43 main 2286 baseline). 30 s dry-run smoke produced an empty / low-sample report (`gate_status=fail` with reasons `sample_count_below_half_min`, etc.) — exactly what the brief asks for. Real WS 10 min smoke is **NOT required** for this PR (the smallest Phase 11C.1C-C-A primary tracking window is 5 min and cannot complete in 30 s); reserved for Phase 11C.1C-C-B-B-B closeout. The `validation_quality_gate_status` field is **descriptive** (`pass` / `warn` / `fail`) and **MUST NEVER trigger a real trade**; the Risk Engine remains the single trade-decision gate. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A forbidden item verbatim. |
+| 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up | **FORBIDDEN by PR #44; NEXT_ALLOWED after Phase 11C.1C-C-B-B-A is ACCEPTED** | Phase 11C.1C-C-B-B-A is currently **IN_REVIEW** (PR #44 open). Phase 11C.1C-C-B-B-B is reserved for the deeper Strategy Validation Lab follow-up (richer cohort comparisons, extended cluster heuristics, longer-window correlations, dataset-driven retrospective audits). NOT authorised by Phase 11C.1C-C-B-B-A acceptance bypassing the standard gate; will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
+| 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A IN_REVIEW, Phase 11C.1C-C-B-B-B, or any other Phase 11C sub-phase). |
 
 
 ### Phase 11B-HF acceptance summary
@@ -780,36 +781,156 @@ cluster heuristics — those are reserved for Phase
     → PR #37, PR #38 → PR #39, and PR #40 → PR #41 closeout
     pattern.
 
-## Open phase: Phase 11C.1C-C-B-B (NEXT_ALLOWED / NOT_STARTED)
+## Open phase: Phase 11C.1C-C-B-B-A (IN_REVIEW)
 
-**Phase 11C.1C-C-B-B — Strategy Validation Lab (deeper) &
+**Phase 11C.1C-C-B-B-A — Strategy Validation Dataset Builder
+& Quality Gate v0.** Status: **IN_REVIEW (PR #44 open).**
+Paper / report only. Phase 11C.1C-C-B-A (PR #42) merged into
+`main` on 2026-05-23 (mergeCommit `cc18047`) and is the
+gating predecessor. PR #44 ships the **first slice** of the
+Phase 11C.1C-C-B-B work: dataset record / dataset / summary /
+quality-gate v0 contracts + pure builders + the runtime hook
+that emits three new typed events.
+
+> **Phase 11C.1C-C-B-B-A is paper / report only.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise live trading.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise API keys.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise private endpoints.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise DeepSeek trade decisions.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise real Telegram outbound.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise Phase 11C.1C-C-B-B-B kickoff bypassing the standard gate.**
+> **Phase 11C.1C-C-B-B-A does NOT authorise Phase 12.**
+> **`validation_quality_gate_status` (`pass` / `warn` /
+> `fail`) cannot trigger real trading** — it is a descriptive
+> label only; the Risk Engine remains the single
+> trade-decision gate.
+> **Phase 12 (live trading) remains FORBIDDEN.**
+
+### Phase 11C.1C-C-B-B-A scope (PR #44)
+
+- **New module**: `app/adaptive/strategy_validation_dataset.py`
+  with `StrategyValidationDatasetRecord`,
+  `StrategyValidationDatasetSummary`,
+  `StrategyValidationDataset`,
+  `StrategyValidationQualityGate`,
+  `StrategyValidationQualityGateResult` and the five pure
+  functions
+  (`build_validation_dataset_from_samples` /
+  `summarize_validation_dataset` /
+  `evaluate_validation_dataset_quality` /
+  `export_validation_dataset_payload` /
+  `load_validation_dataset_payload`).
+- **Three new typed events** (`STRATEGY_VALIDATION_DATASET_BUILT`,
+  `STRATEGY_VALIDATION_DATASET_EXPORTED`,
+  `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED`) emitted by
+  `StrategyValidationRuntime` with the brief-mandated identity
+  block (`report_id`, `timestamp`, `strategy_version`,
+  `scoring_version`, `risk_config_version`,
+  `state_machine_version`, `schema_version`).
+- **Schema version**: `phase_11c_1c_c_b_b_a.strategy_validation_dataset.v1`.
+- **Quality gate v0** is a *sample trust* gate, not a *strategy
+  quality* gate: `min_total_samples`, `min_completed_tail_labels`,
+  `min_strategy_mode_coverage`, `min_candidate_stage_coverage`,
+  `min_score_bucket_coverage`, `require_export_roundtrip`,
+  `require_replay_readable`. Output: `gate_status` (`pass` /
+  `warn` / `fail`) + diagnostic reasons.
+- **Daily report** carries a new "Phase 11C.1C-C-B-B-A
+  Strategy Validation Dataset Builder & Quality Gate v0"
+  section with `validation_dataset_records`,
+  `validation_dataset_symbols`,
+  `validation_dataset_tail_label_counts`,
+  `validation_quality_gate_status`,
+  `validation_quality_gate_reasons`,
+  `validation_dataset_export_ready`,
+  `validation_dataset_replay_ready`.
+- **Export / replay**: the Phase 8.5 export bundle's
+  `events.jsonl` carries the three new event types
+  automatically; the Phase 10A replay engine accepts the rows
+  without raising.
+- **Runtime config**:
+  `app/config/defaults.yaml > strategy_validation` extended
+  with `dataset_enabled` and seven `quality_gate_*` fields.
+- **27 brief-mandated tests** in
+  `tests/unit/test_phase11c_1c_c_b_b_validation_dataset_quality_gate.py`.
+- **Real WS 10 min smoke is NOT required for this PR** — the
+  smallest Phase 11C.1C-C-A primary tracking window is 5 min
+  and cannot complete in 30 s; reserved for Phase
+  11C.1C-C-B-B-B closeout when non-empty datasets are first
+  observable end-to-end.
+
+### Phase 11C.1C-C-B-B-A inherited boundary (held from day one)
+
+- mode = paper
+- live_trading_enabled = False
+- exchange_live_order_enabled = False
+- right_tail_enabled = False
+- llm_enabled = False
+- telegram_outbound_enabled = False
+- binance_private_api_enabled = False
+- no API key / no API secret / no signed endpoint
+- no private WebSocket / no listenKey
+- no account / order / position / leverage / margin endpoint
+- no DeepSeek trade decision
+- no real Telegram outbound
+
+### Phase 11C.1C-C-B-B-A explicitly forbidden (inherited verbatim)
+
+- Real trading.
+- Binance private API / signed endpoint / listenKey / private
+  WebSocket.
+- LLM / DeepSeek trade decision.
+- Real Telegram outbound.
+- Right-tail score in production scope.
+- Validation result / `gate_status` triggering real downstream
+  execution.
+- AI deciding direction / position size / leverage / stop-loss
+  / target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- Risk Engine override.
+- Phase 11C.1C-C-B-B-B implementation.
+- Phase 12 / live trading kickoff.
+
+### Phase 11C.1C-C-B-B-A acceptance gate (status: PR #44 in human review)
+
+- 27 brief-mandated tests PASS.
+- `tests/unit -k phase11c_` PASS (339 = 312 baseline + 27).
+- Full `tests/` PASS (2313 = 2286 baseline + 27, no
+  regression vs. post-PR-#43 main).
+- 30 s dry-run smoke produces an empty / low-sample
+  quality-gate report (`gate_status=fail` with
+  `sample_count_below_half_min` reason and similar — exactly
+  what the brief asks for).
+- Safety boundary held end-to-end (`live_trading=False`,
+  `exchange_live_orders=False`, `trading_mode_paper=True`,
+  etc.).
+- Real WS 10 min smoke deferred to Phase 11C.1C-C-B-B-B
+  closeout.
+
+## Open phase: Phase 11C.1C-C-B-B-B (FORBIDDEN by PR #44; NEXT_ALLOWED after Phase 11C.1C-C-B-B-A is ACCEPTED)
+
+**Phase 11C.1C-C-B-B-B — Strategy Validation Lab (deeper) &
 richer Cluster Exposure Control follow-up.** Status:
-**NEXT_ALLOWED / NOT_STARTED.** Phase 11C.1C-C-B-A (PR #42)
-merged into `main` on 2026-05-23 (mergeCommit `cc18047`); the
-operator-VPS 10 min real public WS smoke evidence under
-§"Phase 11C.1C-C-B-A acceptance evidence (operator-VPS 10
-min real public WS smoke PASSED)" was accepted; Phase
-11C.1C-C-B-A is therefore **ACCEPTED**, and Phase
-11C.1C-C-B-B is now **NEXT_ALLOWED**. No implementation has
-started in this repo state. **Phase 11C.1C-C-B-A acceptance
-does NOT authorise Phase 11C.1C-C-B-B kickoff bypassing the
-standard gate.** Phase 11C.1C-C-B-B will require its own
-kickoff PR, brief, scope, boundary table, forbidden list,
-and acceptance evidence and inherits every Phase 1 / 11C.1B
-/ 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A forbidden
-item verbatim.
+**FORBIDDEN by PR #44; NEXT_ALLOWED after Phase
+11C.1C-C-B-B-A is ACCEPTED.** Phase 11C.1C-C-B-B-A is
+currently **IN_REVIEW** (PR #44 open). Phase 11C.1C-C-B-B-B
+is reserved for the deeper Strategy Validation Lab follow-up
+(richer cohort comparisons, extended cluster heuristics,
+longer-window correlations, dataset-driven retrospective
+audits). NOT authorised by Phase 11C.1C-C-B-B-A acceptance
+bypassing the standard gate; will require its own kickoff
+PR, brief, scope, boundary table, forbidden list, and
+acceptance evidence. Inherits every Phase 1 / 11C.1B /
+11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A /
+11C.1C-C-B-B-A forbidden item verbatim.
 
-> **Phase 11C.1C-C-B-A acceptance does NOT authorise live trading.**
-> **Phase 11C.1C-C-B-A acceptance does NOT authorise API keys.**
-> **Phase 11C.1C-C-B-A acceptance does NOT authorise private endpoints.**
-> **Phase 11C.1C-C-B-A acceptance does NOT authorise DeepSeek trade decisions.**
-> **Phase 11C.1C-C-B-A acceptance does NOT authorise real Telegram outbound.**
-> **Phase 11C.1C-C-B-A acceptance does NOT authorise Phase 12.**
-> **Validation result / cluster action / `strategy_mode` /
-> `suggested_cluster_action` / `mfe_pct` / `mae_pct` /
-> `tail_label` cannot trigger real trading** — they are
-> descriptive labels only; the Risk Engine remains the
-> single trade-decision gate.
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise live trading.**
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise API keys.**
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise private endpoints.**
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise DeepSeek trade decisions.**
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise real Telegram outbound.**
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise Phase 11C.1C-C-B-B-B kickoff bypassing the standard gate.**
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise Phase 12.**
 > **Phase 12 (live trading) remains FORBIDDEN.**
 
 ## Phase 11C.1C-C-A acceptance evidence (closeout)

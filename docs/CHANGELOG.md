@@ -7,6 +7,170 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder & Quality Gate v0
+
+**Version:** `1.4.0a11c.1c.c.b.b.a` - Phase 11C.1C-C-B-B-A.
+Tracks the **paper / report-only first slice** of the deeper
+Phase 11C.1C-C-B-B work: dataset record / dataset / summary /
+quality-gate v0 contracts + pure builders + the runtime hook
+that emits three new typed events on top of the Phase
+11C.1C-C-B-A `StrategyValidationSample` /
+`StrategyValidationReport` / `ClusterExposureAssessment`
+artefacts. The dataset is exportable, replayable, and
+auditable; the quality gate is a *sample trust* gate, not a
+*strategy quality* gate.
+
+> **Status: IN_REVIEW (PR #44 open).** Paper / report only.
+> NOT live trading. NOT AI Learning. NOT automatic parameter
+> optimisation. NOT reinforcement learning. NOT the complete
+> Strategy Validation Lab follow-up (Phase 11C.1C-C-B-B-B).
+> NOT Phase 12.
+>
+> The `validation_quality_gate_status` field on every
+> `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED` event
+> (`pass` / `warn` / `fail`) is a **descriptive label** for
+> human review and **MUST NEVER trigger a real trade**; the
+> Risk Engine remains the single trade-decision gate.
+
+#### Added
+
+- **`app/adaptive/strategy_validation_dataset.py`** — new
+  pure-function module:
+  - Models: `StrategyValidationDatasetRecord`,
+    `StrategyValidationDatasetSummary`,
+    `StrategyValidationDataset`,
+    `StrategyValidationQualityGate`,
+    `StrategyValidationQualityGateResult`.
+  - Pure functions:
+    `build_validation_dataset_from_samples`,
+    `summarize_validation_dataset`,
+    `evaluate_validation_dataset_quality`,
+    `export_validation_dataset_payload`,
+    `load_validation_dataset_payload`.
+  - Schema version:
+    `phase_11c_1c_c_b_b_a.strategy_validation_dataset.v1`.
+- **Three new `EventType` values** in `app/core/events.py`:
+  `STRATEGY_VALIDATION_DATASET_BUILT`,
+  `STRATEGY_VALIDATION_DATASET_EXPORTED`,
+  `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED`. Every payload
+  carries the brief-mandated identity block (`report_id`,
+  `timestamp`, `strategy_version`, `scoring_version`,
+  `risk_config_version`, `state_machine_version`,
+  `schema_version`).
+- **`StrategyValidationRuntime`** extended:
+  - `flush_report()` now also builds the dataset and evaluates
+    the quality gate (under the
+    `dataset_enabled` config flag, default True).
+  - New runtime properties: `latest_dataset`,
+    `latest_quality_gate_result`, `dataset_built_count`,
+    `dataset_exported_count`,
+    `quality_gate_evaluated_count`.
+  - `metrics_payload()` exposes `validation_dataset_records`,
+    `validation_dataset_symbols`,
+    `validation_dataset_tail_label_counts`,
+    `validation_quality_gate_status`,
+    `validation_quality_gate_reasons`,
+    `validation_dataset_export_ready`,
+    `validation_dataset_replay_ready`,
+    `validation_quality_gate_result`, plus the three new event
+    counters.
+- **`StrategyValidationRuntimeConfig`** extended with
+  `dataset_enabled` and seven `quality_gate_*` thresholds;
+  `from_settings_section()` honours all of them. The new
+  `quality_gate()` helper builds the `StrategyValidationQualityGate`
+  instance the gate evaluator consumes.
+- **`app/config/schema.py > StrategyValidationSection`**
+  extended with `dataset_enabled` + seven `quality_gate_*`
+  fields + validators (>=0).
+- **`app/config/defaults.yaml > strategy_validation`** extended
+  with the same keys.
+- **Daily report**:
+  - `DailyReportSnapshot` extended with
+    `validation_dataset_built_count`,
+    `validation_dataset_exported_count`,
+    `validation_quality_gate_evaluated_count`,
+    `validation_dataset_records`,
+    `validation_dataset_symbols`,
+    `validation_dataset_tail_label_counts`,
+    `validation_quality_gate_status`,
+    `validation_quality_gate_reasons`,
+    `validation_dataset_export_ready`,
+    `validation_dataset_replay_ready`,
+    `validation_quality_gate_result`.
+  - `DailyReportBuilder.build()` cross-checks the runner
+    counters against the events.db type-counts of the three
+    new event types so a stale runner counter cannot
+    under-report.
+  - New Markdown section "Phase 11C.1C-C-B-B-A Strategy
+    Validation Dataset Builder & Quality Gate v0" with
+    explicit "the `validation_quality_gate_status` is
+    descriptive and **MUST NEVER trigger a real trade**;
+    Phase 12 remains FORBIDDEN" disclaimer.
+- **Tests**:
+  - `tests/unit/test_phase11c_1c_c_b_b_validation_dataset_quality_gate.py`
+    — 27 brief-mandated cases covering record contract,
+    builder, summary, quality gate (pass / warn / fail),
+    export round-trip, replay, daily-report integration,
+    safety boundary, Phase 12 forbidden.
+  - `tests/unit/test_phase11b_no_network.py` allow-list
+    extended with the three new event types.
+- **Docs**:
+  - `docs/PHASE_11C_1C_C_B_B_VALIDATION_DATASET_QUALITY_GATE.md` (new).
+  - `docs/PR44_DESCRIPTION.md` (new).
+  - `docs/PROJECT_STATUS.md` updated with Phase
+    11C.1C-C-B-B-A IN_REVIEW.
+  - `docs/PHASE_GATE.md` updated with the open phase entry +
+    Phase 11C.1C-C-B-B-B carve-out + open-phases table.
+
+#### Changed
+
+- **`StrategyValidationRuntime._emit()`** now returns the
+  `event_id` of the appended event so dataset records can
+  carry `source_event_id` cross-references back to events.db.
+- **`StrategyValidationRuntime._latest_report_metrics`** is
+  rebuilt after the dataset / quality-gate emission so the
+  daily-report builder sees the latest dataset / gate fields
+  on the same flush.
+
+#### Forbidden by this PR
+
+- Real trading.
+- Binance private API / signed endpoint / listenKey / private
+  WebSocket.
+- LLM / DeepSeek trade decision.
+- Real Telegram outbound.
+- Right-tail score in production scope.
+- `gate_status` triggering real downstream execution.
+- AI deciding direction / position size / leverage / stop-loss
+  / target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- Risk Engine override.
+- Phase 11C.1C-C-B-B-B implementation.
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (status: PR #44 in human review)
+
+- 27 brief-mandated tests PASS.
+- `tests/unit -k phase11c_` PASS (339 = 312 baseline + 27).
+- Full `tests/` PASS (2313 = 2286 baseline + 27, no
+  regression vs. post-PR-#43 main).
+- 30 s dry-run smoke produces an empty / low-sample
+  quality-gate report (`gate_status=fail` with
+  `sample_count_below_half_min` reason and similar — exactly
+  what the brief asks for).
+- Real WS 10 min smoke is **NOT required** for this PR;
+  reserved for Phase 11C.1C-C-B-B-B closeout when non-empty
+  datasets are first observable end-to-end.
+- Safety boundary held end-to-end (`live_trading=False`,
+  `exchange_live_orders=False`, `trading_mode_paper=True`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no signed
+  endpoint, no private WS, no listenKey, no DeepSeek trade
+  decision, no real Telegram outbound).
+- Phase 12 remains FORBIDDEN.
+
 ### Phase 11C.1C-C-B-A - Strategy Validation Lab v0 & Cluster Exposure Control Contracts
 
 **Version:** `1.4.0a11c.1c.c.b.a` - Phase 11C.1C-C-B-A. Tracks the

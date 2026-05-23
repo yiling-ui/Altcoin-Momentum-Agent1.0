@@ -382,6 +382,11 @@ class StrategyValidationSection(BaseModel):
     ``suggested_cluster_action`` produced by the runtime is
     descriptive; the Risk Engine remains the single trade-decision
     gate.
+
+    Phase 11C.1C-C-B-B-A extends the section with a dataset /
+    quality-gate v0 sub-block. The dataset / gate is paper / report
+    only; ``quality_gate_*`` thresholds are descriptive and **MUST
+    NEVER trigger a real trade**.
     """
 
     enabled: bool = True
@@ -389,6 +394,16 @@ class StrategyValidationSection(BaseModel):
     primary_window: str = "5m"
     overexposure_warning_threshold: int = 3
     top_symbol_limit: int = 10
+    # Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder &
+    # Quality Gate v0 thresholds. Paper / report only.
+    dataset_enabled: bool = True
+    quality_gate_min_total_samples: int = 20
+    quality_gate_min_completed_tail_labels: int = 10
+    quality_gate_min_strategy_mode_coverage: int = 2
+    quality_gate_min_candidate_stage_coverage: int = 2
+    quality_gate_min_score_bucket_coverage: int = 2
+    quality_gate_require_export_roundtrip: bool = True
+    quality_gate_require_replay_readable: bool = True
 
     @field_validator("max_samples")
     @classmethod
@@ -417,6 +432,21 @@ class StrategyValidationSection(BaseModel):
                 "strategy_validation.top_symbol_limit must be > 0"
             )
         return value
+
+    @field_validator(
+        "quality_gate_min_total_samples",
+        "quality_gate_min_completed_tail_labels",
+        "quality_gate_min_strategy_mode_coverage",
+        "quality_gate_min_candidate_stage_coverage",
+        "quality_gate_min_score_bucket_coverage",
+    )
+    @classmethod
+    def _quality_gate_thresholds_non_negative(cls, value: int) -> int:
+        if int(value) < 0:
+            raise ValueError(
+                "strategy_validation.quality_gate_* thresholds must be >= 0"
+            )
+        return int(value)
 
 
 class SafetyConfig(BaseModel):

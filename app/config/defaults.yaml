@@ -173,8 +173,24 @@ strategy_validation:
   # ``suggested_cluster_action`` produced by the runtime is a
   # descriptive label; the Risk Engine remains the single
   # trade-decision gate.
+  #
+  # Phase 11C.1C-C-B-B-A extends this section with the Strategy
+  # Validation Dataset Builder & Quality Gate v0 sub-block. The
+  # ``quality_gate_*`` thresholds are descriptive: the gate result
+  # (``pass`` / ``warn`` / ``fail``) is a label for human review,
+  # NOT an input to a trade-decision pipeline. Phase 12 remains
+  # FORBIDDEN.
   enabled: true
   max_samples: 2000
   primary_window: "5m"
   overexposure_warning_threshold: 3
   top_symbol_limit: 10
+  # Phase 11C.1C-C-B-B-A dataset / quality-gate v0.
+  dataset_enabled: true
+  quality_gate_min_total_samples: 20
+  quality_gate_min_completed_tail_labels: 10
+  quality_gate_min_strategy_mode_coverage: 2
+  quality_gate_min_candidate_stage_coverage: 2
+  quality_gate_min_score_bucket_coverage: 2
+  quality_gate_require_export_roundtrip: true
+  quality_gate_require_replay_readable: true
