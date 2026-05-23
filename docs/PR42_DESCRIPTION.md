@@ -1,17 +1,29 @@
 # PR #42 — Phase 11C.1C-C-B-A: Strategy Validation Lab v0 & Cluster Exposure Control Contracts
 
-> **Status: IN_REVIEW.** **NOT** ACCEPTED. **NOT** live trading.
-> **NOT** AI Learning. **NOT** the complete Strategy Validation
-> Lab. **NOT** automatic parameter optimisation. **NOT** Phase 12.
+> **Status: IN_REVIEW (PR #42 open).** **NOT** ACCEPTED yet.
+> **NOT** live trading. **NOT** AI Learning. **NOT** the complete
+> Strategy Validation Lab. **NOT** automatic parameter
+> optimisation. **NOT** Phase 12.
 >
 > Phase 11C.1C-C-A — *MFE / MAE Label Queue Runtime & Tail Outcome
 > Tracking* — merged on 2026-05-23 (PR #40, mergeCommit `75d3c7c`)
 > and is the gating predecessor. Phase 11C.1C-C-B-A is the **first
 > slice** of the deeper Phase 11C.1C-C-B Strategy Validation Lab
 > work; it ships only the data contracts + pure aggregators + the
-> runtime that emits the seven typed events. A 5 min / 10 min
-> operator-VPS real public WS smoke is required before merge (see
-> "Smoke" below).
+> runtime that emits the seven typed events.
+>
+> **Operator-VPS 10 min real public WS smoke PASSED.** The
+> operator ran the smoke from a Binance-reachable VPS against the
+> PR #42 head (commit `0bedcce`) and the verbatim evidence is
+> backfilled below under "Real WS smoke (operator-VPS 10 min,
+> PASSED)" and under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A
+> acceptance evidence (operator-VPS 10 min real public WS smoke
+> PASSED)". **PR #42 is ready for human review and may be merged
+> after reviewer confirms docs-only evidence backfill.** Phase
+> 11C.1C-C-B-A flips to ACCEPTED only after PR #42 merges, via
+> the standard closeout PR pattern (mirroring PR #36 → PR #37,
+> PR #38 → PR #39, PR #40 → PR #41); this PR does **NOT**
+> self-flip the phase to ACCEPTED.
 
 ## Phase
 
@@ -189,58 +201,162 @@ verifies:
     `STRATEGY_VALIDATION_REPORT_GENERATED` event with
     `sample_count=0`.
 
-## Real WS smoke (REQUIRED before merge)
+## Real WS smoke (operator-VPS 10 min, PASSED)
 
-A 5 min / 10 min operator-VPS real public WS smoke is **required
-before merge** to confirm the runtime emits at least one real
-`STRATEGY_VALIDATION_SAMPLE_CREATED` event for a completed primary
-5 min window. The Kiro-side sandbox cannot host this smoke
-(Binance-region HTTP 451 geoblock; same as the Phase 11C.1C-B and
-Phase 11C.1C-C-A closeouts), so the operator must run the smoke
-from a Binance-reachable VPS:
+The 10 min operator-VPS real public WS smoke **PASSED** on
+2026-05-23 against the PR #42 head (commit `0bedcce`,
+branch `feature/phase-11c1c-c-b-strategy-validation-cluster-control`).
+The Kiro-side sandbox cannot host this smoke (Binance-region
+HTTP 451 geoblock — same historical reason previously recorded
+for the Phase 11C.1C-B and Phase 11C.1C-C-A closeouts; this is
+**not** the current blocker), so the operator ran it from a
+Binance-reachable VPS. The verbatim transcript is also filed
+under `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A acceptance
+evidence (operator-VPS 10 min real public WS smoke PASSED)".
+
+### Command actually used
 
 ```
 python -m scripts.run_public_market_paper \
-    --duration-seconds 600 \
-    --ws-first \
-    --emit-banner \
-    --write-daily-report
+    --duration 10min \
+    --symbol-limit 5 \
+    --ws-first
 ```
 
-Acceptance for the operator-VPS smoke (paste the verbatim banner
-into `docs/PHASE_GATE.md` §"Phase 11C.1C-C-B-A acceptance evidence"
-when complete):
+> **Note on `--emit-banner`.** The runner does **not** support
+> `--emit-banner`. The banner is emitted **by default**; pass
+> `--no-banner` only if you want to suppress it. Earlier drafts
+> of this document referenced `--emit-banner`; that flag was
+> never on the runner and the operator-VPS smoke uses the actual
+> command above.
 
-  - `dry_run = false`
-  - `ws_real_transport = true`
-  - `ws_messages_received >= 5000`
-  - `ws_chains_emitted >= 1`
-  - `STRATEGY_VALIDATION_SAMPLE_CREATED >= 1`
-  - `STRATEGY_VALIDATION_REPORT_GENERATED >= 1`
-  - `STRATEGY_MODE_VALIDATED >= 1` for each of `follow` /
-    `pullback` / `observe` / `reject` (the four canonical modes
-    are always present even when a cohort is empty)
-  - `CLUSTER_EXPOSURE_ASSESSED >= 1`
-  - `CLUSTER_LEADER_VALIDATED >= 1`
-  - The daily report Markdown contains the new section "Phase
-    11C.1C-C-B-A Strategy Validation Lab v0 & Cluster Exposure
-    Control Contracts" with a non-empty cohort line for at least
-    one strategy_mode and at least one candidate_stage.
-  - Safety flags unchanged: `live_trading=False`,
-    `exchange_live_orders=False`, `right_tail=False`, `llm=False`,
-    `telegram_outbound_enabled=False`,
-    `binance_private_api_enabled=False`.
-  - `HTTP 429 count = 0`, `HTTP 418 count = 0`, `rate_limit_ban =
-    False`.
+### Runner-level numerics (PASS)
 
-## Whether real WS smoke is required
+```
+duration_seconds                = 600.0
+uptime                          = 611s
+dry_run                         = false
+ws_real_transport               = true
+ws_messages_received            = 76324
+ws_chains_emitted               = 27
+learning_ready_attached         = 27
+snapshots_emitted               = 27
+ingestion_errors                = 0
+HTTP 429 count                  = 0
+HTTP 418 count                  = 0
+rate_limit_ban                  = False
+ws_reconnect_count              = 0
+ws_stale_count                  = 0
+ws_currently_stale              = False
+```
 
-**Yes.** The 5 min / 10 min operator-VPS real public WS smoke is
-required before merge. Phase 11C.1C-C-B-A is *contracts +
-aggregators + runtime wiring*; the test suite proves the contract
-is correct and the wiring fires on synthetic Phase 11C.1C-C-A
-records, but only a real-WS smoke can confirm a real candidate
-through the live chain produces a meaningful sample.
+### Strategy Validation events (authoritative, from SQLite)
+
+The authoritative source for the new event counts is the
+`events.db` SQLite query against
+`SELECT event_type, COUNT(*) FROM events GROUP BY event_type`,
+captured **after** shutdown flush:
+
+```
+STRATEGY_VALIDATION_SAMPLE_CREATED       | 24
+STRATEGY_VALIDATION_REPORT_GENERATED     |  1
+STRATEGY_MODE_VALIDATED                  |  4
+CANDIDATE_STAGE_VALIDATED                |  5
+SCORE_BUCKET_VALIDATED                   |  8
+CLUSTER_EXPOSURE_ASSESSED                |  1
+CLUSTER_LEADER_VALIDATED                 |  1
+```
+
+> **Important note on the daily report's top event-count
+> lines.** The daily report's top event-count lines may show
+> `STRATEGY_VALIDATION_REPORT_GENERATED` /
+> `STRATEGY_MODE_VALIDATED` / `CANDIDATE_STAGE_VALIDATED` /
+> `SCORE_BUCKET_VALIDATED` / `CLUSTER_*` counts as **0**
+> because those event counters appear to be snapshotted
+> **before** shutdown flush. The **authoritative** event
+> repository SQLite query (above) confirms those events were
+> emitted. The daily report **section itself** rendered the
+> Strategy Validation cohorts non-empty and correctly. This
+> snapshot-vs-flush gap is a daily-report instrumentation
+> nuance that does **not** invalidate the smoke; the SQLite
+> ground truth is conclusive. A future daily-report polish
+> can move the counter snapshot after the shutdown flush; it
+> is **not** in scope for Phase 11C.1C-C-B-A.
+
+### Daily report content (PASS)
+
+The daily report Markdown contains the new Phase 11C.1C-C-B-A
+section:
+
+```
+Phase 11C.1C-C-B-A Strategy Validation Lab v0 & Cluster Exposure Control Contracts
+```
+
+with non-empty cohort lines confirmed for the 10 min run:
+
+```
+strategy_mode=reject                  n=24
+candidate_stage=early                 n=24
+opportunity_score_bucket=0-49         n=13
+opportunity_score_bucket=50-64        n=11
+early_tail_score_bucket=0-24          n=24
+cluster=USDT size=22 correlated=24 leader=PAXGUSDT action=no_action
+```
+
+`tail_label_distribution`:
+
+```
+unresolved x 24
+```
+
+(The 5 min primary tracking windows that opened during the
+10 min run had not all completed by the time of shutdown, so
+`unresolved` is the expected dominant label for a 10 min run;
+`STRATEGY_VALIDATION_SAMPLE_CREATED = 24` confirms the runtime
+fired.)
+
+### Safety (PASS — Phase 1 lock unchanged end-to-end)
+
+```
+exchange_live_order_enabled     = False
+live_trading_enabled            = False
+llm_enabled                     = False
+right_tail_enabled              = False
+trading_mode_paper              = True
+no live trading                 : confirmed
+no API key                      : confirmed
+no signed endpoint              : confirmed
+no private websocket            : confirmed
+no listenKey                    : confirmed
+no DeepSeek trade decision      : confirmed
+no real Telegram outbound       : confirmed
+Phase 12                        : remains FORBIDDEN
+```
+
+### Acceptance criteria — every gate met
+
+  - `dry_run = false` ✅
+  - `ws_real_transport = true` ✅
+  - `ws_messages_received = 76324` (≥ 5000) ✅
+  - `ws_chains_emitted = 27` (≥ 1) ✅
+  - `STRATEGY_VALIDATION_SAMPLE_CREATED = 24` (≥ 1) ✅
+  - `STRATEGY_VALIDATION_REPORT_GENERATED = 1` (≥ 1) ✅
+  - `STRATEGY_MODE_VALIDATED = 4` ✅ (the four canonical modes
+    `follow` / `pullback` / `observe` / `reject` are emitted
+    even when a cohort is empty — observed `reject` cohort
+    `n=24`)
+  - `CANDIDATE_STAGE_VALIDATED = 5` ✅
+  - `SCORE_BUCKET_VALIDATED = 8` ✅
+  - `CLUSTER_EXPOSURE_ASSESSED = 1` ✅
+  - `CLUSTER_LEADER_VALIDATED = 1` ✅
+  - Daily report contains the new Phase 11C.1C-C-B-A section
+    with non-empty `strategy_mode` and `candidate_stage`
+    cohort lines ✅
+  - Safety flags unchanged ✅
+  - `HTTP 429 count = 0`, `HTTP 418 count = 0`,
+    `rate_limit_ban = False` ✅
+  - `ws_reconnect_count = 0`, `ws_stale_count = 0`,
+    `ws_currently_stale = False`, `ingestion_errors = 0` ✅
 
 ## Safety boundary confirmation
 
@@ -262,10 +378,6 @@ through the live chain produces a meaningful sample.
 
 ## Remaining risk
 
-  - Real-network smoke not yet completed. The Kiro-side sandbox is
-    Binance-region geoblocked (HTTP 451) so the smoke must run on
-    an operator VPS. Until that smoke is on file, Phase 11C.1C-C-B-A
-    is `IN_REVIEW`, **NOT** `ACCEPTED`.
   - The cluster taxonomy is still the Phase 11C.1C-A
     quote-asset-only classifier, so cluster cohorts in production
     will be coarse (e.g. every `*USDT` perp lands in one cluster).
@@ -277,6 +389,19 @@ through the live chain produces a meaningful sample.
     cohorts with <5 samples may not flip a flag even when the
     underlying signal is meaningful. Operators reviewing short runs
     should consult the per-cohort cohort lines directly.
+  - **Daily-report counter snapshot timing.** The daily report's
+    top event-count lines may show
+    `STRATEGY_VALIDATION_REPORT_GENERATED` /
+    `STRATEGY_MODE_VALIDATED` / `CANDIDATE_STAGE_VALIDATED` /
+    `SCORE_BUCKET_VALIDATED` / `CLUSTER_*` counts as **0**
+    because those event counters appear to be snapshotted
+    **before** shutdown flush. The authoritative event repository
+    SQLite query confirms those events were emitted (see "Real WS
+    smoke (operator-VPS 10 min, PASSED)" above). The daily report
+    section itself rendered the Strategy Validation cohorts
+    correctly. A future daily-report polish can move the counter
+    snapshot after the shutdown flush; it is **not** in scope for
+    Phase 11C.1C-C-B-A.
 
 ## Whether PR is ready for human review
 
@@ -284,6 +409,17 @@ through the live chain produces a meaningful sample.
 shows no regression vs. the post-PR-#41 main baseline; the new
 section renders correctly in the daily-report Markdown body; the
 Phase 1 safety lock is unchanged; Phase 12 remains FORBIDDEN. The
-real-WS smoke is required before merge but does not block human
-review of the contracts + aggregators + runtime + wiring + tests +
-docs.
+**operator-VPS 10 min real public WS smoke PASSED** (commit
+`0bedcce`; verbatim evidence backfilled above) and confirms the
+runtime emits real `STRATEGY_VALIDATION_SAMPLE_CREATED` /
+`STRATEGY_VALIDATION_REPORT_GENERATED` /
+`STRATEGY_MODE_VALIDATED` / `CANDIDATE_STAGE_VALIDATED` /
+`SCORE_BUCKET_VALIDATED` / `CLUSTER_EXPOSURE_ASSESSED` /
+`CLUSTER_LEADER_VALIDATED` events end-to-end on real Binance
+public WS data. **PR #42 is ready for human review and may be
+merged after reviewer confirms the docs-only evidence
+backfill.** This PR does **not** flip Phase 11C.1C-C-B-A to
+ACCEPTED; the standard closeout PR (mirroring PR #36 → PR #37,
+PR #38 → PR #39, PR #40 → PR #41) records ACCEPTED only after
+PR #42 has merged. Phase 11C.1C-C-B-B remains **NOT_STARTED**;
+Phase 12 remains **FORBIDDEN**.

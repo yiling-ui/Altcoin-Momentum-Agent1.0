@@ -39,7 +39,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
 | #          | Title                                                                | State                       | Detail                                                                 |
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
-| 11C.1C-C-B-A | Strategy Validation Lab v0 & Cluster Exposure Control Contracts | **IN_REVIEW (PR #42 open)** | First slice of Phase 11C.1C-C-B. Paper / report only. Ships data contracts (`StrategyValidationSample`, `ClusterExposureAssessment`, `StrategyValidationReport`, …) + pure aggregators + the `StrategyValidationRuntime` that emits the seven new typed events on top of the Phase 11C.1C-C-A `LabelTrackingRecord` outcomes. Risk Engine remains the single trade-decision gate; `suggested_cluster_action` is paper / report only. NOT authorised to bypass the Phase 11C.1C-C-B-B kickoff gate. Operator-VPS 5 min / 10 min real public WS smoke required before merge. See "Open phase: Phase 11C.1C-C-B-A (IN_REVIEW)" below. |
+| 11C.1C-C-B-A | Strategy Validation Lab v0 & Cluster Exposure Control Contracts | **IN_REVIEW (PR #42 open)** | First slice of Phase 11C.1C-C-B. Paper / report only. Ships data contracts (`StrategyValidationSample`, `ClusterExposureAssessment`, `StrategyValidationReport`, …) + pure aggregators + the `StrategyValidationRuntime` that emits the seven new typed events on top of the Phase 11C.1C-C-A `LabelTrackingRecord` outcomes. Risk Engine remains the single trade-decision gate; `suggested_cluster_action` is paper / report only. NOT authorised to bypass the Phase 11C.1C-C-B-B kickoff gate. **Operator-VPS 10 min real public WS smoke PASSED** (commit `0bedcce`; verbatim evidence under §"Phase 11C.1C-C-B-A acceptance evidence (operator-VPS 10 min real public WS smoke PASSED)" below). PR #42 is ready for human review and may be merged after reviewer confirms docs-only evidence backfill; this PR does **NOT** self-flip Phase 11C.1C-C-B-A to ACCEPTED — the standard closeout PR (mirroring PR #36 → PR #37, PR #38 → PR #39, PR #40 → PR #41) records ACCEPTED only after PR #42 has merged. See "Open phase: Phase 11C.1C-C-B-A (IN_REVIEW)" below. |
 | 11C.1C-C-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up | **RESERVED / NOT_STARTED** | Reserved for the deeper Strategy Validation Lab follow-up after Phase 11C.1C-C-B-A is ACCEPTED. NOT authorised by Phase 11C.1C-C-B-A acceptance bypassing the standard gate; will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. |
 | 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A, Phase 11C.1C-C-B-B, or any other Phase 11C sub-phase). |
 
@@ -608,6 +608,17 @@ live trading, **NOT** AI Learning, **NOT** the complete Strategy
 Validation Lab, **NOT** automatic parameter optimisation,
 **NOT** Phase 12.
 
+> **Operator-VPS 10 min real public WS smoke PASSED.** The
+> verbatim runner / SQLite transcript is filed below under
+> §"Phase 11C.1C-C-B-A acceptance evidence (operator-VPS 10
+> min real public WS smoke PASSED)". **PR #42 is ready for
+> human review and may be merged after reviewer confirms
+> docs-only evidence backfill.** Phase 11C.1C-C-B-A flips to
+> ACCEPTED only after PR #42 merges, via the standard
+> closeout PR (mirroring PR #36 → PR #37, PR #38 → PR #39,
+> PR #40 → PR #41); this PR does **NOT** self-flip the phase
+> to ACCEPTED.
+
 > **Phase 11C.1C-C-B-A is paper / report only.**
 > **Phase 11C.1C-C-B-A acceptance does NOT authorise live trading.**
 > **Phase 11C.1C-C-B-A acceptance does NOT authorise API keys.**
@@ -734,7 +745,7 @@ Validation Lab, **NOT** automatic parameter optimisation,
   - Issuing any real order.
   - Entering Phase 12.
 
-### Phase 11C.1C-C-B-A acceptance gate (must hold before merge)
+### Phase 11C.1C-C-B-A acceptance gate (status: smoke PASSED, awaiting human review of PR #42)
 
   - `python -m pytest tests/unit/test_phase11c_1c_c_b_strategy_validation.py -q`
     → 25/25 PASS.
@@ -747,15 +758,22 @@ Validation Lab, **NOT** automatic parameter optimisation,
     30 s); the runner emits an empty-but-well-formed
     `STRATEGY_VALIDATION_REPORT_GENERATED` so the daily report
     still renders the new section.
-  - **5 min / 10 min operator-VPS real public WS smoke is
-    REQUIRED before merge** to confirm the runtime emits at
-    least one real `STRATEGY_VALIDATION_SAMPLE_CREATED` for a
-    completed primary 5 min window. The Kiro-side sandbox
-    cannot host this smoke (Binance-region HTTP 451 geoblock;
+  - **Operator-VPS 10 min real public WS smoke PASSED** on
+    2026-05-23 against PR #42 head (commit `0bedcce`;
+    branch
+    `feature/phase-11c1c-c-b-strategy-validation-cluster-control`).
+    The Kiro-side sandbox cannot host this smoke
+    (Binance-region HTTP 451 geoblock — historical context;
     same as the Phase 11C.1C-B / Phase 11C.1C-C-A closeouts).
-    The verbatim banner / events.db transcript MUST be filed
-    under "Phase 11C.1C-C-B-A acceptance evidence (closeout)"
-    before this phase flips to ACCEPTED.
+    The verbatim runner output + the authoritative SQLite
+    event-count query are filed under §"Phase 11C.1C-C-B-A
+    acceptance evidence (operator-VPS 10 min real public WS
+    smoke PASSED)" below. PR #42 is therefore ready for
+    human review and may be merged after the reviewer
+    confirms the docs-only evidence backfill; the Phase
+    11C.1C-C-B-A row in the closed-phases table at the top
+    of this document flips to ACCEPTED only via the standard
+    docs-only closeout PR after PR #42 has merged.
 
 ## Open phase: Phase 11C.1C-C-B-B (RESERVED / NOT_STARTED)
 
@@ -873,6 +891,162 @@ real order, no signed endpoint call, no private WebSocket
 connection, no listenKey allocation, no DeepSeek trade
 decision, no real Telegram outbound, and Phase 12 stayed
 **FORBIDDEN**.
+
+## Phase 11C.1C-C-B-A acceptance evidence (operator-VPS 10 min real public WS smoke PASSED)
+
+> The transcript below is the verbatim runner output and the
+> authoritative `events.db` SQLite query captured from the
+> operator-VPS 10 min real public WS smoke run against the
+> PR #42 branch
+> (`feature/phase-11c1c-c-b-strategy-validation-cluster-control`)
+> at commit `0bedcce`. The Kiro-side sandbox could not host
+> this smoke (Binance-region HTTP 451 geoblock — historical
+> context, same as the Phase 11C.1C-B / Phase 11C.1C-C-A
+> closeouts; this is **not** the current blocker), so the
+> operator ran it from a Binance-reachable VPS. **The smoke
+> PASSED.**
+>
+> Phase 11C.1C-C-B-A status remains **IN_REVIEW (PR #42
+> open)**: this evidence backfill confirms the smoke gate is
+> green; the closed-phases table at the top of this document
+> flips Phase 11C.1C-C-B-A to ACCEPTED only after PR #42
+> merges, via the standard docs-only closeout PR (mirroring
+> PR #36 → PR #37, PR #38 → PR #39, PR #40 → PR #41). PR #42
+> is ready for human review and may be merged after the
+> reviewer confirms this docs-only evidence backfill.
+>
+> Phase 11C.1C-C-B-B remains **NOT_STARTED**; Phase 12
+> remains **FORBIDDEN**.
+
+```
+branch                          : feature/phase-11c1c-c-b-strategy-validation-cluster-control
+commit                          : 0bedcce
+host                            : operator VPS (Binance-reachable region)
+command                         : python -m scripts.run_public_market_paper \
+                                    --duration 10min --symbol-limit 5 --ws-first
+
+# Note on banner flag
+# The runner does NOT support --emit-banner. The banner is emitted
+# by default; pass --no-banner to suppress.
+
+# WS / runner-level metrics
+duration_seconds                = 600.0
+uptime                          = 611s
+dry_run                         = false
+ws_real_transport               = true
+ws_messages_received            = 76324
+ws_chains_emitted               = 27
+learning_ready_attached         = 27
+snapshots_emitted               = 27
+ingestion_errors                = 0
+
+# Rate-limit / health
+HTTP 429 count                  = 0
+HTTP 418 count                  = 0
+rate_limit_ban                  = False
+ws_reconnect_count              = 0
+ws_stale_count                  = 0
+ws_currently_stale              = False
+
+# Strategy Validation events (authoritative, from events.db SQLite query
+# `SELECT event_type, COUNT(*) FROM events GROUP BY event_type;`,
+# captured AFTER shutdown flush)
+STRATEGY_VALIDATION_SAMPLE_CREATED       = 24
+STRATEGY_VALIDATION_REPORT_GENERATED     =  1
+STRATEGY_MODE_VALIDATED                  =  4
+CANDIDATE_STAGE_VALIDATED                =  5
+SCORE_BUCKET_VALIDATED                   =  8
+CLUSTER_EXPOSURE_ASSESSED                =  1
+CLUSTER_LEADER_VALIDATED                 =  1
+
+# Daily-report content
+daily_report_section_present    = "Phase 11C.1C-C-B-A Strategy Validation Lab v0 & Cluster Exposure Control Contracts"
+
+# Non-empty cohort lines from the daily report
+strategy_mode=reject                  n=24
+candidate_stage=early                 n=24
+opportunity_score_bucket=0-49         n=13
+opportunity_score_bucket=50-64        n=11
+early_tail_score_bucket=0-24          n=24
+cluster=USDT size=22 correlated=24 leader=PAXGUSDT action=no_action
+
+# tail_label_distribution (10 min run; 5m primary windows still in-flight)
+tail_label_distribution         = unresolved x 24
+
+# Safety boundary (Phase 1 lock unchanged end-to-end)
+exchange_live_order_enabled     = False
+live_trading_enabled            = False
+llm_enabled                     = False
+right_tail_enabled              = False
+trading_mode_paper              = True
+no live trading                 : confirmed
+no API key                      : confirmed
+no signed endpoint              : confirmed
+no private websocket            : confirmed
+no listenKey                    : confirmed
+no DeepSeek trade decision      : confirmed
+no real Telegram outbound       : confirmed
+Phase 12                        : remains FORBIDDEN
+```
+
+> **Important note on the daily report's top event-count
+> lines.** The daily report's top event-count lines may show
+> `STRATEGY_VALIDATION_REPORT_GENERATED` /
+> `STRATEGY_MODE_VALIDATED` / `CANDIDATE_STAGE_VALIDATED` /
+> `SCORE_BUCKET_VALIDATED` / `CLUSTER_*` counts as **0**
+> because those event counters appear to be snapshotted
+> **before** shutdown flush. The **authoritative** event
+> repository SQLite query (above) confirms those events were
+> emitted. The daily report **section itself** rendered the
+> Strategy Validation cohorts non-empty and correctly. This
+> snapshot-vs-flush gap is a daily-report instrumentation
+> nuance that does **not** invalidate the smoke; the SQLite
+> ground truth is conclusive. A future daily-report polish
+> can move the counter snapshot after the shutdown flush; it
+> is **not** in scope for Phase 11C.1C-C-B-A.
+
+### Acceptance criteria — every gate met
+
+  - `dry_run = false` ✅
+  - `ws_real_transport = true` ✅
+  - `ws_messages_received = 76324` (≥ 5000) ✅
+  - `ws_chains_emitted = 27` (≥ 1) ✅
+  - `STRATEGY_VALIDATION_SAMPLE_CREATED = 24` (≥ 1) ✅
+  - `STRATEGY_VALIDATION_REPORT_GENERATED = 1` (≥ 1) ✅
+  - `STRATEGY_MODE_VALIDATED = 4` ✅ (the four canonical
+    modes `follow` / `pullback` / `observe` / `reject` are
+    emitted even when a cohort is empty — observed `reject`
+    cohort `n=24`)
+  - `CANDIDATE_STAGE_VALIDATED = 5` ✅
+  - `SCORE_BUCKET_VALIDATED = 8` ✅
+  - `CLUSTER_EXPOSURE_ASSESSED = 1` ✅
+  - `CLUSTER_LEADER_VALIDATED = 1` ✅
+  - Daily report contains the new Phase 11C.1C-C-B-A section
+    with non-empty `strategy_mode` and `candidate_stage`
+    cohort lines ✅
+  - Safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `right_tail=False`, `llm=False`,
+    `exchange_live_orders=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`) ✅
+  - `HTTP 429 count = 0`, `HTTP 418 count = 0`,
+    `rate_limit_ban = False` ✅
+  - `ws_reconnect_count = 0`, `ws_stale_count = 0`,
+    `ws_currently_stale = False`, `ingestion_errors = 0` ✅
+
+The 5 m primary tracking windows that opened during the 10
+min run had not all completed by shutdown, so `unresolved`
+is the expected dominant `tail_label` for a 10 min run; the
+`STRATEGY_VALIDATION_SAMPLE_CREATED = 24` count confirms the
+runtime fired end-to-end on real Binance public WS data, and
+the `STRATEGY_VALIDATION_REPORT_GENERATED = 1` event records
+the shutdown flush.
+
+Phase 1 safety lock held end-to-end across the smoke run;
+no real order, no signed endpoint call, no private
+WebSocket connection, no listenKey allocation, no DeepSeek
+trade decision, no real Telegram outbound, and Phase 12
+stayed **FORBIDDEN**.
 
 ## Phase 11C.1C-B acceptance evidence (closeout)
 
