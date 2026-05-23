@@ -774,3 +774,51 @@ acceptance path.
 | `--ws-first --dry-run` (default)          | In-process pump, deterministic synthetic messages, no socket, full event chain.                                        |
 | `--ws-first` (no `--dry-run`)             | Real `MultiTransportPublicWSManager` opening routed PUBLIC (`/public/stream`) + MARKET (`/market/stream`) endpoints. RC=2 if the factory cannot produce one - never silently falls back to REST. |
 | `--ws-disabled`                           | PR-A bootstrap-only REST path. Documented as **not** the Phase 11C.1B all-market demon-radar acceptance path.          |
+
+
+## Architecture governance (guidance-only)
+
+A new architecture governance document has been added to the
+repository:
+
+  - `docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md` —
+    *AMA-RT Adaptive Market Operating System Governance /
+    自适应市场操作系统架构治理文档.*
+
+This document is **guidance-only**. It records the long-term
+architectural rails of AMA-RT: core positioning ("AMA-RT is
+not an auto-trading bot, AMA-RT is an Adaptive Market
+Operating System"), AI authority boundaries (LLMs may explain,
+LLMs may **not** trade / size / leverage / stop / target),
+stateless AI cognition, the Truth Layer, the Reality Check
+Layer, anti-overfitting governance, feedback isolation, the
+nine-layer architecture, the not-implemented-yet backlog, and
+the explicit rejections list (incl. AI autonomous trading,
+direct price prediction, RL live trading, black-box parameter
+optimisation, AI bypassing the Risk Engine, direct Phase 12
+jump).
+
+The governance document **does NOT**:
+
+  - change the current phase,
+  - flip any safety flag,
+  - authorise any runtime behavior,
+  - authorise live trading, API keys, signed endpoints,
+    private WebSockets, `listenKey`, DeepSeek trade
+    decisions, or real Telegram outbound,
+  - advance Phase 11C.1C-C-B-B-A to ACCEPTED,
+  - kick off Phase 11C.1C-C-B-B-B,
+  - authorise Phase 12.
+
+Current phase is unchanged: **Phase 11C.1C-C-B-B-A is
+IN_REVIEW (PR #44 open)**, current work focus remains
+*validation / dataset / quality gate / replay verification*,
+and **Phase 12 (real money / live trading) remains
+FORBIDDEN**. The Phase 1 safety lock continues to hold:
+`mode=paper`, `live_trading=False`, `right_tail=False`,
+`llm=False`, `exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no
+Binance API secret, no signed endpoint, no private WebSocket,
+no `listenKey`, no DeepSeek trade decision, no real Telegram
+outbound.

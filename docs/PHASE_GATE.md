@@ -2149,3 +2149,59 @@ by:
   - Operational evidence the four write surfaces, the No-Trade Gate,
     and the Reconciliation loop have held under real-data load
   - Explicit operator sign-off; Phase 12 is never auto-promoted
+
+
+## Architecture governance (guidance-only; no phase change)
+
+**Document added:**
+`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md` —
+*AMA-RT Adaptive Market Operating System Governance /
+自适应市场操作系统架构治理文档*.
+
+**Type:** Guidance-only architecture governance.
+**Phase ledger effect:** **none.**
+**Trade authority granted:** **none.**
+**Safety flag effect:** **none.**
+
+The governance document records the long-term architectural
+rails of AMA-RT (core positioning as an Adaptive Market
+Operating System rather than an auto-trading bot, AI authority
+boundary, stateless AI cognition, the Truth Layer, the Reality
+Check Layer, anti-overfitting governance, feedback isolation,
+the nine-layer architecture annotated with current state, the
+not-implemented-yet backlog, and the explicit rejections list).
+
+The governance document **does NOT** open a new phase, **does
+NOT** close any existing phase, **does NOT** flip any
+acceptance state on this ledger, **does NOT** advance Phase
+11C.1C-C-B-B-A to ACCEPTED, **does NOT** kick off Phase
+11C.1C-C-B-B-B, and **does NOT** authorise Phase 12. It is
+binding as architectural guidance, **not** as a phase
+transition.
+
+The Phase 1 safety lock continues to hold and is **not**
+modified by this document:
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+The current open phase remains **Phase 11C.1C-C-B-B-A
+(IN_REVIEW; PR #44 open)**, the next-allowed phase remains
+**Phase 11C.1C-C-B-B-B (FORBIDDEN by PR #44; NEXT_ALLOWED
+after Phase 11C.1C-C-B-B-A is ACCEPTED)**, and **Phase 12
+remains FORBIDDEN**.

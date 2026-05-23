@@ -7,6 +7,157 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Docs-only - AMA-RT Adaptive Market Operating System Governance (guidance-only)
+
+**Type:** Docs-only governance addition.
+**Runtime effect:** **none.**
+**Phase ledger effect:** **none.**
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+#### Added
+
+- **`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`** (NEW)
+  — *AMA-RT Adaptive Market Operating System Governance /
+  自适应市场操作系统架构治理文档.* Long-term architecture
+  governance document recording:
+  - **Core positioning**: AMA-RT is **not** an auto-trading
+    bot; AMA-RT is an Adaptive Market Operating System.
+  - **Core philosophy**: market is a dynamic adversarial
+    system; no fixed strategy is permanently valid; system
+    researches capital absorption / liquidity / market
+    structure rather than raw price prediction; candles can
+    be induced, real fills / volume / OI / funding / spread
+    / depth / liquidation / spot-perp divergence are closer
+    to truth.
+  - **AI authority boundary** (forever): AI / LLM may do
+    market explanation, narrative interpretation, regime
+    interpretation, structural anomaly explanation,
+    replay / reflection summarisation, and evidence
+    compression. AI / LLM **MUST NEVER** place an order,
+    close a position, modify leverage, modify size, modify
+    stop-loss, modify target, bypass the Risk Engine,
+    bypass the Execution FSM, bypass the Phase Gate,
+    trigger a real trade, or treat its own text as a
+    training fact.
+  - **Stateless AI cognition**: AI inference must be
+    stateless; chat history is not a fact source; previous
+    assistant responses are not facts; AI's own past
+    analysis is not a training label. Fact-source priority
+    (highest first): exchange public market data,
+    `EventRepository`, replay / export, structured reports,
+    human-approved phase docs, AI text only as commentary
+    never as truth.
+  - **Truth Layer**: append-only immutable record of
+    `price`, `volume`, `OI`, `funding`, `spread`, `depth`,
+    `liquidation`, spot/perp divergence, candidate
+    `first_seen`, `MFE`, `MAE`, `tail_label`, risk
+    rejection reason, `strategy_mode`, cluster context,
+    `report_id` / `opportunity_id` / `scan_batch_id`. AI
+    judgements must cite Truth Layer fields; no claim of
+    strategy effectiveness without Truth Layer evidence.
+  - **Reality Check Layer**: hard-rule (not LLM) gate
+    that downweights / rejects AI conclusions when funding
+    is overheated, spread is widening, depth has collapsed,
+    spot volume is falling while perp price rises,
+    `late_chase_risk` is high, data is stale or degraded,
+    or the Risk Engine has rejected. Reality Check
+    priority sits above AI explanation and Strategy
+    Selector recommendation; the Risk Engine remains the
+    absolute trade-decision gate.
+  - **Anti-overfitting governance**: no auto rule
+    loosening from small samples; no global change from a
+    single 妖币 (demon coin) case; no leverage / size lift
+    from historical sample fits; no parameter tuning from
+    AI text labels. All strategy adjustments must pass the
+    six-gate process (sample-count gate, validation
+    quality gate, replay, paper-only shadow validation,
+    human review, phase-gate approval).
+  - **Feedback isolation**: AI may **not** learn from its
+    own narrative, confidence, prior speculative text,
+    Telegram copy, or unverified human subjective
+    evaluation. AI may only learn from `MFE` / `MAE`,
+    `tail_label`, `fake_breakout`, `missed_tail`,
+    `late_chase_failure`, risk-rejection outcomes, and
+    replay-verified results.
+  - **Architecture layers** (annotated with current
+    state and trade-authority): Observation Layer
+    (partial; NONE), Market Intelligence Layer (partial;
+    NONE), Regime Engine (partial; NONE), Strategy
+    Orchestrator (partial; paper, NONE), Risk Allocation
+    Engine (GATE), Execution FSM (paper today; GATE),
+    Replay / Verification Layer (partial; NONE), Truth
+    Layer (substrate; NONE), Reality Check Layer (partial;
+    DOWNWEIGHT). Only the Risk Engine and the Execution
+    FSM are trade-decision gates.
+  - **Future backlog (not implemented; no trade
+    authority)**: Regime Transition Prediction, Liquidity
+    Intelligence, Market Structure Memory, Narrative
+    Acceleration, Social Saturation, Bot Amplification,
+    Cross-exchange Flow, Lead-lag Relationships,
+    Spot/perp Divergence, Stablecoin Inflow, Iceberg /
+    Spoof Detection, Narrative-aware Cluster Taxonomy,
+    AI Market Intelligence Layer, AI Interpretation
+    Sandbox, AI Reality Check Scoring. Each item is
+    `NOT_STARTED` or `FUTURE_RESEARCH` with
+    `trade_authority = NONE`.
+  - **Explicit rejections** (permanent): AI autonomous
+    trading, AI direct price prediction, reinforcement
+    learning live trading, black-box parameter
+    optimisation, infinite auto-optimisation, AI bypassing
+    the Risk Engine, AI modifying leverage / size / stop /
+    target, direct Phase 12 jump.
+- **`docs/PROJECT_STATUS.md`** — appended a guidance-only
+  "Architecture governance" section that references the new
+  document and explicitly states the document does not
+  change the current phase, does not flip any safety flag,
+  does not authorise any runtime behavior, does not advance
+  Phase 11C.1C-C-B-B-A to ACCEPTED, does not kick off Phase
+  11C.1C-C-B-B-B, and does not authorise Phase 12. The Phase
+  1 safety lock is restated verbatim.
+- **`docs/PHASE_GATE.md`** — appended a guidance-only
+  "Architecture governance (guidance-only; no phase change)"
+  section at the end. Phase ledger effect: none. Trade
+  authority granted: none. Safety flag effect: none. Phase 12
+  remains FORBIDDEN. The current open phase remains Phase
+  11C.1C-C-B-B-A (IN_REVIEW; PR #44 open).
+
+#### Forbidden by this PR (carries forward verbatim)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop /
+  target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- Risk Engine override / bypass.
+- Phase 11C.1C-C-B-B-A acceptance flip (this docs-only PR
+  is independent of the Phase 11C.1C-C-B-B-A acceptance
+  flow).
+- Phase 11C.1C-C-B-B-B kickoff.
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only)
+
+- Docs-only PR. No code modified under `app/`, `scripts/`,
+  `tests/`, `configs/`, `risk/`, `execution/`, `llm/`,
+  `telegram/`, or `exchange/`.
+- No new tests are required (no runtime / contract change).
+- No dry-run / smoke required (no runtime change).
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
 ### Phase 11C.1C-C-B-B-A - Strategy Validation Dataset Builder & Quality Gate v0
 
 **Version:** `1.4.0a11c.1c.c.b.b.a` - Phase 11C.1C-C-B-B-A.
