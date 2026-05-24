@@ -7,6 +7,179 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Docs-only - Phase 11C.1C-C-B-B-B-A (Paper Alpha Gate v0) kickoff / scope alignment (guidance-only)
+
+**Type:** Docs-only kickoff / scope-alignment.
+**Runtime effect:** **none.**
+**Phase ledger effect:** introduces Phase 11C.1C-C-B-B-B-A
+at `NEXT_ALLOWED / NOT_STARTED` as the **first child slice**
+under the Phase 11C.1C-C-B-B-B parent. **No phase's
+acceptance state is flipped.** Phase 11C.1C-C-B-B-A remains
+`ACCEPTED`. Phase 11C.1C-C-B-B-B remains `NEXT_ALLOWED /
+NOT_STARTED` (parent; **unchanged definition** —
+*Strategy Validation Lab (deeper) & richer Cluster Exposure
+Control follow-up*).
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **This PR is paper / report only.** **NOT** live trading.
+> **NOT** AI Learning. **NOT** automatic parameter
+> optimisation. **NOT** reinforcement learning. **NOT** the
+> complete Strategy Validation Lab follow-up. **NOT** Phase
+> 12. **NOT** the Paper Alpha Gate v0 implementation —
+> Paper Alpha Gate v0 is **NOT implemented by Phase
+> 11C.1C-C-B-B-A**, **NOT implemented by this kickoff PR**,
+> and may only start as the Phase 11C.1C-C-B-B-B-A child
+> slice after this docs-only kickoff is reviewed and a
+> separate implementation PR is reviewed and merged.
+>
+> The Paper Alpha Gate v0 verdict, when implemented, will
+> be a descriptive label (`PASS` / `WARN` / `FAIL` /
+> `INCONCLUSIVE`) for human review only. The verdict
+> **MUST NEVER** trigger a real trade or modify position
+> size, leverage, stop-loss, target price, the Risk
+> Engine, or the Execution FSM. The Risk Engine remains
+> the single trade-decision gate.
+
+#### Added
+
+- **`docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`** (NEW)
+  — *Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (docs-only
+  kickoff)*. Records the parent / child relationship
+  (Phase 11C.1C-C-B-B-B-A is the first child slice under
+  Phase 11C.1C-C-B-B-B; the parent phase is **not**
+  renamed), the scope (paper-only / report-only consumer of
+  the existing Phase 11C.1C-C-B-B-A `StrategyValidationDataset`
+  / `StrategyValidationQualityGate` /
+  `StrategyValidationReport` artefacts; descriptive verdict
+  `PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`; no execution
+  surface reads the verdict), the explicit non-scope (NOT
+  live trading, NOT AI Learning, NOT automatic parameter
+  optimisation, NOT reinforcement learning, NOT the complete
+  Strategy Validation Lab follow-up, NOT a strategy quality /
+  profitability oracle, NOT a position-sizing / leverage /
+  stop-loss / target-price modifier, NOT a Risk Engine /
+  Execution FSM / Phase Gate override, NOT a path into Phase
+  12, NOT a real-trade authority of any kind), the boundary
+  table (Phase 1 safety lock + verdict-is-descriptive-only
+  invariants), and the explicitly-forbidden list (inherited
+  verbatim).
+- **`docs/PR51_DESCRIPTION.md`** (NEW) — describes this
+  docs-only kickoff PR (changed files, allowed / forbidden
+  edits, confirmation checklist).
+- **`docs/PHASE_GATE.md`** — added a new
+  *Open phase: Phase 11C.1C-C-B-B-B-A (NEXT_ALLOWED /
+  NOT_STARTED)* section after the existing Phase
+  11C.1C-C-B-B-B section; added a new B-B-B-A row to the
+  *Open / Reserved phases* table; refined the "Paper Alpha
+  Gate v0" boundary lines in the Phase 11C.1C-C-B-B-A and
+  Phase 11C.1C-C-B-B-B tables and forbidden lists to be
+  more precise (Paper Alpha Gate v0 is NOT implemented by
+  Phase 11C.1C-C-B-B-A; Paper Alpha Gate v0 may only start
+  as Phase 11C.1C-C-B-B-B-A after this docs-only kickoff
+  and a separate implementation PR; Paper Alpha Gate v0
+  remains paper-only / report-only and grants no trade
+  authority); refreshed the
+  *Architecture governance (guidance-only; no phase change)*
+  closing paragraph to reflect the current open-phase state
+  (B-B-A = ACCEPTED; B-B-B = NEXT_ALLOWED / NOT_STARTED;
+  B-B-B-A = NEXT_ALLOWED / NOT_STARTED; Phase 12 =
+  FORBIDDEN). Phase 12 row updated to mention Phase
+  11C.1C-C-B-B-B-A in the "NOT permitted from any Phase
+  11C sub-phase alone" list.
+- **`docs/PROJECT_STATUS.md`** — added a Phase
+  11C.1C-C-B-B-B-A row to the per-phase table; added a new
+  subsection
+  *Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (first
+  child slice; docs-only kickoff)* under the existing
+  *Open phase: Phase 11C.1C-C-B-B-B* prose; refined the
+  parent B-B-B row to clarify the parent is **not** renamed;
+  refined the "Paper Alpha Gate v0" bullet items to be more
+  precise; added a Current-phase quick-reference line for
+  Phase 11C.1C-C-B-B-B-A.
+
+#### Forbidden by this PR (carries forward verbatim)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop /
+  target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- AI Learning that auto-decides trades.
+- Risk Engine override / bypass.
+- Execution FSM override / bypass.
+- Phase Gate override / bypass.
+- Implementing Paper Alpha Gate v0 (this PR is docs-only;
+  the implementation lands in a separate PR that opens
+  Phase 11C.1C-C-B-B-B-A as the first child slice under
+  Phase 11C.1C-C-B-B-B).
+- Implementing the complete Strategy Validation Lab
+  follow-up (reserved for later child slices under Phase
+  11C.1C-C-B-B-B).
+- Adding new Python modules under `app/`.
+- Adding new event types.
+- Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+  `risk/`, `execution/`, `llm/`, `telegram/`, or
+  `exchange/`.
+- Modifying configuration schemas, defaults, or YAML.
+- Adding or modifying tests.
+- Flipping any phase's acceptance state. Phase
+  11C.1C-C-B-B-A remains `ACCEPTED`. Phase 11C.1C-C-B-B-B
+  remains `NEXT_ALLOWED / NOT_STARTED`. Phase
+  11C.1C-C-B-B-B-A is introduced at `NEXT_ALLOWED /
+  NOT_STARTED`. Phase 12 remains `FORBIDDEN`.
+- Renaming Phase 11C.1C-C-B-B-B. The parent phase keeps its
+  existing definition — *Strategy Validation Lab (deeper) &
+  richer Cluster Exposure Control follow-up*.
+- Phase 11C.1C-C-B-B-B-A implementation (out of scope for
+  this kickoff PR).
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only)
+
+- Docs-only PR. **No code modified** under `app/`,
+  `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`,
+  `llm/`, `telegram/`, or `exchange/`.
+- **No new Python files.**
+- **No new event types.**
+- **No new tests.**
+- **No dry-run / smoke required** (no runtime change).
+- **No phase acceptance state flipped.**
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Docs-only - AMA-RT Adaptive Market Operating System Governance (guidance-only)
 
 **Type:** Docs-only governance addition.
