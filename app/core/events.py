@@ -444,6 +444,57 @@ class EventType(str, Enum):
     PAPER_ALPHA_COHORT_EVALUATED = "PAPER_ALPHA_COHORT_EVALUATED"
     PAPER_ALPHA_REPORT_GENERATED = "PAPER_ALPHA_REPORT_GENERATED"
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence Pack v0.
+    #
+    # The Regime & Cluster Cohort Evidence Pack v0 is a paper / report
+    # / evidence-only compression layer that aggregates the Phase
+    # 11C.1C-C-B-B-A :class:`StrategyValidationDataset` (and
+    # transitively the Phase 11C.1C-C-B-A
+    # :class:`StrategyValidationReport` cohort stats and the Phase
+    # 11C.1C-C-B-B-B-A :class:`PaperAlphaGateReport` verdict) into a
+    # structured cohort summary across ``market_regime`` /
+    # ``cluster_id`` / ``cluster_leader_vs_follower`` /
+    # ``candidate_stage`` / ``strategy_mode`` /
+    # ``opportunity_score_bucket`` / ``early_tail_score_bucket``.
+    #
+    # Phase 11C.1C-C-B-B-B-B boundary:
+    # - Every event below is paper / report / evidence only. None of
+    #   them authorises a real trade, modifies a real position, or
+    #   flips a Phase 1 safety flag.
+    # - The ``evidence_pack_status`` carried by every payload is a
+    #   *descriptive* roll-up - one of ``INSUFFICIENT_SAMPLE`` /
+    #   ``OBSERVE_ONLY`` / ``WARNING`` / ``EVIDENCE_SIGNAL``. It is
+    #   NEVER an input to a trade-decision pipeline; the Risk Engine
+    #   remains the single trade-decision gate.
+    # - The pack MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, or the Execution
+    #   FSM.
+    # - This is **NOT** a new strategy, **NOT** a trading module,
+    #   **NOT** AI Learning, **NOT** automatic parameter
+    #   optimisation, **NOT** reinforcement learning, **NOT** the
+    #   complete Strategy Validation Lab follow-up, **NOT** Phase
+    #   12.
+    # - Every payload carries ``schema_version`` so future PRs can
+    #   extend the shape; old events without the v0 sub-block remain
+    #   replayable verbatim.
+    #
+    #   REGIME_CLUSTER_EVIDENCE_PACK_GENERATED   - the full
+    #     :class:`RegimeClusterEvidencePack` payload was assembled
+    #     and is available for export / replay.
+    #   REGIME_CLUSTER_COHORT_SUMMARY_GENERATED - one named cohort
+    #     summary (``regime_cohort_summary`` /
+    #     ``cluster_cohort_summary`` / ``score_bucket_summary`` /
+    #     ``stage_outcome_summary`` /
+    #     ``strategy_mode_outcome_summary``) was emitted. The
+    #     payload's ``summary_name`` field disambiguates.
+    REGIME_CLUSTER_EVIDENCE_PACK_GENERATED = (
+        "REGIME_CLUSTER_EVIDENCE_PACK_GENERATED"
+    )
+    REGIME_CLUSTER_COHORT_SUMMARY_GENERATED = (
+        "REGIME_CLUSTER_COHORT_SUMMARY_GENERATED"
+    )
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

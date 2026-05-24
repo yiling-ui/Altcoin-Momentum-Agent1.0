@@ -36,7 +36,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from app.core.clock import now_ms
 from app.core.events import CAPITAL_EVENT_TYPES, Event, EventType
@@ -316,6 +316,37 @@ class DailyReportSnapshot:
     paper_alpha_follow_risk_warnings: int = 0
     paper_alpha_leader_preference_signals: int = 0
     paper_alpha_gate_report: dict[str, Any] = field(default_factory=dict)
+    # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence Pack
+    # v0. The runner passes the
+    # :meth:`StrategyValidationRuntime.metrics_payload` dict through
+    # ``strategy_validation_metrics``; the regime / cluster
+    # evidence-pack sub-block below is read from that dict. Every
+    # value is paper / report / evidence only - the per-cohort
+    # status and the ``regime_cluster_evidence_status`` are
+    # *descriptive* labels (``INSUFFICIENT_SAMPLE`` /
+    # ``OBSERVE_ONLY`` / ``WARNING`` / ``EVIDENCE_SIGNAL``) and
+    # **MUST NEVER trigger a real trade**, and **MUST NEVER**
+    # modify position size, leverage, stop-loss, target price, the
+    # Risk Engine, or the Execution FSM. The Risk Engine remains
+    # the single trade-decision gate.
+    regime_cluster_evidence_pack_generated_count: int = 0
+    regime_cluster_cohort_summary_generated_count: int = 0
+    regime_cluster_evidence_status: str = ""
+    regime_cluster_sample_count: int = 0
+    regime_cluster_completed_tail_label_count: int = 0
+    regime_cluster_insufficient_sample_reasons: list[str] = field(
+        default_factory=list
+    )
+    regime_cluster_warnings: list[str] = field(default_factory=list)
+    regime_cluster_signals: list[str] = field(default_factory=list)
+    regime_cohort_summary: dict[str, Any] = field(default_factory=dict)
+    cluster_cohort_summary: dict[str, Any] = field(default_factory=dict)
+    score_bucket_summary: dict[str, Any] = field(default_factory=dict)
+    stage_outcome_summary: dict[str, Any] = field(default_factory=dict)
+    strategy_mode_outcome_summary: dict[str, Any] = field(
+        default_factory=dict
+    )
+    regime_cluster_evidence_pack: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -650,6 +681,38 @@ class DailyReportSnapshot:
                 self.paper_alpha_leader_preference_signals
             ),
             "paper_alpha_gate_report": dict(self.paper_alpha_gate_report),
+            # Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort Evidence
+            # Pack v0 fields.
+            "regime_cluster_evidence_pack_generated_count": int(
+                self.regime_cluster_evidence_pack_generated_count
+            ),
+            "regime_cluster_cohort_summary_generated_count": int(
+                self.regime_cluster_cohort_summary_generated_count
+            ),
+            "regime_cluster_evidence_status": str(
+                self.regime_cluster_evidence_status
+            ),
+            "regime_cluster_sample_count": int(
+                self.regime_cluster_sample_count
+            ),
+            "regime_cluster_completed_tail_label_count": int(
+                self.regime_cluster_completed_tail_label_count
+            ),
+            "regime_cluster_insufficient_sample_reasons": list(
+                self.regime_cluster_insufficient_sample_reasons
+            ),
+            "regime_cluster_warnings": list(self.regime_cluster_warnings),
+            "regime_cluster_signals": list(self.regime_cluster_signals),
+            "regime_cohort_summary": dict(self.regime_cohort_summary),
+            "cluster_cohort_summary": dict(self.cluster_cohort_summary),
+            "score_bucket_summary": dict(self.score_bucket_summary),
+            "stage_outcome_summary": dict(self.stage_outcome_summary),
+            "strategy_mode_outcome_summary": dict(
+                self.strategy_mode_outcome_summary
+            ),
+            "regime_cluster_evidence_pack": dict(
+                self.regime_cluster_evidence_pack
+            ),
         }
 
 
@@ -1916,6 +1979,118 @@ class DailyReportBuilder:
                 )
                 or {}
             ),
+            # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort
+            # Evidence Pack v0 sub-block read off the runtime metrics
+            # payload. Event-log counts of the two new event types
+            # are used as the cross-check / fall-back so a stale
+            # runner counter cannot under-report a real evidence-pack
+            # event.
+            regime_cluster_evidence_pack_generated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "regime_cluster_evidence_pack_generated_count",
+                            0,
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.REGIME_CLUSTER_EVIDENCE_PACK_GENERATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            regime_cluster_cohort_summary_generated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "regime_cluster_cohort_summary_generated_count",
+                            0,
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.REGIME_CLUSTER_COHORT_SUMMARY_GENERATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            regime_cluster_evidence_status=str(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_evidence_status", ""
+                )
+                or ""
+            ),
+            regime_cluster_sample_count=int(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_sample_count", 0
+                )
+                or 0
+            ),
+            regime_cluster_completed_tail_label_count=int(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_completed_tail_label_count", 0
+                )
+                or 0
+            ),
+            regime_cluster_insufficient_sample_reasons=list(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_insufficient_sample_reasons", []
+                )
+                or []
+            ),
+            regime_cluster_warnings=list(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_warnings", []
+                )
+                or []
+            ),
+            regime_cluster_signals=list(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_signals", []
+                )
+                or []
+            ),
+            regime_cohort_summary=dict(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cohort_summary", {}
+                )
+                or {}
+            ),
+            cluster_cohort_summary=dict(
+                (strategy_validation_metrics or {}).get(
+                    "cluster_cohort_summary", {}
+                )
+                or {}
+            ),
+            score_bucket_summary=dict(
+                (strategy_validation_metrics or {}).get(
+                    "score_bucket_summary", {}
+                )
+                or {}
+            ),
+            stage_outcome_summary=dict(
+                (strategy_validation_metrics or {}).get(
+                    "stage_outcome_summary", {}
+                )
+                or {}
+            ),
+            strategy_mode_outcome_summary=dict(
+                (strategy_validation_metrics or {}).get(
+                    "strategy_mode_outcome_summary", {}
+                )
+                or {}
+            ),
+            regime_cluster_evidence_pack=dict(
+                (strategy_validation_metrics or {}).get(
+                    "regime_cluster_evidence_pack", {}
+                )
+                or {}
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -2556,6 +2731,139 @@ class DailyReportBuilder:
             snapshot.paper_alpha_cluster_results
         )
 
+        # ---- Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort
+        # Evidence Pack v0. Paper / report / evidence only. The
+        # ``regime_cluster_evidence_status`` is a *descriptive*
+        # roll-up (one of ``INSUFFICIENT_SAMPLE`` / ``OBSERVE_ONLY``
+        # / ``WARNING`` / ``EVIDENCE_SIGNAL``) and **MUST NEVER
+        # trigger a real trade** and **MUST NEVER** modify position
+        # size, leverage, stop-loss, target price, the Risk Engine,
+        # or the Execution FSM. The Risk Engine remains the single
+        # trade-decision gate.
+        regime_cluster_block = (
+            f"- REGIME_CLUSTER_EVIDENCE_PACK_GENERATED count: "
+            f"**{snapshot.regime_cluster_evidence_pack_generated_count}**\n"
+            f"- REGIME_CLUSTER_COHORT_SUMMARY_GENERATED count: "
+            f"**{snapshot.regime_cluster_cohort_summary_generated_count}**\n"
+            f"- Regime / cluster evidence status: "
+            f"**{snapshot.regime_cluster_evidence_status or '(not evaluated)'}**\n"
+            f"- Regime / cluster sample count: "
+            f"**{snapshot.regime_cluster_sample_count}**\n"
+            f"- Regime / cluster completed tail-label count: "
+            f"**{snapshot.regime_cluster_completed_tail_label_count}**\n"
+        )
+
+        if snapshot.regime_cluster_insufficient_sample_reasons:
+            regime_cluster_insufficient_lines = "\n".join(
+                f"- `{r}`"
+                for r in snapshot.regime_cluster_insufficient_sample_reasons
+            )
+        else:
+            regime_cluster_insufficient_lines = (
+                "- (no insufficient_sample reasons in this window)"
+            )
+
+        if snapshot.regime_cluster_warnings:
+            regime_cluster_warning_lines = "\n".join(
+                f"- `{w}`" for w in snapshot.regime_cluster_warnings
+            )
+        else:
+            regime_cluster_warning_lines = (
+                "- (no regime/cluster warnings in this window)"
+            )
+
+        if snapshot.regime_cluster_signals:
+            regime_cluster_signal_lines = "\n".join(
+                f"- `{s}`" for s in snapshot.regime_cluster_signals
+            )
+        else:
+            regime_cluster_signal_lines = (
+                "- (no regime/cluster signals in this window)"
+            )
+
+        def _evidence_row_lines(rows: Sequence[Mapping[str, Any]]) -> str:
+            if not rows:
+                return "- (no entries in this window)"
+            lines: list[str] = []
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                key = row.get("key") or {}
+                dim = (
+                    str(key.get("dimension"))
+                    if isinstance(key, Mapping)
+                    else ""
+                )
+                val = (
+                    str(key.get("value"))
+                    if isinstance(key, Mapping)
+                    else ""
+                )
+                n = int(row.get("sample_count", 0) or 0)
+                completed = int(
+                    row.get("completed_tail_label_count", 0) or 0
+                )
+                strong_rate = float(row.get("strong_tail_rate", 0.0) or 0.0)
+                p3r = float(row.get("reached_3r_rate", 0.0) or 0.0)
+                p5r = float(row.get("reached_5r_rate", 0.0) or 0.0)
+                fake = float(row.get("fake_breakout_rate", 0.0) or 0.0)
+                missed = float(row.get("missed_tail_rate", 0.0) or 0.0)
+                late = float(
+                    row.get("late_chase_failure_rate", 0.0) or 0.0
+                )
+                med_mfe = float(row.get("median_mfe", 0.0) or 0.0)
+                med_mae = float(row.get("median_mae", 0.0) or 0.0)
+                status = str(row.get("status") or "")
+                signals = list(row.get("signals") or [])
+                warnings = list(row.get("warnings") or [])
+                lines.append(
+                    f"- `{dim}={val}` n={n} completed={completed} "
+                    f"status=**{status or '(unset)'}** "
+                    f"strong={strong_rate:.3f} 3r={p3r:.3f} "
+                    f"5r={p5r:.3f} fake={fake:.3f} "
+                    f"missed={missed:.3f} late={late:.3f} "
+                    f"mfe~={med_mfe:.4f} mae~={med_mae:.4f} "
+                    f"signals={signals or '-'} warnings={warnings or '-'}"
+                )
+            return "\n".join(lines) if lines else "- (no entries)"
+
+        regime_rows = (snapshot.regime_cohort_summary or {}).get("rows") or []
+        cluster_rows = (snapshot.cluster_cohort_summary or {}).get(
+            "rows"
+        ) or []
+        leader_follower_rows = (
+            (snapshot.cluster_cohort_summary or {}).get(
+                "leader_vs_follower_rows"
+            )
+            or []
+        )
+        opp_score_rows = (snapshot.score_bucket_summary or {}).get(
+            "opportunity_score_rows"
+        ) or []
+        ets_score_rows = (snapshot.score_bucket_summary or {}).get(
+            "early_tail_score_rows"
+        ) or []
+        stage_rows = (snapshot.stage_outcome_summary or {}).get(
+            "rows"
+        ) or []
+        mode_rows = (snapshot.strategy_mode_outcome_summary or {}).get(
+            "rows"
+        ) or []
+
+        regime_cluster_regime_lines = _evidence_row_lines(regime_rows)
+        regime_cluster_cluster_lines = _evidence_row_lines(cluster_rows)
+        regime_cluster_leader_follower_lines = _evidence_row_lines(
+            leader_follower_rows
+        )
+        regime_cluster_opp_bucket_lines = _evidence_row_lines(
+            opp_score_rows
+        )
+        regime_cluster_ets_bucket_lines = _evidence_row_lines(
+            ets_score_rows
+        )
+        regime_cluster_stage_lines = _evidence_row_lines(stage_rows)
+        regime_cluster_mode_lines = _evidence_row_lines(mode_rows)
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -2731,6 +3039,43 @@ class DailyReportBuilder:
             f"{paper_alpha_ets_bucket_lines}\n\n"
             f"### Paper alpha cluster_leader_vs_follower results\n"
             f"{paper_alpha_cluster_lines}\n\n"
+            f"## Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort "
+            f"Evidence Pack v0\n"
+            f"_Regime & Cluster Cohort Evidence Pack v0 sub-blocks "
+            f"are paper / report / evidence-only. The "
+            f"`regime_cluster_evidence_status` is a **descriptive** "
+            f"label (one of `INSUFFICIENT_SAMPLE` / `OBSERVE_ONLY` "
+            f"/ `WARNING` / `EVIDENCE_SIGNAL`) and **MUST NEVER "
+            f"trigger a real trade**, and **MUST NEVER** modify "
+            f"position size, leverage, stop-loss, target price, the "
+            f"Risk Engine, or the Execution FSM. The Risk Engine "
+            f"remains the single trade-decision gate. This is "
+            f"**NOT** a new strategy, **NOT** a trading module, "
+            f"**NOT** AI Learning, **NOT** automatic parameter "
+            f"optimisation, **NOT** reinforcement learning, "
+            f"**NOT** the complete Strategy Validation Lab "
+            f"follow-up; Phase 12 remains FORBIDDEN._\n\n"
+            f"{regime_cluster_block}\n"
+            f"### Regime / cluster insufficient sample reasons\n"
+            f"{regime_cluster_insufficient_lines}\n\n"
+            f"### Regime / cluster warnings\n"
+            f"{regime_cluster_warning_lines}\n\n"
+            f"### Regime / cluster signals\n"
+            f"{regime_cluster_signal_lines}\n\n"
+            f"### Regime cohort summary (per market_regime)\n"
+            f"{regime_cluster_regime_lines}\n\n"
+            f"### Cluster cohort summary (per cluster_id)\n"
+            f"{regime_cluster_cluster_lines}\n\n"
+            f"### Cluster leader-vs-follower cohort summary\n"
+            f"{regime_cluster_leader_follower_lines}\n\n"
+            f"### Score bucket summary (opportunity_score buckets)\n"
+            f"{regime_cluster_opp_bucket_lines}\n\n"
+            f"### Score bucket summary (early_tail_score buckets)\n"
+            f"{regime_cluster_ets_bucket_lines}\n\n"
+            f"### Stage outcome summary (per candidate_stage)\n"
+            f"{regime_cluster_stage_lines}\n\n"
+            f"### Strategy mode outcome summary (per strategy_mode)\n"
+            f"{regime_cluster_mode_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

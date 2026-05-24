@@ -463,6 +463,20 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "PAPER_ALPHA_RULE_EVALUATED",
         "PAPER_ALPHA_COHORT_EVALUATED",
         "PAPER_ALPHA_REPORT_GENERATED",
+        # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence
+        # Pack v0. Emission lives in
+        # app/adaptive/strategy_validation_runtime.py; the paper_run
+        # daily-report builder counts these events as a cross-check
+        # against the runtime's runner-side ``metrics_payload``.
+        # None of these events authorise a real trade; the
+        # ``evidence_pack_status`` field is descriptive
+        # (``INSUFFICIENT_SAMPLE`` / ``OBSERVE_ONLY`` / ``WARNING``
+        # / ``EVIDENCE_SIGNAL``) and **MUST NEVER trigger a real
+        # trade, modify position size, leverage, stop-loss, target
+        # price, the Risk Engine, or the Execution FSM**. The Risk
+        # Engine remains the single trade-decision gate.
+        "REGIME_CLUSTER_EVIDENCE_PACK_GENERATED",
+        "REGIME_CLUSTER_COHORT_SUMMARY_GENERATED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (
