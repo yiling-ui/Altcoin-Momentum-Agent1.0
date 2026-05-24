@@ -171,6 +171,119 @@ artefacts. The dataset is exportable, replayable, and
 auditable; the quality gate is a *sample trust* gate, not a
 *strategy quality* gate.
 
+> **Status: ACCEPTED (closed 2026-05-23; PR #44 merged into
+> `main`, mergeCommit `3ecfc3b`).** Paper / report only.
+> NOT live trading. NOT AI Learning. NOT automatic parameter
+> optimisation. NOT reinforcement learning. NOT the complete
+> Strategy Validation Lab follow-up (Phase 11C.1C-C-B-B-B).
+> NOT the Paper Alpha Gate v0. NOT Phase 12.
+>
+> The `validation_quality_gate_status` field on every
+> `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED` event
+> (`pass` / `warn` / `fail`) is a **descriptive label** for
+> human review and **MUST NEVER trigger a real trade**; the
+> Risk Engine remains the single trade-decision gate.
+
+#### Phase 11C.1C-C-B-B-A accepted (closeout summary)
+
+  - Strategy Validation Dataset Builder
+  - Quality Gate v0
+  - validation dataset export / replay compatibility
+  - validation dataset summary
+  - `validation_quality_gate_status`
+  - paper-only, no live trading
+  - PR #44 merged into `main` (mergeCommit `3ecfc3b`)
+  - 27 brief-mandated tests PASS / 339 phase11c tests PASS /
+    2313 full pytest PASS on the PR branch (no regression vs.
+    post-PR-#43 main 2286 baseline)
+  - 30 s dry-run smoke generated dataset and quality gate
+    report
+    (`STRATEGY_VALIDATION_DATASET_BUILT=1`,
+    `STRATEGY_VALIDATION_DATASET_EXPORTED=1`,
+    `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED=1`,
+    `validation_dataset_records=2`,
+    `validation_dataset_symbols=BTCUSDT,ETHUSDT`,
+    `validation_quality_gate_status=fail` — expected for the
+    low-sample 30 s window, exactly the brief's "empty or
+    low-sample quality gate report" requirement,
+    `validation_dataset_export_ready=True`,
+    `validation_dataset_replay_ready=True`)
+  - `validation_quality_gate_status=fail` is the **expected**
+    output for the low-sample 30 s dry-run (smallest Phase
+    11C.1C-C-A primary tracking window is 5 minutes; samples
+    are necessarily in-flight)
+  - `validation_quality_gate_status` is **descriptive only**
+    (`pass` / `warn` / `fail`) and **MUST NEVER trigger a real
+    trade**; the Risk Engine remains the single trade-decision
+    gate
+  - real WS 10 min smoke is **NOT required** for this PR
+    (smallest Phase 11C.1C-C-A tracking window is 5 min and
+    cannot complete in 30 s); reserved for Phase
+    11C.1C-C-B-B-B closeout when non-empty datasets are first
+    observable end-to-end
+  - safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`)
+  - no Binance API key
+  - no Binance API secret
+  - no signed endpoint
+  - no account / order / position / leverage / margin endpoint
+  - no private websocket
+  - no listenKey
+  - no DeepSeek trade decision
+  - no real Telegram outbound
+  - Phase 12 remains FORBIDDEN
+
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise live
+> trading, API keys, private endpoints, DeepSeek trade
+> decisions, real Telegram outbound, Phase 11C.1C-C-B-B-B
+> kickoff bypassing the standard gate, the Paper Alpha Gate
+> v0, the complete Strategy Validation Lab follow-up, AI
+> Learning, automatic parameter optimisation, reinforcement
+> learning, or Phase 12.** The Phase 1 safety lock and every
+> Phase 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A /
+> 11C.1C-C-B-A forbidden item carry over unchanged. The three
+> new `STRATEGY_VALIDATION_DATASET_*` /
+> `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED` events and the
+> `validation_quality_gate_status` field are paper /
+> report-only descriptive labels: they MUST NEVER trigger a
+> real trade. The Risk Engine remains the single
+> trade-decision gate.
+
+> **Phase 11C.1C-C-B-B-A is NOT live trading. NOT AI Learning.
+> NOT the complete Strategy Validation Lab follow-up. NOT the
+> Paper Alpha Gate v0. NOT automatic parameter optimisation.
+> NOT reinforcement learning. NOT real Telegram outbound. NOT
+> real Binance trading API.** It is the Strategy Validation
+> Dataset Builder + Quality Gate v0 first slice on top of the
+> Phase 11C.1C-C-B-A artefacts.
+
+#### Safety flags after the PR #44 closeout (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+---
+
+#### Phase 11C.1C-C-B-B-A original IN_REVIEW entry (preserved verbatim for evidence audit trail)
+
 > **Status: IN_REVIEW (PR #44 open).** Paper / report only.
 > NOT live trading. NOT AI Learning. NOT automatic parameter
 > optimisation. NOT reinforcement learning. NOT the complete

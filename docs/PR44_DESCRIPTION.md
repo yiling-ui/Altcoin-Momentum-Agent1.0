@@ -1,30 +1,37 @@
 # PR #44 — Phase 11C.1C-C-B-B-A: Strategy Validation Dataset Builder & Quality Gate v0
 
-> **Status: IN_REVIEW.** Paper / report only. **NOT** live
-> trading. **NOT** AI Learning. **NOT** automatic parameter
-> optimisation. **NOT** reinforcement learning. **NOT** the
-> complete Strategy Validation Lab follow-up
-> (Phase 11C.1C-C-B-B-B). **NOT** Phase 12.
+> **Status: MERGED / ACCEPTED.** PR #44 merged into `main` on
+> 2026-05-23 (UTC) at mergeCommit `3ecfc3b`; Phase
+> 11C.1C-C-B-B-A is **ACCEPTED**. Paper / report only. **NOT**
+> live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning.
+> **NOT** the complete Strategy Validation Lab follow-up
+> (Phase 11C.1C-C-B-B-B). **NOT** the Paper Alpha Gate v0.
+> **NOT** Phase 12.
 >
 > Phase 11C.1C-C-B-A — *Strategy Validation Lab v0 & Cluster
 > Exposure Control Contracts* — merged on 2026-05-23 (PR #42,
-> mergeCommit `cc18047`) and is the gating predecessor. This PR
-> ships the **first slice** of the deeper Phase 11C.1C-C-B-B
-> work: the Strategy Validation Dataset Builder + Quality Gate v0
-> on top of the Phase 11C.1C-C-B-A `StrategyValidationSample` /
-> `StrategyValidationReport` / `ClusterExposureAssessment`
-> artefacts.
+> mergeCommit `cc18047`) and is the gating predecessor. This
+> PR shipped the **first slice** of the deeper Phase
+> 11C.1C-C-B-B work: the Strategy Validation Dataset Builder +
+> Quality Gate v0 on top of the Phase 11C.1C-C-B-A
+> `StrategyValidationSample` / `StrategyValidationReport` /
+> `ClusterExposureAssessment` artefacts.
 
 ## Phase
 
   - **Phase 11C.1C-C-B-A** — `ACCEPTED` (PR #42 merged into
     `main`, 2026-05-23, mergeCommit `cc18047`).
-  - **Phase 11C.1C-C-B-B-A** — *this PR*. `IN_REVIEW`. Paper /
-    report only. Three new typed events. Dataset is exportable +
-    replayable + auditable. Quality gate is a *sample trust*
-    gate, NOT a *strategy quality* gate.
-  - **Phase 11C.1C-C-B-B-B** — `FORBIDDEN by this PR`. Reserved
-    for the deeper Lab follow-up.
+  - **Phase 11C.1C-C-B-B-A** — *this PR*. **`ACCEPTED`** (PR
+    #44 merged into `main`, 2026-05-23, mergeCommit
+    `3ecfc3b`). Paper / report only. Three new typed events.
+    Dataset is exportable + replayable + auditable. Quality
+    gate is a *sample trust* gate, NOT a *strategy quality*
+    gate.
+  - **Phase 11C.1C-C-B-B-B** — `NEXT_ALLOWED / NOT_STARTED`.
+    Reserved for the deeper Lab follow-up. Phase
+    11C.1C-C-B-B-A acceptance does NOT authorise Phase
+    11C.1C-C-B-B-B kickoff bypassing the standard gate.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
 ## Branch + base
@@ -279,17 +286,26 @@ unresolved. The quality gate correctly classifies the dataset as
 too thin for downstream review — exactly the brief's "empty or
 low-sample quality gate report" requirement.
 
-## Acceptance gate
+## Acceptance gate (status: ALL GATES MET; PR #44 merged into `main`)
 
   - 27 brief-mandated tests PASS.
   - phase11c_ filter PASS (339).
   - Full pytest PASS (2313, no regression vs. PR #43 baseline).
-  - 30 s dry-run smoke PASS with empty / low-sample quality-gate
-    report.
-  - Real WS 10 min smoke is **not required** for this PR; reserved
-    for Phase 11C.1C-C-B-B-B closeout.
+  - 30 s dry-run smoke PASS with empty / low-sample
+    quality-gate report (`gate_status=fail` is the **expected**
+    output for the low-sample 30 s window — exactly the brief's
+    "empty or low-sample quality gate report" requirement).
+  - Real WS 10 min smoke is **not required** for this PR;
+    reserved for Phase 11C.1C-C-B-B-B closeout.
   - Phase 1 safety flags all confirmed False.
   - Phase 12 remains FORBIDDEN.
+
+PR #44 has merged into `main` (mergeCommit `3ecfc3b`, merged
+2026-05-23 UTC); the dry-run smoke evidence above was
+accepted; this docs-only closeout PR therefore flips Phase
+11C.1C-C-B-B-A to **ACCEPTED**, mirroring the PR #36 → PR
+#37, PR #38 → PR #39, PR #40 → PR #41, and PR #42 → PR #43
+closeout pattern.
 
 ## Remaining risk
 
