@@ -42,7 +42,8 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | #          | Title                                                                | State                       | Detail                                                                 |
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
 | 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up (parent; unchanged definition) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-A (PR #44) merged into `main` on 2026-05-23 (mergeCommit `3ecfc3b`) and is the gating predecessor; Phase 11C.1C-C-B-B-B is reserved for the deeper Strategy Validation Lab follow-up (richer cohort comparisons, extended cluster heuristics, longer-window correlations, dataset-driven retrospective audits). The parent phase is **not** renamed by Paper Alpha Gate v0; the Paper Alpha Gate v0 is one *child slice* under this parent (Phase 11C.1C-C-B-B-B-A), not the parent itself. NOT authorised by Phase 11C.1C-C-B-B-A acceptance bypassing the standard gate; will require its own kickoff PRs (one per child slice), brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
-| 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; implementation) | **IN_REVIEW (PR #52 open)** | Phase 11C.1C-C-B-B-B-A is the **first slice** under the Phase 11C.1C-C-B-B-B parent. Implementation PR #52 ships `app/adaptive/paper_alpha_gate.py` (pure-function module + value-object models + the nine pure functions), four new typed events (`PAPER_ALPHA_GATE_EVALUATED`, `PAPER_ALPHA_RULE_EVALUATED`, `PAPER_ALPHA_COHORT_EVALUATED`, `PAPER_ALPHA_REPORT_GENERATED`), `StrategyValidationRuntime` extension that emits the gate verdict on the same flush as the dataset / quality gate, and the new "Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0" section in the Phase 11B daily report. Schema version `phase_11c_1c_c_b_b_b_a.paper_alpha_gate.v1`. Paper / report-only. Reads existing Phase 11C.1C-C-B-B-A `StrategyValidationDataset` / `StrategyValidationQualityGate` / `StrategyValidationReport` artefacts and emits a descriptive alpha-evidence verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) for human review only. **Verdict MUST NEVER trigger a real trade**, modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM. **NOT** live trading, **NOT** AI Learning, **NOT** automatic parameter optimisation, **NOT** reinforcement learning, **NOT** the complete Strategy Validation Lab follow-up, **NOT** Phase 12. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
+| 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; implementation) | **MERGED / AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING (PR #52 merged into `main` on 2026-05-24, mergeCommit `f8ba315`)** | Phase 11C.1C-C-B-B-B-A is the **first slice** under the Phase 11C.1C-C-B-B-B parent. PR #52 (branch `feature/phase-11c1c-c-b-b-b-a-paper-alpha-gate-v0`) merged the Paper Alpha Gate v0 implementation into `main` on 2026-05-24 (mergeCommit `f8ba315`). The slice is now **MERGED** but **not yet `ACCEPTED`** — closeout requires operator-VPS paper evidence (see "Required operator-VPS paper evidence before Phase 11C.1C-C-B-B-B-A closeout `ACCEPTED`" below). PR #52 shipped `app/adaptive/paper_alpha_gate.py` (pure-function module + value-object models + the nine pure functions), four new typed events (`PAPER_ALPHA_GATE_EVALUATED`, `PAPER_ALPHA_RULE_EVALUATED`, `PAPER_ALPHA_COHORT_EVALUATED`, `PAPER_ALPHA_REPORT_GENERATED`), `StrategyValidationRuntime` extension that emits the gate verdict on the same flush as the dataset / quality gate, and the new "Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0" section in the Phase 11B daily report. Schema version `phase_11c_1c_c_b_b_b_a.paper_alpha_gate.v1`. Paper / report-only. Reads existing Phase 11C.1C-C-B-B-A `StrategyValidationDataset` / `StrategyValidationQualityGate` / `StrategyValidationReport` artefacts and emits a descriptive alpha-evidence verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) for human review only. **Verdict MUST NEVER trigger a real trade**, modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM. **NOT** live trading, **NOT** AI Learning, **NOT** automatic parameter optimisation, **NOT** reinforcement learning, **NOT** the complete Strategy Validation Lab follow-up, **NOT** Phase 12. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
+| 11C.1C-C-B-B-B-B | Next child slice under Phase 11C.1C-C-B-B-B (placeholder; not yet defined) | **BLOCKED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-B cannot start until Phase 11C.1C-C-B-B-B-A closeout is `ACCEPTED`. PR #52 merged the Phase 11C.1C-C-B-B-B-A implementation but Phase 11C.1C-C-B-B-B-A is **not yet `ACCEPTED`** — operator-VPS paper evidence is required before closeout (see "Required operator-VPS paper evidence before Phase 11C.1C-C-B-B-B-A closeout `ACCEPTED`" below). **No next runtime feature is authorised by this status repair.** Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A forbidden item verbatim. Phase 12 remains **FORBIDDEN**. |
 | 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A acceptance, Phase 11C.1C-C-B-B-B, Phase 11C.1C-C-B-B-B-A, or any other Phase 11C sub-phase). |
 
 
@@ -1126,13 +1127,31 @@ will be authored alongside the kickoff PR and reviewed
 against the Phase 1 safety lock + the AMOS governance rails
 in `docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`.
 
-## Open phase: Phase 11C.1C-C-B-B-B-A (IN_REVIEW)
+## Open phase: Phase 11C.1C-C-B-B-B-A (MERGED / AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING)
 
 **Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (PR #52
-open).** Status: **IN_REVIEW.** Branch:
+merged into `main` on 2026-05-24, mergeCommit `f8ba315`).**
+Status: **MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+CLOSEOUT_PENDING.** Branch:
 `feature/phase-11c1c-c-b-b-b-a-paper-alpha-gate-v0`. PR #51
-(the docs-only kickoff) merged into `main` on 2026-05-24
-and is the gating predecessor; PR #52 ships the runtime.
+(the docs-only kickoff) merged into `main` on 2026-05-24 and
+is the gating predecessor; PR #52 shipped the runtime
+implementation and merged into `main` on 2026-05-24
+(mergeCommit `f8ba315`).
+
+**The Paper Alpha Gate v0 implementation is now on `main` —
+but Phase 11C.1C-C-B-B-B-A is *not yet* `ACCEPTED`.**
+Closeout to `ACCEPTED` requires **operator-VPS paper
+evidence** (see "Required operator-VPS paper evidence before
+Phase 11C.1C-C-B-B-B-A closeout `ACCEPTED`" below). Until
+that evidence is filed in a separate docs-only closeout PR
+(mirroring the PR #36 → PR #37, PR #38 → PR #39, PR #40 →
+PR #41, PR #42 → PR #43, PR #44 → PR #50 docs-only
+closeout pattern), Phase 11C.1C-C-B-B-B-A stays
+`MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+CLOSEOUT_PENDING` and Phase 11C.1C-C-B-B-B-B stays `BLOCKED
+/ NOT_STARTED`. **No next runtime feature is authorised by
+this status repair.**
 
 This section records the **first child slice** under the
 Phase 11C.1C-C-B-B-B parent. The parent phase is **not**
@@ -1268,16 +1287,21 @@ list, and acceptance evidence are recorded in
     11C.1C-C-B-B-B-A).
   - Phase 12 / live trading kickoff.
 
-### Phase 11C.1C-C-B-B-B-A acceptance gate (placeholder; docs-only kickoff)
+### Phase 11C.1C-C-B-B-B-A acceptance gate (post-merge; operator-VPS evidence required)
 
-The Phase 11C.1C-C-B-B-B-A *implementation* PR will define
-the detailed gate criteria (Paper Alpha Gate v0 dataclass +
-event + verdict thresholds + daily-report fields + replay
-compatibility + brief-mandated tests + dry-run / real-WS
-smoke as appropriate). This docs-only kickoff intentionally
-records only the inherited boundary + forbidden list above;
-the substantive gate criteria will be authored alongside the
-implementation PR and reviewed against:
+PR #52 merged the Phase 11C.1C-C-B-B-B-A *implementation*
+into `main` on 2026-05-24 (mergeCommit `f8ba315`). The
+implementation PR landed the Paper Alpha Gate v0 dataclasses,
+the deterministic evaluator, the four new typed events, the
+daily-report section, the brief-mandated tests, and the 30 s
+dry-run evidence. **The merge does *not* flip Phase
+11C.1C-C-B-B-B-A to `ACCEPTED`.** Closeout to `ACCEPTED`
+requires a separate docs-only closeout PR (mirroring the PR
+#36 → PR #37, PR #38 → PR #39, PR #40 → PR #41, PR #42 →
+PR #43, PR #44 → PR #50 docs-only closeout pattern) carrying
+**operator-VPS paper evidence**.
+
+The closeout-to-`ACCEPTED` PR will be reviewed against:
 
   - the Phase 1 safety lock (held end-to-end);
   - the AMOS governance rails in
@@ -1291,11 +1315,75 @@ implementation PR and reviewed against:
     Engine, or the Execution FSM;
   - the requirement that Phase 12 stays `FORBIDDEN`.
 
-This kickoff PR therefore introduces Phase 11C.1C-C-B-B-B-A
-at `NEXT_ALLOWED / NOT_STARTED`. It does **not** flip any
-phase's acceptance state. Phase 11C.1C-C-B-B-A remains
-`ACCEPTED`. Phase 11C.1C-C-B-B-B remains `NEXT_ALLOWED /
-NOT_STARTED`. Phase 12 remains `FORBIDDEN`.
+This status repair PR therefore records Phase
+11C.1C-C-B-B-B-A as `MERGED /
+AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING`. It does
+**not** flip Phase 11C.1C-C-B-B-B-A to `ACCEPTED`. Phase
+11C.1C-C-B-B-A remains `ACCEPTED`. Phase 11C.1C-C-B-B-B
+remains `NEXT_ALLOWED / NOT_STARTED` (parent; unchanged
+definition). Phase 11C.1C-C-B-B-B-B is recorded as `BLOCKED
+/ NOT_STARTED` and cannot start until Phase
+11C.1C-C-B-B-B-A closeout is `ACCEPTED`. Phase 12 remains
+`FORBIDDEN`.
+
+### Required operator-VPS paper evidence before Phase 11C.1C-C-B-B-B-A closeout `ACCEPTED`
+
+Phase 11C.1C-C-B-B-B-A closeout from
+`MERGED / AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING`
+to `ACCEPTED` requires the operator to file the following
+**operator-VPS paper evidence** in a separate docs-only
+closeout PR. The same paper-only safety boundary must be
+held end-to-end during the operator-VPS run and recorded in
+the closeout PR.
+
+| Required evidence field                                              | Source                                                                                  |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `paper_alpha_gate_status`                                            | Daily report; one of `PASS` / `WARN` / `FAIL` / `INCONCLUSIVE` (verbatim).              |
+| `paper_alpha_gate_sample_count`                                      | Daily report.                                                                           |
+| `PAPER_ALPHA_GATE_EVALUATED` count                                   | Runner snapshot **and** events.db type-count cross-check (after shutdown flush).        |
+| `PAPER_ALPHA_RULE_EVALUATED` count                                   | Runner snapshot **and** events.db type-count cross-check (after shutdown flush).        |
+| `PAPER_ALPHA_COHORT_EVALUATED` count                                 | Runner snapshot **and** events.db type-count cross-check (after shutdown flush).        |
+| `PAPER_ALPHA_REPORT_GENERATED` count                                 | Runner snapshot **and** events.db type-count cross-check (after shutdown flush).        |
+| Daily-report "Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0" section    | Verbatim Markdown excerpt from the daily report.                                        |
+| Phase 8.5 export bundle / Phase 10A replay readability check         | Where available; the four new event types must round-trip through export and replay.   |
+| Safety flags unchanged across the operator-VPS run                   | `mode=paper`, `live_trading=False`, `exchange_live_orders=False`, `right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`. |
+| No Binance API key / no Binance API secret                           | Verified at construction; recorded verbatim.                                           |
+| No signed endpoint                                                   | Verified at allowlist; recorded verbatim.                                              |
+| No account / order / position / leverage / margin endpoint           | Verified at allowlist; recorded verbatim.                                              |
+| No private WebSocket                                                 | Verified at allowlist; recorded verbatim.                                              |
+| No `listenKey`                                                       | Verified at allowlist; recorded verbatim.                                              |
+| No DeepSeek trade decision                                           | Verified verbatim.                                                                     |
+| No real Telegram outbound                                            | Verified verbatim.                                                                     |
+| Phase 12 remains FORBIDDEN                                           | Verified verbatim.                                                                     |
+
+Until the closeout-to-`ACCEPTED` PR is filed and merged,
+Phase 11C.1C-C-B-B-B-A stays
+`MERGED / AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING`
+and Phase 11C.1C-C-B-B-B-B stays `BLOCKED / NOT_STARTED`.
+
+## Reserved phase: Phase 11C.1C-C-B-B-B-B (BLOCKED / NOT_STARTED)
+
+**Phase 11C.1C-C-B-B-B-B — next child slice under Phase
+11C.1C-C-B-B-B (placeholder; not yet defined).** Status:
+**BLOCKED / NOT_STARTED.** Phase 11C.1C-C-B-B-B-B cannot
+start until Phase 11C.1C-C-B-B-B-A closeout is `ACCEPTED`.
+PR #52 merged the Phase 11C.1C-C-B-B-B-A implementation but
+Phase 11C.1C-C-B-B-B-A is **not yet `ACCEPTED`** — the
+operator-VPS paper evidence required before closeout has not
+been filed yet (see "Required operator-VPS paper evidence
+before Phase 11C.1C-C-B-B-B-A closeout `ACCEPTED`" above).
+**No next runtime feature is authorised by this status
+repair.** Phase 11C.1C-C-B-B-B-B will require its own
+kickoff PR, brief, scope, boundary table, forbidden list,
+and acceptance evidence — none of which exists yet.
+
+> **Phase 11C.1C-C-B-B-B-A merge does NOT authorise Phase
+> 11C.1C-C-B-B-B-B kickoff.**
+> **Phase 11C.1C-C-B-B-B-B inherits every Phase 1 / 11C.1B /
+> 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A /
+> 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A forbidden item
+> verbatim.**
+> **Phase 12 remains FORBIDDEN.**
 
 ## Phase 11C.1C-C-B-B-A acceptance evidence (closeout)
 

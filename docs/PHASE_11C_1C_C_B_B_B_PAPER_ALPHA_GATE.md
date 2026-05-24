@@ -1,12 +1,23 @@
 # Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0
 
-> **Status: IN_REVIEW (PR #52 open).** The implementation PR
-> ships the runtime data contracts + pure-function evaluator +
-> deterministic rule set + four new typed events + daily-report
-> section + tests + docs for the **first child slice** under
-> Phase 11C.1C-C-B-B-B (Paper Alpha Gate v0). PR #51 (the
-> docs-only kickoff) merged into `main` on 2026-05-24 and is
-> the gating predecessor.
+> **Status: MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+> CLOSEOUT_PENDING (PR #52 merged into `main` on 2026-05-24,
+> mergeCommit `f8ba315`).** The implementation PR shipped
+> the runtime data contracts + pure-function evaluator +
+> deterministic rule set + four new typed events +
+> daily-report section + tests + docs for the **first child
+> slice** under Phase 11C.1C-C-B-B-B (Paper Alpha Gate v0).
+> PR #51 (the docs-only kickoff) merged into `main` on
+> 2026-05-24 and is the gating predecessor.
+>
+> **The Paper Alpha Gate v0 implementation is now on `main`
+> — but Phase 11C.1C-C-B-B-B-A is *not yet* `ACCEPTED`.**
+> Closeout to `ACCEPTED` requires a separate docs-only
+> closeout PR carrying **operator-VPS paper evidence** (see
+> "Required operator-VPS paper evidence before closeout
+> `ACCEPTED`" below). Phase 11C.1C-C-B-B-B-B (the next child
+> slice) is therefore `BLOCKED / NOT_STARTED` until that
+> closeout merges.
 >
 > **Phase 11C.1C-C-B-B-B-A (Paper Alpha Gate v0) is paper /
 > report / evidence-only.** **NOT** live trading. **NOT** AI
@@ -35,13 +46,19 @@
     **not** renamed by Paper Alpha Gate v0; the Paper Alpha
     Gate v0 is one *child slice* under this parent.
   - **Phase 11C.1C-C-B-B-B-A** — *this document*.
-    `IN_REVIEW` (PR #52 open). **First child slice** under
-    Phase 11C.1C-C-B-B-B. Paper Alpha Gate v0. Paper /
+    `MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+    CLOSEOUT_PENDING` (PR #52 merged into `main` on
+    2026-05-24, mergeCommit `f8ba315`). **First child slice**
+    under Phase 11C.1C-C-B-B-B. Paper Alpha Gate v0. Paper /
     report-only. No trade authority. Reads
     `StrategyValidationDataset` /
     `StrategyValidationQualityGate` /
     `StrategyValidationReport` artefacts and emits a
     descriptive alpha-evidence verdict.
+  - **Phase 11C.1C-C-B-B-B-B** — `BLOCKED / NOT_STARTED`.
+    Next child slice; cannot start until Phase
+    11C.1C-C-B-B-B-A closeout is `ACCEPTED`. No next runtime
+    feature is authorised by this status repair.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
 ## What ships
@@ -370,3 +387,55 @@ Phase 12                        = FORBIDDEN
   - Phase 11C.1C-C-B-B-B-B implementation (reserved for the
     next child slice).
   - Phase 12 / live trading kickoff.
+
+
+## Required operator-VPS paper evidence before closeout `ACCEPTED`
+
+PR #52 merged the Phase 11C.1C-C-B-B-B-A *implementation*
+into `main` on 2026-05-24 (mergeCommit `f8ba315`). The merge
+does **not** flip Phase 11C.1C-C-B-B-B-A to `ACCEPTED`.
+Closeout to `ACCEPTED` requires a separate docs-only
+closeout PR (mirroring the PR #36 → PR #37, PR #38 → PR
+#39, PR #40 → PR #41, PR #42 → PR #43, PR #44 → PR #50
+docs-only closeout pattern) carrying the following
+**operator-VPS paper evidence**, captured during a
+paper-only run on a Binance-reachable VPS:
+
+  - `paper_alpha_gate_status` (verbatim from the daily
+    report; one of `PASS` / `WARN` / `FAIL` /
+    `INCONCLUSIVE`)
+  - `paper_alpha_gate_sample_count`
+  - `PAPER_ALPHA_GATE_EVALUATED` event count (runner snapshot
+    + events.db type-count cross-check, after shutdown flush)
+  - `PAPER_ALPHA_RULE_EVALUATED` event count (runner snapshot
+    + events.db type-count cross-check, after shutdown flush)
+  - `PAPER_ALPHA_COHORT_EVALUATED` event count (runner
+    snapshot + events.db type-count cross-check, after
+    shutdown flush)
+  - `PAPER_ALPHA_REPORT_GENERATED` event count (runner
+    snapshot + events.db type-count cross-check, after
+    shutdown flush)
+  - the daily-report "Phase 11C.1C-C-B-B-B-A Paper Alpha
+    Gate v0" section (verbatim Markdown excerpt)
+  - export bundle / replay readability check, where
+    available (the four new event types must round-trip
+    through the Phase 8.5 export bundle and the Phase 10A
+    replay engine)
+  - safety flags unchanged across the operator-VPS run
+    (`mode=paper`, `live_trading=False`,
+    `exchange_live_orders=False`, `right_tail=False`,
+    `llm=False`, `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`, no Binance API
+    key, no Binance API secret, no signed endpoint, no
+    account / order / position / leverage / margin
+    endpoint, no private WebSocket, no `listenKey`, no
+    DeepSeek trade decision, no real Telegram outbound)
+  - **Phase 12 remains FORBIDDEN** across the operator-VPS
+    run
+
+Until that operator-VPS paper evidence is filed and merged
+in a separate docs-only closeout PR, Phase 11C.1C-C-B-B-B-A
+stays `MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+CLOSEOUT_PENDING` and Phase 11C.1C-C-B-B-B-B (the next
+child slice) stays `BLOCKED / NOT_STARTED`. **No next
+runtime feature is authorised by this status repair.**

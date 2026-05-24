@@ -1,9 +1,21 @@
 # PR #52 — Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (implementation)
 
-> **Status: IN_REVIEW.** Branch:
+> **Status: MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+> CLOSEOUT_PENDING (PR #52 merged into `main` on 2026-05-24,
+> mergeCommit `f8ba315`).** Branch:
 > `feature/phase-11c1c-c-b-b-b-a-paper-alpha-gate-v0`. PR #51
 > (the docs-only kickoff) merged into `main` on 2026-05-24
 > and is the gating predecessor.
+>
+> **The Paper Alpha Gate v0 implementation is now on `main` —
+> but Phase 11C.1C-C-B-B-B-A is *not yet* `ACCEPTED`.**
+> Closeout to `ACCEPTED` requires a separate docs-only
+> closeout PR carrying **operator-VPS paper evidence** (see
+> `docs/PHASE_GATE.md` §"Required operator-VPS paper
+> evidence before Phase 11C.1C-C-B-B-B-A closeout
+> `ACCEPTED`"). Phase 11C.1C-C-B-B-B-B (the next child
+> slice) is therefore `BLOCKED / NOT_STARTED` until that
+> closeout merges.
 >
 > **This PR is paper / report / evidence only.** **NOT** live
 > trading. **NOT** AI Learning. **NOT** automatic parameter
@@ -158,7 +170,10 @@ Every payload carries the brief-mandated identity block:
     docs-only kickoff document (PR #51) is replaced with the
     full IN_REVIEW spec (this PR ships the runtime).
   - `docs/PROJECT_STATUS.md` — Phase 11C.1C-C-B-B-B-A row
-    flipped to `IN_REVIEW (PR #52 open)`.
+    flipped to `MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+    CLOSEOUT_PENDING (PR #52 merged into main on 2026-05-24,
+    mergeCommit f8ba315)`; Phase 11C.1C-C-B-B-B-B added at
+    `BLOCKED / NOT_STARTED`.
   - `docs/PHASE_GATE.md` — Open phase entry refreshed;
     forbidden item updated to reflect implementation
     landing.
@@ -339,4 +354,23 @@ Phase 12                        = FORBIDDEN (gate unchanged)
   - Branch:
     `feature/phase-11c1c-c-b-b-b-a-paper-alpha-gate-v0`.
   - Target: `main`.
-  - Open PR (this document is its description).
+  - **Status: MERGED into `main` on 2026-05-24 (mergeCommit
+    `f8ba315`).** This PR description is preserved as the
+    pre-merge reference; the post-merge status is recorded
+    at the top of this file and in `docs/PHASE_GATE.md` §
+    "Open phase: Phase 11C.1C-C-B-B-B-A (MERGED /
+    AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING)".
+
+## Acceptance status (post-merge)
+
+PR #52 merged into `main` on 2026-05-24 (mergeCommit
+`f8ba315`). The merge does **not** flip Phase
+11C.1C-C-B-B-B-A to `ACCEPTED`. Phase 11C.1C-C-B-B-B-A is
+recorded as `MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+CLOSEOUT_PENDING` until a separate docs-only closeout PR
+files the operator-VPS paper evidence required for closeout
+(see `docs/PHASE_GATE.md` §"Required operator-VPS paper
+evidence before Phase 11C.1C-C-B-B-B-A closeout
+`ACCEPTED`"). Phase 11C.1C-C-B-B-B-B (the next child slice)
+is `BLOCKED / NOT_STARTED` until that closeout merges. **No
+next runtime feature is authorised by this status repair.**
