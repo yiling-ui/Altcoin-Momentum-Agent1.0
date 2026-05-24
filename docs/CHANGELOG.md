@@ -7,6 +7,228 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-B (Regime & Cluster Cohort Evidence Pack v0) implementation (PR #56)
+
+**Type:** Implementation PR (paper / report / evidence-only).
+**Runtime effect:** the
+:class:`StrategyValidationRuntime` now builds a
+:class:`RegimeClusterEvidencePack` after every flush_report;
+emits two new typed events
+(``REGIME_CLUSTER_EVIDENCE_PACK_GENERATED`` /
+``REGIME_CLUSTER_COHORT_SUMMARY_GENERATED``); the Phase 11B
+daily report renders a new Phase 11C.1C-C-B-B-B-B section.
+**Phase ledger effect:** none — Phase 11C.1C-C-B-B-B-B
+remains `NEXT_ALLOWED / NOT_STARTED` until operator-VPS
+paper smoke + closeout PR. **Phase 11C.1C-C-B-B-B-A remains
+`ACCEPTED`. Phase 11C.1C-C-B-B-B remains `NEXT_ALLOWED /
+NOT_STARTED` (parent; unchanged definition).**
+**Safety flag effect:** **none.** Every Phase 1 safety flag
+held throughout the test ladder.
+**Trade authority granted:** **none.**
+
+> **This PR is paper / report / evidence only.** **NOT**
+> live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning.
+> **NOT** a strategy implementation. **NOT** a trading
+> module. **NOT** the complete Strategy Validation Lab
+> follow-up. **NOT** Phase 12.
+>
+> The pack's per-cohort `status` is one of
+> `INSUFFICIENT_SAMPLE` / `OBSERVE_ONLY` / `WARNING` /
+> `EVIDENCE_SIGNAL` and is a **descriptive label only**.
+> Every artefact (`regime_cohort_summary`,
+> `cluster_cohort_summary`, `score_bucket_summary`,
+> `stage_outcome_summary`,
+> `strategy_mode_outcome_summary`,
+> `regime_cluster_evidence_pack`, `warnings`,
+> `insufficient_sample_reasons`) **MUST NEVER** trigger a
+> real trade or modify position size, leverage, stop-loss,
+> target price, the Risk Engine, or the Execution FSM. The
+> Risk Engine remains the single trade-decision gate.
+
+#### Added
+
+- **`app/adaptive/regime_cluster_evidence_pack.py`** (NEW)
+  — Phase 11C.1C-C-B-B-B-B value objects + pure functions:
+  `RegimeClusterEvidencePackStatus` (with `INSUFFICIENT_SAMPLE`
+  / `OBSERVE_ONLY` / `WARNING` / `EVIDENCE_SIGNAL`),
+  `RegimeClusterCohortKey`, `RegimeClusterCohortStats`,
+  `RegimeClusterEvidenceRecord`,
+  `RegimeClusterEvidenceInput`, `RegimeCohortSummary`,
+  `ClusterCohortSummary`, `ScoreBucketSummary`,
+  `StageOutcomeSummary`, `StrategyModeOutcomeSummary`,
+  `RegimeClusterEvidencePack`, plus
+  `build_regime_cluster_evidence_input` /
+  `build_regime_cohort_summary` /
+  `build_cluster_cohort_summary` /
+  `build_score_bucket_summary` /
+  `build_stage_outcome_summary` /
+  `build_strategy_mode_outcome_summary` /
+  `build_regime_cluster_evidence_pack` /
+  `export_regime_cluster_evidence_payload` /
+  `load_regime_cluster_evidence_payload`. Every payload
+  carries `schema_version`
+  (`phase_11c_1c_c_b_b_b_b.regime_cluster_evidence_pack.v1`)
+  + the four canonical Phase 11C.1C-A versioning labels.
+  All functions are deterministic / pure: no I/O, no clock
+  read, no event emission, no network access, no API key
+  read, no exchange call, no Risk Engine / Execution FSM
+  mutation. Records whose `market_regime` is missing from
+  the upstream snapshot safely degrade to `unknown` per the
+  brief's "if a field is missing, do not raise" rule.
+- **`app/core/events.py`** — two new typed `EventType`
+  members: `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED` and
+  `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED`. Both are
+  paper / report / evidence only; their payloads carry
+  `evidence_pack_status` (descriptive only) and the full
+  identity block. Neither event is consumed by the Risk
+  Engine or the Execution FSM.
+- **`tests/unit/test_phase11c_1c_c_b_b_b_b_regime_cluster_evidence_pack.py`**
+  (NEW, 23 tests covering the brief's mandated cases):
+  contract pin (input fields + status vocabulary + cohort
+  dimensions), `INSUFFICIENT_SAMPLE` on low-total samples,
+  `INSUFFICIENT_SAMPLE` on low-completed-tail-label samples,
+  per-regime cohort tail-outcome counting,
+  cluster-leader-vs-follower signal detection, score-bucket
+  high-vs-low signal detection, stage-outcome
+  missed-tail-warning detection, strategy-mode
+  fake-breakout warning detection, end-to-end pack builder
+  on a real `StrategyValidationDataset`,
+  payload roundtrip, exportable through the Phase 8.5 zip
+  bundle, replayable through `ReplayEngine`, daily-report
+  contains the new section, daily-report renders even on a
+  zero-event window, INSUFFICIENT-SAMPLE on empty dataset,
+  Phase 1 safety flags unchanged, no live-trading
+  side-effects (`ORDER_*` / `POSITION_*` / `STOP_*` /
+  `TELEGRAM_MESSAGE_SENT` / `EXIT_TRIGGERED` events
+  remain absent), Phase 12 remains `FORBIDDEN`,
+  `regime_cluster_evidence_pack_enabled=False` disables the
+  new sub-slice without affecting the parent dataset /
+  quality-gate / paper-alpha-gate contracts.
+- **`docs/PR56_DESCRIPTION.md`** (NEW) — describes this
+  implementation PR (changed files, allowed / forbidden
+  edits, test ladder, dry-run summary, safety boundary).
+
+#### Changed
+
+- **`app/adaptive/__init__.py`** — re-exports the new
+  symbols from `regime_cluster_evidence_pack` so callers
+  can use `from app.adaptive import …`.
+- **`app/adaptive/strategy_validation_runtime.py`** —
+  `StrategyValidationRuntimeConfig` extended with twelve
+  Phase 11C.1C-C-B-B-B-B knobs (defaults match the
+  module-level defaults). `StrategyValidationRuntime` gained
+  `observe_market_regime(opportunity_id, market_regime)`
+  helper, `latest_regime_cluster_evidence_pack` accessor,
+  `regime_cluster_evidence_pack_generated_count` /
+  `regime_cluster_cohort_summary_generated_count` counters,
+  and a new `_build_and_emit_regime_cluster_evidence_events`
+  hook that fires after the Phase 11C.1C-C-B-B-B-A Paper
+  Alpha Gate evaluation. `metrics_payload()` extended with
+  the new Phase 11C.1C-C-B-B-B-B aggregates so the
+  daily-report builder can render the section.
+- **`app/market_data_public/ws_radar_chain.py`** —
+  `WSRadarChainDriver._post_chain` calls
+  `strategy_validation_runtime.observe_market_regime` after
+  every adaptive context is built so the evidence pack can
+  attach `market_regime` per opportunity. Records whose
+  regime was not observed safely degrade to
+  `unknown`. The driver does NOT trigger any real trade as
+  a result of this change.
+- **`app/paper_run/daily_report.py`** —
+  `DailyReportSnapshot` extended with the
+  Phase 11C.1C-C-B-B-B-B fields
+  (`regime_cluster_evidence_pack_generated_count`,
+  `regime_cluster_cohort_summary_generated_count`,
+  `regime_cluster_evidence_status`,
+  `regime_cluster_sample_count`,
+  `regime_cluster_completed_tail_label_count`,
+  `regime_cluster_insufficient_sample_reasons`,
+  `regime_cluster_warnings`, `regime_cluster_signals`,
+  `regime_cohort_summary`, `cluster_cohort_summary`,
+  `score_bucket_summary`, `stage_outcome_summary`,
+  `strategy_mode_outcome_summary`,
+  `regime_cluster_evidence_pack`). `to_payload()` carries
+  every new field; the Markdown body renders a new
+  *Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort Evidence
+  Pack v0* section with the boundary banner ("paper / report
+  / evidence-only", "MUST NEVER trigger a real trade",
+  "Phase 12 remains FORBIDDEN") and per-cohort row
+  rendering across the seven cohort dimensions.
+- **`tests/unit/test_phase11b_no_network.py`** —
+  `allowed_phase_11b_references` extended with the two new
+  EventType labels (mirrors how PAPER_ALPHA_* were added by
+  PR #52). The Phase 11B safety / no-network tests continue
+  to pass.
+- **`docs/PHASE_11C_1C_C_B_B_B_B_REGIME_CLUSTER_EVIDENCE_PACK.md`**
+  — implementation acceptance evidence appended (test
+  ladder, dry-run summary, daily-report excerpt, schema
+  version, safety-flag invariants).
+- **`docs/PHASE_GATE.md`** — Phase 11C.1C-C-B-B-B-B row
+  refreshed with the implementation summary (event types,
+  schema version, paper-only-safety language); the slice
+  remains `NEXT_ALLOWED / NOT_STARTED` until the
+  operator-VPS paper smoke + closeout PR. Architecture
+  governance closing paragraph refreshed to mention the new
+  implementation in flight.
+- **`docs/PROJECT_STATUS.md`** — current-phase block /
+  per-phase table updated to record that the
+  Phase 11C.1C-C-B-B-B-B implementation has shipped via
+  PR #56 (paper / report / evidence only). Phase
+  acceptance state for B-B-B-B is unchanged
+  (`NEXT_ALLOWED / NOT_STARTED`).
+- **`docs/CHANGELOG.md`** — *this entry*.
+
+#### Verification
+
+- `tests/unit/test_phase11c_1c_c_b_b_b_b_regime_cluster_evidence_pack.py`
+  — **23/23 PASS** (brief-mandated cases).
+- `tests/unit/ -k phase11c_` — **389/389 PASS** (366
+  baseline + 23 new) with no regression vs. the post-PR-#55
+  main baseline.
+- `tests/` (full surface) — **2363/2363 PASS** with no
+  regression vs. the post-PR-#55 main baseline.
+- 30 s dry-run smoke produces the new evidence-pack
+  section. When samples are below the configured minimums
+  (the expected case for a 30 s dry-run / when the upstream
+  Phase 11C.1C-C-A primary tracking window has not yet
+  resolved), `regime_cluster_evidence_status` correctly
+  emits `INSUFFICIENT_SAMPLE` together with explicit
+  `insufficient_sample_reasons` rather than silently
+  inflating signals on thin data — exactly the brief's "do
+  not loosen rules on low samples" requirement.
+- Real-WS 10 min smoke is **NOT required** for this PR.
+  This PR is a deterministic evidence-compression layer
+  over the upstream Phase 11C.1C-C-A label-tracking
+  outcomes; non-empty cohort rows depend on the upstream
+  primary tracking window resolving. Real non-empty cohort
+  validation is reserved for the Phase 11C.1C-C-B-B-B-B
+  closeout / operator-VPS run.
+
+#### Safety boundary held
+
+- `mode = paper`
+- `live_trading = False`
+- `exchange_live_orders = False`
+- `right_tail = False`
+- `llm = False`
+- `telegram_outbound_enabled = False`
+- `binance_private_api_enabled = False`
+- No Binance API key
+- No Binance API secret
+- No signed endpoint
+- No account / order / position / leverage / margin
+  endpoint
+- No private WebSocket
+- No `listenKey`
+- No DeepSeek trade decision
+- No real Telegram outbound
+- No `ORDER_*` / `POSITION_*` / `STOP_*` /
+  `TELEGRAM_MESSAGE_SENT` / `EXIT_TRIGGERED` emitted by
+  the new pipeline
+- Phase 12 remains **FORBIDDEN**
+
+
 ### Docs-only - Phase 11C.1C-C-B-B-B-B (Regime & Cluster Cohort Evidence Pack v0) kickoff / scope alignment (PR #55)
 
 **Type:** Docs-only kickoff / scope-alignment.

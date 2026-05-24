@@ -1187,6 +1187,31 @@ class WSRadarChainDriver:
                     adaptive.opportunity_id,
                     exc,
                 )
+            # Phase 11C.1C-C-B-B-B-B - attach the adaptive
+            # ``market_regime`` to the per-opportunity cache so the
+            # Regime & Cluster Cohort Evidence Pack v0 can group on
+            # it without re-querying events.db. Paper / report only;
+            # this cache NEVER authorises a real trade. Records
+            # missing from the cache safely degrade to
+            # :data:`UNKNOWN_REGIME` per the Phase 11C.1C-C-B-B-B-B
+            # brief.
+            try:
+                regime_attr = getattr(adaptive, "market_regime", None)
+                if regime_attr is not None:
+                    regime_name = getattr(regime_attr, "regime_name", None)
+                    if regime_name:
+                        self._strategy_validation_runtime.observe_market_regime(
+                            opportunity_id=str(adaptive.opportunity_id or ""),
+                            market_regime=str(regime_name),
+                        )
+            except Exception as exc:  # pragma: no cover - protective
+                logger.error(
+                    "[phase11c.1c-c-b-b-b-b] strategy validation regime"
+                    " observe failed symbol={} opp={}: {}",
+                    symbol,
+                    adaptive.opportunity_id,
+                    exc,
+                )
 
     # ------------------------------------------------------------------
     # Event emission helpers

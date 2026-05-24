@@ -93,6 +93,16 @@ from app.adaptive.paper_alpha_gate import (
     build_paper_alpha_gate_report,
     export_paper_alpha_gate_payload,
 )
+from app.adaptive.regime_cluster_evidence_pack import (
+    REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION,
+    REGIME_CLUSTER_EVIDENCE_SOURCE_PHASE,
+    REGIME_CLUSTER_EVIDENCE_VERSION,
+    RegimeClusterEvidencePack,
+    RegimeClusterEvidencePackStatus,
+    build_regime_cluster_evidence_input,
+    build_regime_cluster_evidence_pack,
+    export_regime_cluster_evidence_payload,
+)
 from app.core.clock import now_ms
 from app.core.events import Event, EventType
 from app.database.repositories import EventRepository
@@ -146,6 +156,24 @@ class StrategyValidationRuntimeConfig:
     paper_alpha_missed_alpha_strong_tail_rate: float = 0.20
     paper_alpha_follow_fake_breakout_rate: float = 0.30
     paper_alpha_leader_preference_advantage: float = 0.10
+    # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence Pack
+    # v0 thresholds. Paper / report / evidence only; the per-cohort
+    # ``status`` (``INSUFFICIENT_SAMPLE`` / ``OBSERVE_ONLY`` /
+    # ``WARNING`` / ``EVIDENCE_SIGNAL``) is descriptive and **MUST
+    # NEVER** trigger a real trade or modify the Risk Engine /
+    # Execution FSM.
+    regime_cluster_evidence_pack_enabled: bool = True
+    regime_cluster_min_total_samples: int = 20
+    regime_cluster_min_completed_tail_labels: int = 10
+    regime_cluster_min_cohort_samples: int = 5
+    regime_cluster_strong_tail_signal_rate: float = 0.30
+    regime_cluster_reached_3r_signal_rate: float = 0.20
+    regime_cluster_reached_5r_signal_rate: float = 0.10
+    regime_cluster_fake_breakout_warning_rate: float = 0.30
+    regime_cluster_missed_tail_warning_rate: float = 0.20
+    regime_cluster_late_chase_failure_warning_rate: float = 0.20
+    regime_cluster_leader_preference_advantage: float = 0.10
+    regime_cluster_high_bucket_advantage: float = 0.10
 
     @staticmethod
     def from_mapping(
@@ -177,6 +205,18 @@ class StrategyValidationRuntimeConfig:
             "paper_alpha_missed_alpha_strong_tail_rate",
             "paper_alpha_follow_fake_breakout_rate",
             "paper_alpha_leader_preference_advantage",
+            "regime_cluster_evidence_pack_enabled",
+            "regime_cluster_min_total_samples",
+            "regime_cluster_min_completed_tail_labels",
+            "regime_cluster_min_cohort_samples",
+            "regime_cluster_strong_tail_signal_rate",
+            "regime_cluster_reached_3r_signal_rate",
+            "regime_cluster_reached_5r_signal_rate",
+            "regime_cluster_fake_breakout_warning_rate",
+            "regime_cluster_missed_tail_warning_rate",
+            "regime_cluster_late_chase_failure_warning_rate",
+            "regime_cluster_leader_preference_advantage",
+            "regime_cluster_high_bucket_advantage",
         ):
             if f in mapping and mapping[f] is not None:
                 kwargs[f] = mapping[f]
@@ -218,6 +258,18 @@ class StrategyValidationRuntimeConfig:
             "paper_alpha_missed_alpha_strong_tail_rate",
             "paper_alpha_follow_fake_breakout_rate",
             "paper_alpha_leader_preference_advantage",
+            "regime_cluster_evidence_pack_enabled",
+            "regime_cluster_min_total_samples",
+            "regime_cluster_min_completed_tail_labels",
+            "regime_cluster_min_cohort_samples",
+            "regime_cluster_strong_tail_signal_rate",
+            "regime_cluster_reached_3r_signal_rate",
+            "regime_cluster_reached_5r_signal_rate",
+            "regime_cluster_fake_breakout_warning_rate",
+            "regime_cluster_missed_tail_warning_rate",
+            "regime_cluster_late_chase_failure_warning_rate",
+            "regime_cluster_leader_preference_advantage",
+            "regime_cluster_high_bucket_advantage",
         ):
             if hasattr(section, f):
                 attrs[f] = getattr(section, f)
@@ -335,6 +387,22 @@ class StrategyValidationRuntime:
         self._paper_alpha_cohort_evaluated_count = 0
         self._paper_alpha_report_generated_count = 0
         self._latest_paper_alpha_report: PaperAlphaGateReport | None = None
+        # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence
+        # Pack v0 counters + latest pack cache. Paper / report /
+        # evidence only; the per-cohort status is descriptive and
+        # **MUST NEVER trigger a real trade** or modify the Risk
+        # Engine / Execution FSM.
+        self._regime_cluster_evidence_pack_generated_count = 0
+        self._regime_cluster_cohort_summary_generated_count = 0
+        self._latest_regime_cluster_evidence_pack: (
+            RegimeClusterEvidencePack | None
+        ) = None
+        # ``opportunity_id`` -> ``market_regime`` cache. Populated
+        # by :meth:`observe_market_regime` so the evidence pack
+        # builder can attach the regime to dataset records without
+        # re-querying events.db. Records whose opportunity_id is
+        # missing from this cache safely degrade to "unknown".
+        self._regime_by_opportunity: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     @property
@@ -410,6 +478,54 @@ class StrategyValidationRuntime:
     @property
     def paper_alpha_report_generated_count(self) -> int:
         return self._paper_alpha_report_generated_count
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence Pack
+    # v0 accessors. Read-only views; mutations happen exclusively in
+    # flush_report() (or via observe_market_regime() which only
+    # populates the per-opportunity regime cache).
+    # ------------------------------------------------------------------
+    @property
+    def latest_regime_cluster_evidence_pack(
+        self,
+    ) -> RegimeClusterEvidencePack | None:
+        return self._latest_regime_cluster_evidence_pack
+
+    @property
+    def regime_cluster_evidence_pack_generated_count(self) -> int:
+        return self._regime_cluster_evidence_pack_generated_count
+
+    @property
+    def regime_cluster_cohort_summary_generated_count(self) -> int:
+        return self._regime_cluster_cohort_summary_generated_count
+
+    def observe_market_regime(
+        self,
+        *,
+        opportunity_id: str,
+        market_regime: str,
+    ) -> None:
+        """Record the ``market_regime`` snapshot taken when an
+        adaptive context was assembled for ``opportunity_id``.
+
+        Paper / virtual only; storing the regime does NOT authorise
+        opening a position. The cache is consumed by
+        :meth:`flush_report` to attach the regime to dataset rows
+        before the evidence pack is built.
+
+        ``observe_market_regime`` is intentionally a tiny helper -
+        the WS-radar driver calls it after every
+        ``MARKET_REGIME_ASSESSED`` it would have already emitted.
+        Records whose opportunity_id is missing from the cache
+        safely degrade to ``"unknown"`` per the brief.
+        """
+        opp_id = str(opportunity_id or "").strip()
+        if not opp_id:
+            return
+        regime = str(market_regime or "").strip()
+        if not regime:
+            return
+        self._regime_by_opportunity[opp_id] = regime
 
     # ------------------------------------------------------------------
     def observe_label_record(
@@ -569,6 +685,22 @@ class StrategyValidationRuntime:
                     report=report,
                     ts_ms=ts_value,
                 )
+            # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort
+            # Evidence Pack v0. Emit only when the parent dataset
+            # exists (the brief's "if sample_count is insufficient,
+            # emit INSUFFICIENT_SAMPLE - do NOT skip" requirement
+            # holds so long as the dataset object exists, even when
+            # it contains zero records). The pack is paper / report
+            # / evidence only; nothing on the path below authorises
+            # a real trade or modifies the Risk Engine / Execution
+            # FSM.
+            if (
+                self._config.regime_cluster_evidence_pack_enabled
+                and self._latest_dataset is not None
+            ):
+                self._build_and_emit_regime_cluster_evidence_events(
+                    ts_ms=ts_value,
+                )
             # Rebuild metrics so the daily-report builder sees the
             # latest dataset / quality-gate fields. Without this
             # refresh, a metrics_payload() call after the flush
@@ -678,6 +810,60 @@ class StrategyValidationRuntime:
                 "paper_alpha_follow_risk_warnings": 0,
                 "paper_alpha_leader_preference_signals": 0,
                 "paper_alpha_gate_report": {},
+                # Phase 11C.1C-C-B-B-B-B - empty Regime & Cluster
+                # Cohort Evidence Pack v0 block so the daily-report
+                # builder can still render the new section. Paper /
+                # report / evidence only; the per-cohort status is
+                # descriptive and **MUST NEVER trigger a real
+                # trade**.
+                "regime_cluster_evidence_schema_version": (
+                    REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                ),
+                "regime_cluster_evidence_pack_generated_count": int(
+                    self._regime_cluster_evidence_pack_generated_count
+                ),
+                "regime_cluster_cohort_summary_generated_count": int(
+                    self._regime_cluster_cohort_summary_generated_count
+                ),
+                "regime_cluster_evidence_status": "",
+                "regime_cluster_sample_count": 0,
+                "regime_cluster_completed_tail_label_count": 0,
+                "regime_cluster_insufficient_sample_reasons": [],
+                "regime_cluster_warnings": [],
+                "regime_cluster_signals": [],
+                "regime_cohort_summary": {
+                    "rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                },
+                "cluster_cohort_summary": {
+                    "rows": [],
+                    "leader_vs_follower_rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                },
+                "score_bucket_summary": {
+                    "opportunity_score_rows": [],
+                    "early_tail_score_rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                },
+                "stage_outcome_summary": {
+                    "rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                },
+                "strategy_mode_outcome_summary": {
+                    "rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                },
+                "regime_cluster_evidence_pack": {},
             }
         report = build_strategy_validation_report(
             samples,
@@ -896,6 +1082,116 @@ class StrategyValidationRuntime:
             "paper_alpha_gate_report": (
                 self._latest_paper_alpha_report.to_payload()
                 if self._latest_paper_alpha_report is not None
+                else {}
+            ),
+            # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort
+            # Evidence Pack v0 aggregates the daily-report builder
+            # consumes. Paper / report / evidence only; the per-
+            # cohort status is descriptive and **MUST NEVER trigger
+            # a real trade** or modify the Risk Engine / Execution
+            # FSM. The Risk Engine remains the single trade-decision
+            # gate.
+            "regime_cluster_evidence_schema_version": (
+                REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+            ),
+            "regime_cluster_evidence_pack_generated_count": int(
+                self._regime_cluster_evidence_pack_generated_count
+            ),
+            "regime_cluster_cohort_summary_generated_count": int(
+                self._regime_cluster_cohort_summary_generated_count
+            ),
+            "regime_cluster_evidence_status": (
+                str(self._latest_regime_cluster_evidence_pack.status)
+                if self._latest_regime_cluster_evidence_pack is not None
+                else ""
+            ),
+            "regime_cluster_sample_count": int(
+                self._latest_regime_cluster_evidence_pack.sample_count
+                if self._latest_regime_cluster_evidence_pack is not None
+                else 0
+            ),
+            "regime_cluster_completed_tail_label_count": int(
+                self._latest_regime_cluster_evidence_pack
+                .completed_tail_label_count
+                if self._latest_regime_cluster_evidence_pack is not None
+                else 0
+            ),
+            "regime_cluster_insufficient_sample_reasons": list(
+                self._latest_regime_cluster_evidence_pack
+                .insufficient_sample_reasons
+                if self._latest_regime_cluster_evidence_pack is not None
+                else ()
+            ),
+            "regime_cluster_warnings": list(
+                self._latest_regime_cluster_evidence_pack.warnings
+                if self._latest_regime_cluster_evidence_pack is not None
+                else ()
+            ),
+            "regime_cluster_signals": list(
+                self._latest_regime_cluster_evidence_pack.signals
+                if self._latest_regime_cluster_evidence_pack is not None
+                else ()
+            ),
+            "regime_cohort_summary": (
+                self._latest_regime_cluster_evidence_pack
+                .regime_cohort_summary.to_payload()
+                if self._latest_regime_cluster_evidence_pack is not None
+                else {
+                    "rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                }
+            ),
+            "cluster_cohort_summary": (
+                self._latest_regime_cluster_evidence_pack
+                .cluster_cohort_summary.to_payload()
+                if self._latest_regime_cluster_evidence_pack is not None
+                else {
+                    "rows": [],
+                    "leader_vs_follower_rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                }
+            ),
+            "score_bucket_summary": (
+                self._latest_regime_cluster_evidence_pack
+                .score_bucket_summary.to_payload()
+                if self._latest_regime_cluster_evidence_pack is not None
+                else {
+                    "opportunity_score_rows": [],
+                    "early_tail_score_rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                }
+            ),
+            "stage_outcome_summary": (
+                self._latest_regime_cluster_evidence_pack
+                .stage_outcome_summary.to_payload()
+                if self._latest_regime_cluster_evidence_pack is not None
+                else {
+                    "rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                }
+            ),
+            "strategy_mode_outcome_summary": (
+                self._latest_regime_cluster_evidence_pack
+                .strategy_mode_outcome_summary.to_payload()
+                if self._latest_regime_cluster_evidence_pack is not None
+                else {
+                    "rows": [],
+                    "schema_version": (
+                        REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION
+                    ),
+                }
+            ),
+            "regime_cluster_evidence_pack": (
+                self._latest_regime_cluster_evidence_pack.to_payload()
+                if self._latest_regime_cluster_evidence_pack is not None
                 else {}
             ),
         }
@@ -1497,6 +1793,210 @@ class StrategyValidationRuntime:
             payload=report_payload,
         )
         self._paper_alpha_report_generated_count += 1
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-B - Regime & Cluster Cohort Evidence Pack
+    # v0 helpers
+    # ------------------------------------------------------------------
+    def _regime_cluster_identity_block(
+        self,
+        *,
+        report_id: str,
+        dataset_id: str,
+        evidence_pack_status: str,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        """Build the Phase 11C.1C-C-B-B-B-B identity block carried by
+        every Regime & Cluster Evidence Pack v0 event. Mirrors
+        :meth:`_paper_alpha_identity_block` but stamps the
+        evidence-pack schema_version + version label + the
+        descriptive ``evidence_pack_status``."""
+        return {
+            "schema_version": REGIME_CLUSTER_EVIDENCE_SCHEMA_VERSION,
+            "regime_cluster_evidence_version": (
+                REGIME_CLUSTER_EVIDENCE_VERSION
+            ),
+            "source_phase": REGIME_CLUSTER_EVIDENCE_SOURCE_PHASE,
+            "report_id": str(report_id),
+            "dataset_id": str(dataset_id),
+            "timestamp": int(ts_ms),
+            "evidence_pack_status": str(evidence_pack_status),
+            "strategy_version": "phase_11c_1c_a.strategy.v1",
+            "scoring_version": "phase_11c_1c_a.scoring.v1",
+            "risk_config_version": "phase_11c_1c_a.risk_config.v1",
+            "state_machine_version": "phase_11c_1c_a.state_machine.v1",
+        }
+
+    def _build_and_emit_regime_cluster_evidence_events(
+        self,
+        *,
+        ts_ms: int,
+    ) -> None:
+        """Build the Phase 11C.1C-C-B-B-B-B
+        :class:`RegimeClusterEvidencePack` from the cached
+        :class:`StrategyValidationDataset` /
+        :class:`StrategyValidationQualityGateResult` /
+        :class:`PaperAlphaGateReport` artefacts, emit the two new
+        typed events
+        (``REGIME_CLUSTER_EVIDENCE_PACK_GENERATED`` and
+        ``REGIME_CLUSTER_COHORT_SUMMARY_GENERATED``), and cache the
+        result on the runtime for the daily-report builder.
+
+        Phase 11C.1C-C-B-B-B-B boundary - this method is paper /
+        report / evidence only. None of the events it emits
+        authorises a real trade; the per-cohort ``status`` is a
+        descriptive label and **MUST NEVER** modify position size,
+        leverage, stop-loss, target price, the Risk Engine, or the
+        Execution FSM.
+        """
+        if self._latest_dataset is None:
+            return
+        try:
+            paper_alpha_status = ""
+            if self._latest_paper_alpha_report is not None:
+                paper_alpha_status = str(
+                    self._latest_paper_alpha_report.gate_status
+                )
+            quality_gate_status = ""
+            if self._latest_quality_gate_result is not None:
+                quality_gate_status = str(
+                    self._latest_quality_gate_result.gate_status
+                )
+            evidence_input = build_regime_cluster_evidence_input(
+                dataset=self._latest_dataset,
+                regime_by_opportunity=self._regime_by_opportunity,
+                paper_alpha_gate_status=paper_alpha_status,
+                quality_gate_status=quality_gate_status,
+                report_id=str(self._latest_dataset.report_id),
+            )
+            evidence_pack = build_regime_cluster_evidence_pack(
+                evidence_input,
+                evaluated_at=int(ts_ms),
+                min_total_samples=int(
+                    self._config.regime_cluster_min_total_samples
+                ),
+                min_completed_tail_labels=int(
+                    self._config.regime_cluster_min_completed_tail_labels
+                ),
+                min_cohort_samples=int(
+                    self._config.regime_cluster_min_cohort_samples
+                ),
+                strong_tail_signal_rate=float(
+                    self._config.regime_cluster_strong_tail_signal_rate
+                ),
+                reached_3r_signal_rate=float(
+                    self._config.regime_cluster_reached_3r_signal_rate
+                ),
+                reached_5r_signal_rate=float(
+                    self._config.regime_cluster_reached_5r_signal_rate
+                ),
+                fake_breakout_warning_rate=float(
+                    self._config.regime_cluster_fake_breakout_warning_rate
+                ),
+                missed_tail_warning_rate=float(
+                    self._config.regime_cluster_missed_tail_warning_rate
+                ),
+                late_chase_failure_warning_rate=float(
+                    self._config
+                    .regime_cluster_late_chase_failure_warning_rate
+                ),
+                leader_preference_advantage=float(
+                    self._config.regime_cluster_leader_preference_advantage
+                ),
+                high_bucket_advantage=float(
+                    self._config.regime_cluster_high_bucket_advantage
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "[phase11c.1c-c-b-b-b-b] build_regime_cluster_evidence_pack"
+                " failed: {}",
+                exc,
+            )
+            return
+        self._latest_regime_cluster_evidence_pack = evidence_pack
+
+        evidence_pack_status = str(evidence_pack.status)
+        dataset_id = str(self._latest_dataset.report_id)
+        report_id = str(evidence_pack.report_id)
+
+        # 1. REGIME_CLUSTER_COHORT_SUMMARY_GENERATED - one event per
+        #    named cohort summary so a downstream auditor can flatly
+        #    iterate the per-cohort summaries without parsing the
+        #    nested top-level pack.
+        cohort_summaries: tuple[tuple[str, dict[str, Any]], ...] = (
+            (
+                "regime_cohort_summary",
+                evidence_pack.regime_cohort_summary.to_payload(),
+            ),
+            (
+                "cluster_cohort_summary",
+                evidence_pack.cluster_cohort_summary.to_payload(),
+            ),
+            (
+                "score_bucket_summary",
+                evidence_pack.score_bucket_summary.to_payload(),
+            ),
+            (
+                "stage_outcome_summary",
+                evidence_pack.stage_outcome_summary.to_payload(),
+            ),
+            (
+                "strategy_mode_outcome_summary",
+                evidence_pack.strategy_mode_outcome_summary.to_payload(),
+            ),
+        )
+        for summary_name, summary_payload in cohort_summaries:
+            payload = {
+                **self._regime_cluster_identity_block(
+                    report_id=report_id,
+                    dataset_id=dataset_id,
+                    evidence_pack_status=evidence_pack_status,
+                    ts_ms=ts_ms,
+                ),
+                "summary_name": str(summary_name),
+                "summary": summary_payload,
+            }
+            self._emit(
+                EventType.REGIME_CLUSTER_COHORT_SUMMARY_GENERATED,
+                symbol=None,
+                timestamp=ts_ms,
+                payload=payload,
+            )
+            self._regime_cluster_cohort_summary_generated_count += 1
+
+        # 2. REGIME_CLUSTER_EVIDENCE_PACK_GENERATED - the full pack
+        #    payload so a downstream auditor can replay the report
+        #    from one event-log row.
+        pack_payload = {
+            **self._regime_cluster_identity_block(
+                report_id=report_id,
+                dataset_id=dataset_id,
+                evidence_pack_status=evidence_pack_status,
+                ts_ms=ts_ms,
+            ),
+            "sample_count": int(evidence_pack.sample_count),
+            "completed_tail_label_count": int(
+                evidence_pack.completed_tail_label_count
+            ),
+            "insufficient_sample_reasons": list(
+                evidence_pack.insufficient_sample_reasons
+            ),
+            "warnings": list(evidence_pack.warnings),
+            "signals": list(evidence_pack.signals),
+            "paper_alpha_gate_status": str(
+                evidence_pack.paper_alpha_gate_status
+            ),
+            "quality_gate_status": str(evidence_pack.quality_gate_status),
+            "pack": export_regime_cluster_evidence_payload(evidence_pack),
+        }
+        self._emit(
+            EventType.REGIME_CLUSTER_EVIDENCE_PACK_GENERATED,
+            symbol=None,
+            timestamp=ts_ms,
+            payload=pack_payload,
+        )
+        self._regime_cluster_evidence_pack_generated_count += 1
 
     def _emit(
         self,
