@@ -2,18 +2,19 @@
 
 > **Chinese name / 中文名:** *Regime 与 Cluster 分组证据包 v0*.
 >
-> **Status: NEXT_ALLOWED / NOT_STARTED (docs-only kickoff /
-> scope alignment).** This document opens Phase
-> 11C.1C-C-B-B-B-B as the **second child slice** under the
-> Phase 11C.1C-C-B-B-B parent (*Strategy Validation Lab
-> (deeper) & richer Cluster Exposure Control follow-up*).
-> The parent phase is **not** renamed; it keeps its existing
-> definition. Phase 11C.1C-C-B-B-B-A (*Paper Alpha Gate v0*)
-> remains `ACCEPTED` (PR #52 + PR #54 closeout). **No
-> runtime code is shipped by this PR.** The substantive
-> implementation is reserved for a separate implementation
-> PR that will land after this docs-only kickoff is
-> reviewed.
+> **Status: ACCEPTED (closed 2026-05-24; PR #56 merged into
+> `main` on 2026-05-24, mergeCommit `1a9abe2`; this docs-only
+> closeout PR #57 records the operator-VPS paper evidence
+> that flips the slice to `ACCEPTED`).** This document
+> opened Phase 11C.1C-C-B-B-B-B as the **second child
+> slice** under the Phase 11C.1C-C-B-B-B parent (*Strategy
+> Validation Lab (deeper) & richer Cluster Exposure Control
+> follow-up*). The parent phase is **not** renamed; it
+> keeps its existing definition. Phase 11C.1C-C-B-B-B-A
+> (*Paper Alpha Gate v0*) remains `ACCEPTED` (PR #52 + PR
+> #54 closeout). Phase 11C.1C-C-B-B-B-C is now
+> **NEXT_ALLOWED / NOT_STARTED** as the next child slice
+> under the same parent (placeholder; not yet defined).
 >
 > Paper / report / evidence only. **NOT** live trading.
 > **NOT** AI Learning. **NOT** automatic parameter
@@ -610,3 +611,209 @@ real DeepSeek trade decision    = none
 real Telegram outbound          = none
 Phase 12                        = FORBIDDEN (gate unchanged)
 ```
+
+
+
+## Phase 11C.1C-C-B-B-B-B acceptance evidence (operator-VPS 10 min WS paper smoke PASSED + Phase 8.5 export bundle) — FILED via PR #57
+
+> **Status flipped:** Phase 11C.1C-C-B-B-B-B is now
+> **ACCEPTED** (PR #56 merged into `main` on 2026-05-24,
+> mergeCommit `1a9abe2`; this docs-only closeout PR #57
+> records the operator-VPS paper evidence below). The
+> closeout mirrors the PR #36 → PR #37, PR #38 → PR #39, PR
+> #40 → PR #41, PR #42 → PR #43, PR #44 → PR #50, and PR
+> #52 → PR #54 docs-only closeout pattern.
+
+### Operator-VPS 10 min WS paper smoke
+
+```
+duration_seconds                = 600.0
+uptime                          ≈ 608s
+ws_first                        = true
+ws_real_transport               = true
+ingestion_errors                = 0
+HTTP 429 count                  = 0
+HTTP 418 count                  = 0
+```
+
+### Regime & Cluster Cohort Evidence Pack daily report
+
+```
+daily report contains           : "## Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort Evidence Pack v0"
+regime_cluster_evidence_status  = INSUFFICIENT_SAMPLE
+sample_count                    = 14
+completed_tail_label_count      = 0
+insufficient_sample_reasons     :
+  - sample_count_below_min=14<20
+  - completed_tail_label_count_below_min=0<10
+```
+
+### Regime & Cluster event counts (runner snapshot + events.db type-count cross-check, after shutdown flush)
+
+```
+REGIME_CLUSTER_EVIDENCE_PACK_GENERATED  = 1
+REGIME_CLUSTER_COHORT_SUMMARY_GENERATED = 5
+```
+
+### Phase 8.5 export bundle
+
+```
+export_test_data                = OK
+export zip                      = data/reports/exports/ama_rt_test_data_1779635774169_export_d.zip
+manifest_event_count            = 3151
+redaction_applied               = True
+events.jsonl                    = exists
+export contains REGIME_CLUSTER_* events                  = yes
+EXPORT_REGIME_CLUSTER_EVIDENCE_CHECK                     = PASS
+```
+
+### Export package files observed
+
+```
+manifest.json
+summary_report.md
+events.jsonl
+opportunities.jsonl
+signal_snapshots.jsonl
+risk_decisions.jsonl
+state_transitions.jsonl
+capital_events.jsonl
+virtual_trade_plans.jsonl
+```
+
+### Why `regime_cluster_evidence_status = INSUFFICIENT_SAMPLE` was the expected and accepted result
+
+`regime_cluster_evidence_status = INSUFFICIENT_SAMPLE` is
+an **expected and accepted** result for this smoke window
+because `sample_count = 14 < 20` and
+`completed_tail_label_count = 0 < 10`. This means the
+Regime & Cluster Evidence Pack **correctly refused to
+overfit or force a regime / cluster conclusion when
+structural samples were insufficient**. The brief's
+"forbid loosening rules on low samples" rule was honoured
+end-to-end:
+
+  - **`INSUFFICIENT_SAMPLE` does NOT mean runtime failure.**
+    The runtime emitted both new event types
+    (`REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=1`,
+    `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=5`), the
+    daily report rendered the new section, and the export
+    bundle round-trips cleanly through Phase 8.5 / Phase
+    10A.
+  - **`INSUFFICIENT_SAMPLE` does NOT authorise strategy
+    changes.** No threshold / parameter / strategy change
+    is implied by or permitted on the basis of this
+    status.
+  - **`INSUFFICIENT_SAMPLE` does NOT authorise rule
+    relaxation.** No cohort minimum, no quality-gate
+    threshold, no Paper Alpha Gate threshold, and no Risk
+    Engine threshold may be widened in response.
+  - **`INSUFFICIENT_SAMPLE` does NOT authorise live
+    trading.** The Risk Engine remains the single
+    trade-decision gate, and no execution surface reads
+    the evidence pack.
+  - **`INSUFFICIENT_SAMPLE` does NOT authorise Phase 12.**
+    Phase 12 stays `FORBIDDEN` under the Phase 1 safety
+    lock.
+
+### Safety boundary held end-to-end across the operator-VPS run
+
+```
+mode                            = paper
+live_trading                    = False
+exchange_live_orders            = False
+right_tail                      = False
+llm                             = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+no Binance API key
+no Binance API secret
+no signed endpoint
+no account / order / position / leverage / margin endpoint
+no private websocket
+no listenKey
+no DeepSeek trade decision
+no real Telegram outbound
+Phase 12                        = FORBIDDEN
+```
+
+### Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    live trading.
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    API keys.
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    private endpoints.
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    DeepSeek trade decisions.
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    real Telegram outbound.
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    Phase 11C.1C-C-B-B-B-C kickoff bypassing the standard
+    gate.
+  - Phase 11C.1C-C-B-B-B-B acceptance does **NOT** authorise
+    Phase 12.
+  - Regime & Cluster Evidence Pack outputs remain
+    paper-only / report-only / evidence-only.
+  - Regime & Cluster Evidence Pack outputs cannot trigger
+    orders, leverage, position sizing, stop changes, target
+    changes, Risk Engine changes, or Execution FSM changes.
+
+### Acceptance conditions checked off
+
+  - [x] Operator-VPS 10 min WS paper smoke PASSED
+    (`duration_seconds=600.0`, `uptime≈608s`,
+    `ws_first=true`, `ws_real_transport=true`,
+    `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`).
+  - [x] Daily report contains
+    `"## Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort
+    Evidence Pack v0"`.
+  - [x] `regime_cluster_evidence_status =
+    INSUFFICIENT_SAMPLE` is correctly recorded as the
+    expected and accepted result for `sample_count=14<20`
+    + `completed_tail_label_count=0<10`.
+  - [x] `insufficient_sample_reasons` populated with
+    explicit reasons (`sample_count_below_min=14<20`,
+    `completed_tail_label_count_below_min=0<10`).
+  - [x] `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=1` and
+    `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=5`
+    cross-checked against the events.db type-count query
+    after shutdown flush.
+  - [x] Phase 8.5 export zip generated successfully
+    (`data/reports/exports/ama_rt_test_data_1779635774169_export_d.zip`,
+    `manifest_event_count=3151`,
+    `redaction_applied=True`, `events.jsonl` exists,
+    export contains `REGIME_CLUSTER_*` events,
+    `EXPORT_REGIME_CLUSTER_EVIDENCE_CHECK=PASS`).
+  - [x] Export package files observed (`manifest.json`,
+    `summary_report.md`, `events.jsonl`,
+    `opportunities.jsonl`, `signal_snapshots.jsonl`,
+    `risk_decisions.jsonl`, `state_transitions.jsonl`,
+    `capital_events.jsonl`,
+    `virtual_trade_plans.jsonl`).
+  - [x] Phase 1 safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`).
+  - [x] No Binance API key.
+  - [x] No Binance API secret.
+  - [x] No signed endpoint.
+  - [x] No account / order / position / leverage / margin
+    endpoint.
+  - [x] No private WebSocket.
+  - [x] No `listenKey`.
+  - [x] No DeepSeek trade decision.
+  - [x] No real Telegram outbound.
+  - [x] No `ORDER_*` / `POSITION_*` / `STOP_*` /
+    `TELEGRAM_MESSAGE_SENT` / `EXIT_TRIGGERED` event
+    emitted by the new pipeline.
+  - [x] No evidence-pack output is read by the Risk Engine
+    or the Execution FSM.
+  - [x] Phase 12 stays `FORBIDDEN`.
+
+This docs-only closeout PR #57 is therefore complete; Phase
+11C.1C-C-B-B-B-B is now **ACCEPTED**; Phase
+11C.1C-C-B-B-B-C is now **NEXT_ALLOWED / NOT_STARTED**;
+Phase 12 remains **FORBIDDEN**.

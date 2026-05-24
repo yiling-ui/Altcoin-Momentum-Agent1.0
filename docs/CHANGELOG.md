@@ -7,6 +7,245 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-B accepted - Regime & Cluster Cohort Evidence Pack v0 docs-only closeout (PR #57)
+
+**Type:** Docs-only closeout / acceptance flip.
+**Runtime effect:** **none.**
+**Phase ledger effect:** flips Phase 11C.1C-C-B-B-B-B from
+`MERGED / AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING`
+to `ACCEPTED`; introduces Phase 11C.1C-C-B-B-B-C as
+`NEXT_ALLOWED / NOT_STARTED` (placeholder; not yet defined).
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **Status: ACCEPTED (closed 2026-05-24; PR #56 merged into
+> `main` on 2026-05-24, mergeCommit `1a9abe2`; this docs-only
+> closeout PR #57 records the operator-VPS paper evidence
+> that flips Phase 11C.1C-C-B-B-B-B to `ACCEPTED`).** Regime
+> & Cluster Cohort Evidence Pack v0 / *Regime 与 Cluster 分组
+> 证据包 v0* — second child slice under the Phase
+> 11C.1C-C-B-B-B parent — paper / report / evidence only.
+> **NOT** live trading. **NOT** AI Learning. **NOT**
+> automatic parameter optimisation. **NOT** reinforcement
+> learning. **NOT** the complete Strategy Validation Lab
+> follow-up. **NOT** Phase 12.
+
+#### Phase 11C.1C-C-B-B-B-B accepted (closeout summary)
+
+  - Regime & Cluster Cohort Evidence Pack v0 implementation
+    merged (PR #56 merged into `main` on 2026-05-24,
+    mergeCommit `1a9abe2`).
+  - operator-VPS 10 min WS paper smoke evidence recorded
+    (`duration_seconds=600.0`, `uptime≈608s`,
+    `ws_first=true`, `ws_real_transport=true`,
+    `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`).
+  - daily report Regime & Cluster section verified
+    (`"## Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort
+    Evidence Pack v0"`;
+    `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE`,
+    `sample_count=14`, `completed_tail_label_count=0`,
+    `insufficient_sample_reasons=[sample_count_below_min=14<20,
+    completed_tail_label_count_below_min=0<10]`).
+  - `REGIME_CLUSTER_*` events verified
+    (`REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=1`,
+    `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=5`).
+  - export package generated and verified
+    (`export_test_data=OK`,
+    `data/reports/exports/ama_rt_test_data_1779635774169_export_d.zip`,
+    `manifest_event_count=3151`,
+    `redaction_applied=True`, `events.jsonl` exists,
+    `EXPORT_REGIME_CLUSTER_EVIDENCE_CHECK=PASS`).
+  - export contains `REGIME_CLUSTER_*` events.
+  - export package files observed: `manifest.json`,
+    `summary_report.md`, `events.jsonl`,
+    `opportunities.jsonl`, `signal_snapshots.jsonl`,
+    `risk_decisions.jsonl`, `state_transitions.jsonl`,
+    `capital_events.jsonl`, `virtual_trade_plans.jsonl`.
+  - status `INSUFFICIENT_SAMPLE` accepted as expected
+    low-sample / low-completed-tail-label result
+    (`sample_count=14<20` and
+    `completed_tail_label_count=0<10`); the Regime &
+    Cluster Evidence Pack correctly refused to overfit or
+    force a regime / cluster conclusion when structural
+    samples were insufficient. `INSUFFICIENT_SAMPLE` does
+    NOT mean runtime failure; `INSUFFICIENT_SAMPLE` does
+    NOT authorise strategy changes; `INSUFFICIENT_SAMPLE`
+    does NOT authorise rule relaxation;
+    `INSUFFICIENT_SAMPLE` does NOT authorise live trading;
+    `INSUFFICIENT_SAMPLE` does NOT authorise Phase 12.
+  - paper-only, no live trading, Phase 12 forbidden.
+  - safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`).
+  - no Binance API key.
+  - no Binance API secret.
+  - no signed endpoint.
+  - no account / order / position / leverage / margin
+    endpoint.
+  - no private websocket.
+  - no listenKey.
+  - no DeepSeek trade decision.
+  - no real Telegram outbound.
+  - Phase 12 remains FORBIDDEN.
+
+#### Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    live trading.
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    API keys.
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    private endpoints.
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    DeepSeek trade decisions.
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    real Telegram outbound.
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    Phase 11C.1C-C-B-B-B-C kickoff bypassing the standard
+    gate.
+  - Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise
+    Phase 12.
+  - Regime & Cluster Evidence Pack outputs remain
+    paper-only / report-only / evidence-only.
+  - Regime & Cluster Evidence Pack outputs cannot trigger
+    orders, leverage, position sizing, stop changes, target
+    changes, Risk Engine changes, or Execution FSM changes.
+
+#### Changed
+
+- **`docs/PROJECT_STATUS.md`** — current-phase block now
+  leads with Phase 11C.1C-C-B-B-B-B = `ACCEPTED`; inline
+  summary list flips B-B-B-B from `NEXT_ALLOWED /
+  NOT_STARTED` to `ACCEPTED` and adds Phase
+  11C.1C-C-B-B-B-C = `NEXT_ALLOWED / NOT_STARTED`
+  placeholder; "does NOT authorise" block extended for
+  B-B-B-B with `INSUFFICIENT_SAMPLE` explanation; per-phase
+  table: new B-B-B-B (closeout) `ACCEPTED` row + new
+  B-B-B-C placeholder row inserted (legacy B-B-B-B kickoff
+  + implementation rows annotated `SUPERSEDED`); per-phase
+  prose section converted to *ACCEPTED via PR #57
+  docs-only closeout* with full operator-VPS evidence
+  subsection + new B-B-B-C placeholder section.
+- **`docs/PHASE_GATE.md`** — Phase 11C.1C-C-B-B-B-B row
+  added to the *Closed phases* table; *Open / Reserved
+  phases* table updated (B-B-B-B → `ACCEPTED — see Closed
+  phases table above`, B-B-B-C → `NEXT_ALLOWED /
+  NOT_STARTED` placeholder); the *Open phase: Phase
+  11C.1C-C-B-B-B-B* section converted to a *Closed phase:
+  Phase 11C.1C-C-B-B-B-B (ACCEPTED)* section + a *Phase
+  11C.1C-C-B-B-B-B acceptance evidence (operator-VPS 10
+  min WS paper smoke PASSED)* section carrying the
+  verbatim runner / events.db / daily-report /
+  export-bundle transcript; new *Open phase: Phase
+  11C.1C-C-B-B-B-C (NEXT_ALLOWED / NOT_STARTED)* section +
+  acceptance gate placeholder; legacy B-B-B-B kickoff
+  sub-sections (scope / outputs / questions / principles /
+  boundary / forbidden / acceptance gate placeholder) /
+  removed (their content is preserved in
+  `docs/PHASE_11C_1C_C_B_B_B_B_REGIME_CLUSTER_EVIDENCE_PACK.md`);
+  Phase 12 forbidden row updated to mention B-B-B-B and
+  B-B-B-C explicitly; *Architecture governance
+  (guidance-only; no phase change)* closing paragraph
+  refreshed (B-B-B-A = ACCEPTED; B-B-B-B = ACCEPTED;
+  B-B-B-C = NEXT_ALLOWED / NOT_STARTED; Phase 12 =
+  FORBIDDEN).
+- **`docs/PHASE_11C_1C_C_B_B_B_B_REGIME_CLUSTER_EVIDENCE_PACK.md`**
+  — status banner flipped from `NEXT_ALLOWED / NOT_STARTED
+  (docs-only kickoff / scope alignment)` to `ACCEPTED`;
+  parent / child relationship updated to mention B-B-B-C;
+  new "Phase 11C.1C-C-B-B-B-B acceptance evidence
+  (operator-VPS 10 min WS paper smoke PASSED + Phase 8.5
+  export bundle) — FILED via PR #57" section added.
+- **`docs/CHANGELOG.md`** — *this entry*.
+
+#### Added
+
+- **`docs/PR57_DESCRIPTION.md`** (NEW) — describes this
+  docs-only closeout PR (changed files, allowed / forbidden
+  edits, confirmation checklist, acceptance evidence).
+
+#### Forbidden by this PR (carries forward verbatim)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop /
+  target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- AI Learning that auto-decides trades.
+- Auto-rule-relaxation on low samples.
+- Risk Engine override / bypass.
+- Execution FSM override / bypass.
+- Phase Gate override / bypass.
+- Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+  `risk/`, `execution/`, `llm/`, `telegram/`, or
+  `exchange/`.
+- Modifying configuration schemas, defaults, or YAML.
+- Modifying strategy runtime code.
+- Adding or modifying tests.
+- Adding new Python modules.
+- Adding new event types.
+- Modifying runtime behavior.
+- Implementing new functionality.
+- Phase 11C.1C-C-B-B-B-C implementation (reserved for the
+  next child slice; will require its own kickoff PR,
+  brief, scope, boundary table, forbidden list, and
+  acceptance evidence).
+- Phase 11C.1C-C-B-B-B-C kickoff bypassing the standard
+  gate.
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only closeout)
+
+- Docs-only PR. **No code modified** under `app/`,
+  `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`,
+  `llm/`, `telegram/`, or `exchange/`.
+- **No new Python files.**
+- **No new event types.**
+- **No new tests.**
+- **No dry-run / smoke required** (no runtime change).
+- Operator-VPS 10 min WS paper smoke evidence already
+  captured pre-PR; this PR **records** the evidence in
+  the ledger.
+- Phase 11C.1C-C-B-B-B-B flipped to `ACCEPTED`.
+- Phase 11C.1C-C-B-B-B-C introduced at `NEXT_ALLOWED /
+  NOT_STARTED`.
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Phase 11C.1C-C-B-B-B-B (Regime & Cluster Cohort Evidence Pack v0) implementation (PR #56)
 
 **Type:** Implementation PR (paper / report / evidence-only).
