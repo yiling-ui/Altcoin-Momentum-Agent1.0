@@ -7,6 +7,254 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Docs-only - Phase 11C.1C-C-B-B-B-B (Regime & Cluster Cohort Evidence Pack v0) kickoff / scope alignment (PR #55)
+
+**Type:** Docs-only kickoff / scope-alignment.
+**Runtime effect:** **none.**
+**Phase ledger effect:** introduces Phase 11C.1C-C-B-B-B-B
+at `NEXT_ALLOWED / NOT_STARTED` as the **second child slice**
+under the Phase 11C.1C-C-B-B-B parent. **No phase's
+acceptance state is flipped.** Phase 11C.1C-C-B-B-B-A remains
+`ACCEPTED`. Phase 11C.1C-C-B-B-B remains `NEXT_ALLOWED /
+NOT_STARTED` (parent; **unchanged definition** —
+*Strategy Validation Lab (deeper) & richer Cluster Exposure
+Control follow-up*).
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **This PR is paper / report / evidence only.** **NOT** live
+> trading. **NOT** AI Learning. **NOT** automatic parameter
+> optimisation. **NOT** reinforcement learning. **NOT** a
+> strategy implementation. **NOT** a trading module. **NOT**
+> the complete Strategy Validation Lab follow-up. **NOT** the
+> Phase 11C.1C-C-B-B-B-B *implementation* (the implementation
+> requires a separate PR; this PR is the **docs-only
+> kickoff**). **NOT** Phase 12.
+>
+> Every artefact this slice produces — when implemented —
+> (`regime_cohort_summary`, `cluster_cohort_summary`,
+> `score_bucket_summary`, `stage_outcome_summary`,
+> `strategy_mode_outcome_summary`,
+> `regime_cluster_evidence_pack`, `warnings`,
+> `insufficient_sample_reasons`) will be a **descriptive
+> label** for human review only. Outputs **MUST NEVER**
+> trigger a real trade or modify position size, leverage,
+> stop-loss, target price, the Risk Engine, or the Execution
+> FSM. The Risk Engine remains the single trade-decision
+> gate.
+
+#### Added
+
+- **`docs/PHASE_11C_1C_C_B_B_B_B_REGIME_CLUSTER_EVIDENCE_PACK.md`**
+  (NEW) — *Phase 11C.1C-C-B-B-B-B — Regime & Cluster Cohort
+  Evidence Pack v0 (docs-only kickoff)* / *Regime 与 Cluster
+  分组证据包 v0*. Records the parent / child relationship
+  (Phase 11C.1C-C-B-B-B-B is the **second child slice**
+  under Phase 11C.1C-C-B-B-B; the parent phase is **not**
+  renamed), the scope (read-only / evidence-only compression
+  layer that organises upstream artefacts into cohort
+  summaries by Regime, Cluster, Stage, Strategy Mode, and
+  Score Bucket), the inputs the slice reads (Phase
+  11C.1C-C-A label-tracking outcomes, Phase 11C.1C-C-B-A
+  validation samples / cluster exposure assessments, Phase
+  11C.1C-C-B-B-A validation dataset / quality gate, Phase
+  11C.1C-C-B-B-B-A Paper Alpha Gate verdict), the **allowed
+  outputs** (`regime_cohort_summary`,
+  `cluster_cohort_summary`, `score_bucket_summary`,
+  `stage_outcome_summary`, `strategy_mode_outcome_summary`,
+  `regime_cluster_evidence_pack`, `warnings`,
+  `insufficient_sample_reasons`), the **eight questions to
+  be answered by cohort evidence**, the **core principles**
+  (add fewer modules / accumulate more structural data;
+  verify Regime more / talk less about strategy; prove which
+  states carry right-tail value; replayable; reduces human
+  interpretation cost; serves Regime / Liquidity / Right
+  Tail judgement; forbid unverifiable AI output; forbid
+  system-complexity growth; forbid loosening rules on low
+  samples), the **boundary table** (Phase 1 safety lock +
+  outputs-are-descriptive-only invariants), the **forbidden
+  list** (inherited verbatim + slice-specific items), and
+  the **acceptance-gate placeholder** for the implementation
+  PR.
+- **`docs/PR55_DESCRIPTION.md`** (NEW) — describes this
+  docs-only kickoff PR (changed files, allowed / forbidden
+  edits, confirmation checklist).
+
+#### Changed
+
+- **`docs/PHASE_GATE.md`** — *Open / Reserved phases* table
+  Phase 11C.1C-C-B-B-B-B row redefined from "Next child
+  slice (placeholder; not yet defined)" to *Regime & Cluster
+  Cohort Evidence Pack v0 (paper / report / evidence-only
+  second child slice under Phase 11C.1C-C-B-B-B; docs-only
+  kickoff via PR #55)* with full scope language,
+  allowed-outputs list, and inherited-forbidden-list
+  reference. *Reserved phase: Phase 11C.1C-C-B-B-B-B*
+  section converted to *Open phase: Phase 11C.1C-C-B-B-B-B
+  (NEXT_ALLOWED / NOT_STARTED)* with full scope, the eight
+  cohort questions, the core principles, the boundary
+  table, the inherited forbidden list, and the
+  acceptance-gate placeholder. *Architecture governance
+  (guidance-only; no phase change)* closing paragraph
+  refreshed to reflect the current open-phase state (B-B-A
+  = ACCEPTED; B-B-B = NEXT_ALLOWED / NOT_STARTED; B-B-B-A
+  = ACCEPTED; B-B-B-B = NEXT_ALLOWED / NOT_STARTED; Phase
+  12 = FORBIDDEN).
+- **`docs/PROJECT_STATUS.md`** — current-phase block
+  B-B-B-B line refreshed with the new defined name (Regime
+  & Cluster Cohort Evidence Pack v0 / Regime 与 Cluster 分组
+  证据包 v0), the docs-only-kickoff scope, and the
+  paper / report / evidence-only safety language.
+  Per-phase table B-B-B-B row redefined with full scope,
+  allowed outputs, eight cohort questions, core principles,
+  and the inherited forbidden list reference. The B-B-B-B
+  prose subsection rewritten to record positioning under
+  AMOS, allowed outputs, the eight cohort questions, the
+  core principles, and the slice-specific forbidden items.
+- **`docs/CHANGELOG.md`** — *this entry*.
+
+#### Phase 11C.1C-C-B-B-B-B exists to make the following questions answerable from data
+
+  1. Which Regimes are more likely to produce
+     `strong_tail` / `reached_3r` / `reached_5r`?
+  2. Which Regimes are more likely to produce
+     `fake_breakout` / `late_chase_failure`?
+  3. Is the `cluster_leader` materially better than its
+     followers on the same cohort?
+  4. Does the high `opportunity_score_bucket` actually
+     out-perform the low bucket?
+  5. Does the high `early_tail_score_bucket` actually
+     out-perform the low bucket?
+  6. Do `follow` / `pullback` / `observe` / `reject`
+     downstream outcomes match expectations?
+  7. Which state combinations deserve continued paper
+     observation?
+  8. Which state combinations must be down-weighted or
+     rejected?
+
+#### Phase 11C.1C-C-B-B-B-B core principles (carried forward verbatim)
+
+  - Add fewer modules; accumulate more structural data.
+  - Talk less about "strategy"; verify Regime more.
+  - Stop chasing a universal model; prove which states
+    really carry right-tail value.
+  - All new content must be replayable.
+  - All new content must reduce the human-interpretation
+    cost.
+  - All new content must serve Regime / Liquidity / Right
+    Tail judgement.
+  - Forbid unverifiable AI output.
+  - Forbid system-complexity growth.
+  - Forbid loosening rules on low samples.
+
+#### Allowed outputs (paper / report / evidence-only)
+
+Each is a **descriptive label only**. None has trade
+authority. None is read by the Risk Engine or the Execution
+FSM:
+
+  - `regime_cohort_summary`
+  - `cluster_cohort_summary`
+  - `score_bucket_summary`
+  - `stage_outcome_summary`
+  - `strategy_mode_outcome_summary`
+  - `regime_cluster_evidence_pack`
+  - `warnings`
+  - `insufficient_sample_reasons`
+
+#### Forbidden by this PR (carries forward verbatim + slice-specific items)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop /
+  target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- AI Learning that auto-decides trades.
+- Auto-rule-relaxation on low samples.
+- Risk Engine override / bypass.
+- Execution FSM override / bypass.
+- Phase Gate override / bypass.
+- Triggering a real trade from any evidence-pack output.
+- Modifying position size / leverage / stop-loss / target
+  price from any evidence-pack output.
+- Modifying the Risk Engine or the Execution FSM from any
+  evidence-pack output.
+- Replacing the Paper Alpha Gate v0 verdict with
+  evidence-pack output (the evidence pack is *additive*,
+  not a replacement).
+- Implementing the Regime & Cluster Cohort Evidence Pack v0
+  (this PR is docs-only; the implementation lands in a
+  separate PR after this kickoff is reviewed).
+- Implementing the complete Strategy Validation Lab
+  follow-up (reserved for later child slices under Phase
+  11C.1C-C-B-B-B).
+- Adding new Python modules under `app/`.
+- Adding new event types.
+- Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+  `risk/`, `execution/`, `llm/`, `telegram/`, or
+  `exchange/`.
+- Modifying configuration schemas, defaults, or YAML.
+- Adding or modifying tests.
+- Modifying strategy runtime code.
+- Modifying runtime behavior.
+- Implementing new functionality.
+- Flipping any phase's acceptance state. Phase
+  11C.1C-C-B-B-B-A remains `ACCEPTED`. Phase
+  11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`.
+  Phase 11C.1C-C-B-B-B-B is introduced at `NEXT_ALLOWED /
+  NOT_STARTED`. Phase 12 remains `FORBIDDEN`.
+- Renaming Phase 11C.1C-C-B-B-B. The parent phase keeps its
+  existing definition — *Strategy Validation Lab (deeper) &
+  richer Cluster Exposure Control follow-up*.
+- Phase 11C.1C-C-B-B-B-B implementation (out of scope for
+  this kickoff PR).
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only)
+
+- Docs-only PR. **No code modified** under `app/`,
+  `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`,
+  `llm/`, `telegram/`, or `exchange/`.
+- **No new Python files.**
+- **No new event types.**
+- **No new tests.**
+- **No dry-run / smoke required** (no runtime change).
+- **No phase acceptance state flipped.**
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Phase 11C.1C-C-B-B-B-A accepted - Paper Alpha Gate v0 docs-only closeout (PR #54)
 
 **Type:** Docs-only closeout / acceptance flip.
