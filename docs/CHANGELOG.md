@@ -7,6 +7,221 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-A accepted - Paper Alpha Gate v0 docs-only closeout (PR #54)
+
+**Type:** Docs-only closeout / acceptance flip.
+**Runtime effect:** **none.**
+**Phase ledger effect:** flips Phase 11C.1C-C-B-B-B-A from
+`MERGED / AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING`
+to `ACCEPTED`; flips Phase 11C.1C-C-B-B-B-B from `BLOCKED /
+NOT_STARTED` to `NEXT_ALLOWED / NOT_STARTED`.
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **Status: ACCEPTED (closed 2026-05-24; PR #52 merged into
+> `main` on 2026-05-24, mergeCommit `f8ba315`; this docs-only
+> closeout PR #54 records the operator-VPS paper evidence
+> that flips Phase 11C.1C-C-B-B-B-A to `ACCEPTED`).** Paper
+> Alpha Gate v0 — first child slice under the Phase
+> 11C.1C-C-B-B-B parent — paper / report / evidence only.
+> **NOT** live trading. **NOT** AI Learning. **NOT**
+> automatic parameter optimisation. **NOT** reinforcement
+> learning. **NOT** the complete Strategy Validation Lab
+> follow-up. **NOT** Phase 12.
+
+#### Phase 11C.1C-C-B-B-B-A accepted (closeout summary)
+
+  - Paper Alpha Gate v0 implementation merged (PR #52
+    merged into `main` on 2026-05-24, mergeCommit
+    `f8ba315`).
+  - operator-VPS 10 min WS paper smoke evidence recorded
+    (`duration_seconds=600.0`, `uptime≈608s`,
+    `ws_first=true`, `ws_real_transport=true`,
+    `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`).
+  - Paper Alpha Gate daily report section verified
+    (`"## Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0"`;
+    `paper_alpha_gate_status=INCONCLUSIVE`,
+    `paper_alpha_gate_sample_count=20`,
+    `reason=completed_tail_label_count_below_min=0<10`).
+  - `PAPER_ALPHA_*` events verified
+    (`PAPER_ALPHA_GATE_EVALUATED=1`,
+    `PAPER_ALPHA_RULE_EVALUATED=9`,
+    `PAPER_ALPHA_COHORT_EVALUATED=6`,
+    `PAPER_ALPHA_REPORT_GENERATED=1`).
+  - export package generated and verified
+    (`export_test_data=OK`,
+    `data/reports/exports/ama_rt_test_data_1779627957433_export_1.zip`,
+    `manifest_event_count=1572`,
+    `redaction_applied=True`,
+    `events.jsonl` exists,
+    `EXPORT_PAPER_ALPHA_GATE_CHECK=PASS`).
+  - export contains `PAPER_ALPHA_*` events.
+  - export package files observed: `manifest.json`,
+    `summary_report.md`, `events.jsonl`,
+    `opportunities.jsonl`, `signal_snapshots.jsonl`,
+    `risk_decisions.jsonl`, `state_transitions.jsonl`,
+    `capital_events.jsonl`, `virtual_trade_plans.jsonl`.
+  - status `INCONCLUSIVE` accepted as expected
+    low-completed-label result
+    (`completed_tail_label_count=0<10`); the Paper Alpha
+    Gate correctly refused to overfit or force a `PASS`
+    when completed tail labels were insufficient.
+    `INCONCLUSIVE` does NOT mean runtime failure;
+    `INCONCLUSIVE` does NOT authorise strategy changes;
+    `INCONCLUSIVE` does NOT authorise live trading;
+    `INCONCLUSIVE` does NOT authorise Phase 12.
+  - paper-only, no live trading, Phase 12 forbidden.
+  - safety flags unchanged (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`).
+  - no Binance API key.
+  - no Binance API secret.
+  - no signed endpoint.
+  - no account / order / position / leverage / margin
+    endpoint.
+  - no private websocket.
+  - no listenKey.
+  - no DeepSeek trade decision.
+  - no real Telegram outbound.
+  - Phase 12 remains FORBIDDEN.
+
+#### Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+
+  - Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+    live trading.
+  - Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+    API keys.
+  - Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+    private endpoints.
+  - Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+    DeepSeek trade decisions.
+  - Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+    real Telegram outbound.
+  - Phase 11C.1C-C-B-B-B-A acceptance does NOT authorise
+    Phase 12.
+  - Paper Alpha Gate verdicts remain paper-only /
+    report-only / evidence-only.
+  - Paper Alpha Gate verdicts cannot trigger orders,
+    leverage, position sizing, stop changes, target changes,
+    Risk Engine changes, or Execution FSM changes.
+
+#### Changed
+
+- **`docs/PROJECT_STATUS.md`** — Phase 11C.1C-C-B-B-B-A row
+  flipped from `MERGED / AWAITING_OPERATOR_VPS_EVIDENCE /
+  CLOSEOUT_PENDING` to `ACCEPTED`; Phase 11C.1C-C-B-B-B-B
+  flipped from `BLOCKED / NOT_STARTED` to `NEXT_ALLOWED /
+  NOT_STARTED`; current-phase block refreshed; per-phase
+  prose updated; new acceptance-evidence subsection added.
+- **`docs/PHASE_GATE.md`** — Phase 11C.1C-C-B-B-B-B-A row
+  added to the *Closed phases* table; *Open / Reserved
+  phases* table updated (B-B-B-A → `ACCEPTED`, B-B-B-B →
+  `NEXT_ALLOWED / NOT_STARTED`); the *Open phase: Phase
+  11C.1C-C-B-B-B-A* section converted to a
+  *Closed phase: Phase 11C.1C-C-B-B-B-A (ACCEPTED)*
+  section; *Required operator-VPS paper evidence* section
+  replaced with a *Phase 11C.1C-C-B-B-B-A acceptance gate
+  (post-merge; operator-VPS evidence filed via PR #54)*
+  section + a *Phase 11C.1C-C-B-B-B-A acceptance evidence
+  (operator-VPS 10 min WS paper smoke PASSED)* section
+  carrying the verbatim runner / events.db / daily-report /
+  export-bundle transcript; *Reserved phase: Phase
+  11C.1C-C-B-B-B-B* section updated to `NEXT_ALLOWED /
+  NOT_STARTED`; Phase 12 forbidden row updated.
+- **`docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`** —
+  status banner flipped from `MERGED /
+  AWAITING_OPERATOR_VPS_EVIDENCE / CLOSEOUT_PENDING` to
+  `ACCEPTED`; new "Phase 11C.1C-C-B-B-B-A acceptance
+  evidence (operator-VPS 10 min WS paper smoke PASSED)"
+  section added; "Required operator-VPS paper evidence
+  before closeout `ACCEPTED`" section replaced with a
+  "filed via PR #54" record.
+- **`docs/CHANGELOG.md`** — *this entry*.
+
+#### Added
+
+- **`docs/PR54_DESCRIPTION.md`** (NEW) — describes this
+  docs-only closeout PR (changed files, allowed / forbidden
+  edits, confirmation checklist, acceptance evidence).
+
+#### Forbidden by this PR (carries forward verbatim)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop /
+  target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- AI Learning that auto-decides trades.
+- Risk Engine override / bypass.
+- Execution FSM override / bypass.
+- Phase Gate override / bypass.
+- Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+  `risk/`, `execution/`, `llm/`, `telegram/`, or
+  `exchange/`.
+- Modifying configuration schemas, defaults, or YAML.
+- Adding or modifying tests.
+- Adding new Python modules.
+- Adding new event types.
+- Modifying runtime behavior.
+- Implementing new functionality.
+- Phase 11C.1C-C-B-B-B-B implementation (reserved for the
+  next child slice; will require its own kickoff PR,
+  brief, scope, boundary table, forbidden list, and
+  acceptance evidence).
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only closeout)
+
+- Docs-only PR. **No code modified** under `app/`,
+  `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`,
+  `llm/`, `telegram/`, or `exchange/`.
+- **No new Python files.**
+- **No new event types.**
+- **No new tests.**
+- **No dry-run / smoke required** (no runtime change).
+- Operator-VPS 10 min WS paper smoke evidence already
+  captured pre-PR; this PR **records** the evidence in the
+  ledger.
+- Phase 11C.1C-C-B-B-B-A flipped to `ACCEPTED`.
+- Phase 11C.1C-C-B-B-B-B flipped to `NEXT_ALLOWED /
+  NOT_STARTED`.
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 (implementation; PR #52 merged)
 
 **Version:** `1.4.0a11c.1c.c.b.b.b.a` - Phase 11C.1C-C-B-B-B-A.
