@@ -83,6 +83,16 @@ from app.adaptive.strategy_validation_dataset import (
     evaluate_validation_dataset_quality,
     export_validation_dataset_payload,
 )
+from app.adaptive.paper_alpha_gate import (
+    PAPER_ALPHA_GATE_SCHEMA_VERSION,
+    PAPER_ALPHA_GATE_SOURCE_PHASE,
+    PAPER_ALPHA_GATE_VERSION,
+    PaperAlphaGateInput,
+    PaperAlphaGateReport,
+    build_paper_alpha_gate_input,
+    build_paper_alpha_gate_report,
+    export_paper_alpha_gate_payload,
+)
 from app.core.clock import now_ms
 from app.core.events import Event, EventType
 from app.database.repositories import EventRepository
@@ -122,6 +132,20 @@ class StrategyValidationRuntimeConfig:
     quality_gate_min_score_bucket_coverage: int = 2
     quality_gate_require_export_roundtrip: bool = True
     quality_gate_require_replay_readable: bool = True
+    # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 thresholds. Paper
+    # / report only; the verdict is descriptive (``PASS`` /
+    # ``WARN`` / ``FAIL`` / ``INCONCLUSIVE``) and **MUST NEVER**
+    # trigger a real trade or modify the Risk Engine / Execution
+    # FSM.
+    paper_alpha_gate_enabled: bool = True
+    paper_alpha_min_total_samples: int = 20
+    paper_alpha_min_completed_tail_labels: int = 10
+    paper_alpha_min_bucket_samples: int = 5
+    paper_alpha_high_bucket_advantage: float = 0.10
+    paper_alpha_late_chase_fake_breakout_rate: float = 0.30
+    paper_alpha_missed_alpha_strong_tail_rate: float = 0.20
+    paper_alpha_follow_fake_breakout_rate: float = 0.30
+    paper_alpha_leader_preference_advantage: float = 0.10
 
     @staticmethod
     def from_mapping(
@@ -144,6 +168,15 @@ class StrategyValidationRuntimeConfig:
             "quality_gate_min_score_bucket_coverage",
             "quality_gate_require_export_roundtrip",
             "quality_gate_require_replay_readable",
+            "paper_alpha_gate_enabled",
+            "paper_alpha_min_total_samples",
+            "paper_alpha_min_completed_tail_labels",
+            "paper_alpha_min_bucket_samples",
+            "paper_alpha_high_bucket_advantage",
+            "paper_alpha_late_chase_fake_breakout_rate",
+            "paper_alpha_missed_alpha_strong_tail_rate",
+            "paper_alpha_follow_fake_breakout_rate",
+            "paper_alpha_leader_preference_advantage",
         ):
             if f in mapping and mapping[f] is not None:
                 kwargs[f] = mapping[f]
@@ -176,6 +209,15 @@ class StrategyValidationRuntimeConfig:
             "quality_gate_min_score_bucket_coverage",
             "quality_gate_require_export_roundtrip",
             "quality_gate_require_replay_readable",
+            "paper_alpha_gate_enabled",
+            "paper_alpha_min_total_samples",
+            "paper_alpha_min_completed_tail_labels",
+            "paper_alpha_min_bucket_samples",
+            "paper_alpha_high_bucket_advantage",
+            "paper_alpha_late_chase_fake_breakout_rate",
+            "paper_alpha_missed_alpha_strong_tail_rate",
+            "paper_alpha_follow_fake_breakout_rate",
+            "paper_alpha_leader_preference_advantage",
         ):
             if hasattr(section, f):
                 attrs[f] = getattr(section, f)
@@ -285,6 +327,14 @@ class StrategyValidationRuntime:
         # samples are emitted so dataset records carry
         # ``source_event_id`` without re-querying events.db.
         self._sample_event_ids: dict[str, str] = {}
+        # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 counters +
+        # latest report cache. Paper / report only; the verdict is
+        # descriptive and **MUST NEVER trigger a real trade**.
+        self._paper_alpha_gate_evaluated_count = 0
+        self._paper_alpha_rule_evaluated_count = 0
+        self._paper_alpha_cohort_evaluated_count = 0
+        self._paper_alpha_report_generated_count = 0
+        self._latest_paper_alpha_report: PaperAlphaGateReport | None = None
 
     # ------------------------------------------------------------------
     @property
@@ -336,6 +386,30 @@ class StrategyValidationRuntime:
     @property
     def quality_gate_evaluated_count(self) -> int:
         return self._quality_gate_evaluated_count
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 accessors. Read-
+    # only views; mutations happen exclusively in flush_report().
+    # ------------------------------------------------------------------
+    @property
+    def latest_paper_alpha_report(self) -> PaperAlphaGateReport | None:
+        return self._latest_paper_alpha_report
+
+    @property
+    def paper_alpha_gate_evaluated_count(self) -> int:
+        return self._paper_alpha_gate_evaluated_count
+
+    @property
+    def paper_alpha_rule_evaluated_count(self) -> int:
+        return self._paper_alpha_rule_evaluated_count
+
+    @property
+    def paper_alpha_cohort_evaluated_count(self) -> int:
+        return self._paper_alpha_cohort_evaluated_count
+
+    @property
+    def paper_alpha_report_generated_count(self) -> int:
+        return self._paper_alpha_report_generated_count
 
     # ------------------------------------------------------------------
     def observe_label_record(
@@ -482,6 +556,19 @@ class StrategyValidationRuntime:
                 build_dataset=do_dataset,
                 evaluate_quality_gate=do_gate,
             )
+            # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0. Emit only
+            # when the parent dataset / quality-gate run produced a
+            # dataset (so the gate has structured input). The
+            # verdict is paper / report only; nothing on the path
+            # below authorises a real trade.
+            if (
+                self._config.paper_alpha_gate_enabled
+                and self._latest_dataset is not None
+            ):
+                self._build_and_emit_paper_alpha_gate_events(
+                    report=report,
+                    ts_ms=ts_value,
+                )
             # Rebuild metrics so the daily-report builder sees the
             # latest dataset / quality-gate fields. Without this
             # refresh, a metrics_payload() call after the flush
@@ -556,6 +643,41 @@ class StrategyValidationRuntime:
                 "validation_dataset_export_ready": False,
                 "validation_dataset_replay_ready": False,
                 "validation_quality_gate_result": {},
+                # Phase 11C.1C-C-B-B-B-A - empty Paper Alpha Gate v0
+                # block so the daily-report builder can still render
+                # the new section. Paper / report only; **MUST
+                # NEVER trigger a real trade**.
+                "paper_alpha_gate_schema_version": (
+                    PAPER_ALPHA_GATE_SCHEMA_VERSION
+                ),
+                "paper_alpha_gate_evaluated_count": int(
+                    self._paper_alpha_gate_evaluated_count
+                ),
+                "paper_alpha_rule_evaluated_count": int(
+                    self._paper_alpha_rule_evaluated_count
+                ),
+                "paper_alpha_cohort_evaluated_count": int(
+                    self._paper_alpha_cohort_evaluated_count
+                ),
+                "paper_alpha_report_generated_count": int(
+                    self._paper_alpha_report_generated_count
+                ),
+                "paper_alpha_gate_status": "",
+                "paper_alpha_gate_reasons": [],
+                "paper_alpha_gate_warnings": [],
+                "paper_alpha_gate_sample_count": 0,
+                "paper_alpha_strategy_mode_results": {},
+                "paper_alpha_candidate_stage_results": {},
+                "paper_alpha_score_bucket_results": {
+                    "opportunity_score_bucket": {},
+                    "early_tail_score_bucket": {},
+                },
+                "paper_alpha_cluster_results": {},
+                "paper_alpha_missed_alpha_warnings": 0,
+                "paper_alpha_late_chase_warnings": 0,
+                "paper_alpha_follow_risk_warnings": 0,
+                "paper_alpha_leader_preference_signals": 0,
+                "paper_alpha_gate_report": {},
             }
         report = build_strategy_validation_report(
             samples,
@@ -699,6 +821,81 @@ class StrategyValidationRuntime:
             "validation_quality_gate_result": (
                 self._latest_quality_gate_result.to_payload()
                 if self._latest_quality_gate_result is not None
+                else {}
+            ),
+            # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 aggregates
+            # the daily-report builder consumes. The fields are
+            # paper / report only; the ``paper_alpha_gate_status``
+            # is descriptive and **MUST NEVER trigger a real
+            # trade**. The Risk Engine remains the single
+            # trade-decision gate.
+            "paper_alpha_gate_schema_version": (
+                PAPER_ALPHA_GATE_SCHEMA_VERSION
+            ),
+            "paper_alpha_gate_evaluated_count": int(
+                self._paper_alpha_gate_evaluated_count
+            ),
+            "paper_alpha_rule_evaluated_count": int(
+                self._paper_alpha_rule_evaluated_count
+            ),
+            "paper_alpha_cohort_evaluated_count": int(
+                self._paper_alpha_cohort_evaluated_count
+            ),
+            "paper_alpha_report_generated_count": int(
+                self._paper_alpha_report_generated_count
+            ),
+            "paper_alpha_gate_status": (
+                str(self._latest_paper_alpha_report.gate_status)
+                if self._latest_paper_alpha_report is not None
+                else ""
+            ),
+            "paper_alpha_gate_reasons": list(
+                self._latest_paper_alpha_report.reasons
+                if self._latest_paper_alpha_report is not None
+                else ()
+            ),
+            "paper_alpha_gate_warnings": list(
+                self._latest_paper_alpha_report.warnings
+                if self._latest_paper_alpha_report is not None
+                else ()
+            ),
+            "paper_alpha_gate_sample_count": int(
+                self._latest_paper_alpha_report.sample_count
+                if self._latest_paper_alpha_report is not None
+                else 0
+            ),
+            "paper_alpha_strategy_mode_results": (
+                self._cohort_payload_for("strategy_mode")
+            ),
+            "paper_alpha_candidate_stage_results": (
+                self._cohort_payload_for("candidate_stage")
+            ),
+            "paper_alpha_score_bucket_results": {
+                "opportunity_score_bucket": (
+                    self._cohort_payload_for("opportunity_score_bucket")
+                ),
+                "early_tail_score_bucket": (
+                    self._cohort_payload_for("early_tail_score_bucket")
+                ),
+            },
+            "paper_alpha_cluster_results": (
+                self._cohort_payload_for("cluster_leader_vs_follower")
+            ),
+            "paper_alpha_missed_alpha_warnings": int(
+                self._cohort_warning_count("missed_alpha_warning")
+            ),
+            "paper_alpha_late_chase_warnings": int(
+                self._cohort_warning_count("late_chase_warning")
+            ),
+            "paper_alpha_follow_risk_warnings": int(
+                self._cohort_warning_count("follow_risk_warning")
+            ),
+            "paper_alpha_leader_preference_signals": int(
+                self._cohort_signal_count("leader_preference_signal")
+            ),
+            "paper_alpha_gate_report": (
+                self._latest_paper_alpha_report.to_payload()
+                if self._latest_paper_alpha_report is not None
                 else {}
             ),
         }
@@ -1087,6 +1284,219 @@ class StrategyValidationRuntime:
             "risk_config_version": "phase_11c_1c_a.risk_config.v1",
             "state_machine_version": "phase_11c_1c_a.state_machine.v1",
         }
+
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 helpers
+    # ------------------------------------------------------------------
+    def _cohort_payload_for(self, dimension: str) -> dict[str, Any]:
+        """Return the to_payload() of the cohort-result for the given
+        dimension on the latest Paper Alpha Gate report, or ``{}``
+        when no report has been built yet / the dimension is missing.
+        """
+        report = self._latest_paper_alpha_report
+        if report is None:
+            return {}
+        for c in report.cohort_results:
+            if str(c.dimension) == str(dimension):
+                return c.to_payload()
+        return {}
+
+    def _cohort_warning_count(self, warning: str) -> int:
+        """Return the number of cohort-results on the latest Paper
+        Alpha Gate report that raised the named warning."""
+        report = self._latest_paper_alpha_report
+        if report is None:
+            return 0
+        return sum(
+            1 for c in report.cohort_results if str(warning) in c.warnings
+        )
+
+    def _cohort_signal_count(self, signal: str) -> int:
+        """Return the number of cohort-results on the latest Paper
+        Alpha Gate report that raised the named signal."""
+        report = self._latest_paper_alpha_report
+        if report is None:
+            return 0
+        return sum(
+            1 for c in report.cohort_results if str(signal) in c.signals
+        )
+
+    def _paper_alpha_identity_block(
+        self,
+        *,
+        report_id: str,
+        dataset_id: str,
+        gate_status: str,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        """Build the Phase 11C.1C-C-B-B-B-A identity block carried by
+        every Paper Alpha Gate v0 event. Mirrors
+        :meth:`_dataset_identity_block` but stamps the alpha-gate
+        schema_version + version label + the descriptive
+        ``gate_status``."""
+        return {
+            "schema_version": PAPER_ALPHA_GATE_SCHEMA_VERSION,
+            "paper_alpha_gate_version": PAPER_ALPHA_GATE_VERSION,
+            "source_phase": PAPER_ALPHA_GATE_SOURCE_PHASE,
+            "report_id": str(report_id),
+            "dataset_id": str(dataset_id),
+            "timestamp": int(ts_ms),
+            "gate_status": str(gate_status),
+            "strategy_version": "phase_11c_1c_a.strategy.v1",
+            "scoring_version": "phase_11c_1c_a.scoring.v1",
+            "risk_config_version": "phase_11c_1c_a.risk_config.v1",
+            "state_machine_version": "phase_11c_1c_a.state_machine.v1",
+        }
+
+    def _build_and_emit_paper_alpha_gate_events(
+        self,
+        *,
+        report: StrategyValidationReport,
+        ts_ms: int,
+    ) -> None:
+        """Build the Phase 11C.1C-C-B-B-B-A
+        :class:`PaperAlphaGateReport` from the cached
+        :class:`StrategyValidationDataset` /
+        :class:`StrategyValidationQualityGateResult` /
+        :class:`StrategyValidationReport` artefacts, emit the four
+        new typed events, and cache the result on the runtime for
+        the daily-report builder.
+
+        Phase 11C.1C-C-B-B-B-A boundary - this method is paper /
+        report only. None of the events it emits authorises a real
+        trade; ``gate_status`` is a *descriptive* label (one of
+        ``PASS`` / ``WARN`` / ``FAIL`` / ``INCONCLUSIVE``) and
+        **MUST NEVER** modify position size, leverage, stop-loss,
+        target price, the Risk Engine, or the Execution FSM.
+        """
+        if self._latest_dataset is None:
+            return
+        try:
+            gate_input = build_paper_alpha_gate_input(
+                dataset=self._latest_dataset,
+                quality_gate_result=self._latest_quality_gate_result,
+                validation_report=report,
+                report_id=str(report.report_id),
+            )
+            paper_report = build_paper_alpha_gate_report(
+                gate_input,
+                evaluated_at=int(ts_ms),
+                min_total_samples=int(
+                    self._config.paper_alpha_min_total_samples
+                ),
+                min_completed_tail_labels=int(
+                    self._config.paper_alpha_min_completed_tail_labels
+                ),
+                min_bucket_samples=int(
+                    self._config.paper_alpha_min_bucket_samples
+                ),
+                follow_fake_breakout_rate=float(
+                    self._config.paper_alpha_follow_fake_breakout_rate
+                ),
+                missed_alpha_strong_tail_rate=float(
+                    self._config.paper_alpha_missed_alpha_strong_tail_rate
+                ),
+                late_chase_fake_breakout_rate=float(
+                    self._config.paper_alpha_late_chase_fake_breakout_rate
+                ),
+                high_bucket_advantage=float(
+                    self._config.paper_alpha_high_bucket_advantage
+                ),
+                leader_preference_advantage=float(
+                    self._config.paper_alpha_leader_preference_advantage
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "[phase11c.1c-c-b-b-b-a] build_paper_alpha_gate_report "
+                "failed: {}",
+                exc,
+            )
+            return
+        self._latest_paper_alpha_report = paper_report
+
+        gate_status = str(paper_report.gate_status)
+        dataset_id = str(self._latest_dataset.report_id)
+
+        # 1. PAPER_ALPHA_GATE_EVALUATED - top-level decision.
+        gate_payload = {
+            **self._paper_alpha_identity_block(
+                report_id=paper_report.report_id,
+                dataset_id=dataset_id,
+                gate_status=gate_status,
+                ts_ms=ts_ms,
+            ),
+            "sample_count": int(paper_report.sample_count),
+            "quality_gate_status": str(paper_report.quality_gate_status),
+            "reasons": list(paper_report.reasons),
+            "warnings": list(paper_report.warnings),
+        }
+        self._emit(
+            EventType.PAPER_ALPHA_GATE_EVALUATED,
+            symbol=None,
+            timestamp=ts_ms,
+            payload=gate_payload,
+        )
+        self._paper_alpha_gate_evaluated_count += 1
+
+        # 2. PAPER_ALPHA_RULE_EVALUATED - one event per rule.
+        for rule_result in paper_report.rule_results:
+            rule_payload = {
+                **self._paper_alpha_identity_block(
+                    report_id=paper_report.report_id,
+                    dataset_id=dataset_id,
+                    gate_status=gate_status,
+                    ts_ms=ts_ms,
+                ),
+                "rule": rule_result.to_payload(),
+            }
+            self._emit(
+                EventType.PAPER_ALPHA_RULE_EVALUATED,
+                symbol=None,
+                timestamp=ts_ms,
+                payload=rule_payload,
+            )
+            self._paper_alpha_rule_evaluated_count += 1
+
+        # 3. PAPER_ALPHA_COHORT_EVALUATED - one event per cohort
+        #    dimension.
+        for cohort_result in paper_report.cohort_results:
+            cohort_payload = {
+                **self._paper_alpha_identity_block(
+                    report_id=paper_report.report_id,
+                    dataset_id=dataset_id,
+                    gate_status=gate_status,
+                    ts_ms=ts_ms,
+                ),
+                "cohort": cohort_result.to_payload(),
+            }
+            self._emit(
+                EventType.PAPER_ALPHA_COHORT_EVALUATED,
+                symbol=None,
+                timestamp=ts_ms,
+                payload=cohort_payload,
+            )
+            self._paper_alpha_cohort_evaluated_count += 1
+
+        # 4. PAPER_ALPHA_REPORT_GENERATED - the full report payload
+        #    so a downstream auditor can replay the verdict from one
+        #    event-log row.
+        report_payload = {
+            **self._paper_alpha_identity_block(
+                report_id=paper_report.report_id,
+                dataset_id=dataset_id,
+                gate_status=gate_status,
+                ts_ms=ts_ms,
+            ),
+            "report": export_paper_alpha_gate_payload(paper_report),
+        }
+        self._emit(
+            EventType.PAPER_ALPHA_REPORT_GENERATED,
+            symbol=None,
+            timestamp=ts_ms,
+            payload=report_payload,
+        )
+        self._paper_alpha_report_generated_count += 1
 
     def _emit(
         self,

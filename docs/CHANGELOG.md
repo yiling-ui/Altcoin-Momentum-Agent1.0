@@ -7,6 +7,228 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 (implementation; PR #52)
+
+**Version:** `1.4.0a11c.1c.c.b.b.b.a` - Phase 11C.1C-C-B-B-B-A.
+Tracks the **paper / report / evidence-only first child
+slice** under Phase 11C.1C-C-B-B-B (Paper Alpha Gate v0).
+Ships `app/adaptive/paper_alpha_gate.py` (pure-function
+module + value-object models + nine pure functions), four
+new typed events, the `StrategyValidationRuntime` extension
+that emits the gate verdict on the same flush as the
+dataset / quality-gate emission, and the new "Phase
+11C.1C-C-B-B-B-A Paper Alpha Gate v0" section in the Phase
+11B daily report.
+
+> **Status: IN_REVIEW (PR #52 open; branch
+> `feature/phase-11c1c-c-b-b-b-a-paper-alpha-gate-v0`).**
+> Paper / report / evidence only. **NOT** live trading.
+> **NOT** AI Learning. **NOT** automatic parameter
+> optimisation. **NOT** reinforcement learning. **NOT** the
+> complete Strategy Validation Lab follow-up. **NOT** Phase
+> 12.
+>
+> The `paper_alpha_gate_status` field on every
+> `PAPER_ALPHA_GATE_EVALUATED` event (`PASS` / `WARN` /
+> `FAIL` / `INCONCLUSIVE`) is a **descriptive label** for
+> human review and **MUST NEVER trigger a real trade**,
+> **MUST NEVER** modify position size, leverage, stop-loss,
+> target price, the Risk Engine, or the Execution FSM. The
+> Risk Engine remains the single trade-decision gate.
+
+#### Added
+
+- **`app/adaptive/paper_alpha_gate.py`** — new pure-function
+  module:
+  - Models: `PaperAlphaGateStatus` (string-constant holder
+    for `PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`),
+    `PaperAlphaGateRule`,
+    `PaperAlphaGateRuleResult`,
+    `PaperAlphaGateCohortResult`,
+    `PaperAlphaGateInput`,
+    `PaperAlphaGateReport`.
+  - Pure functions:
+    `build_paper_alpha_gate_input`,
+    `evaluate_paper_alpha_gate`,
+    `evaluate_strategy_mode_alpha`,
+    `evaluate_candidate_stage_alpha`,
+    `evaluate_score_bucket_alpha`,
+    `evaluate_cluster_alpha`,
+    `build_paper_alpha_gate_report`,
+    `export_paper_alpha_gate_payload`,
+    `load_paper_alpha_gate_payload`.
+  - Schema version
+    `phase_11c_1c_c_b_b_b_a.paper_alpha_gate.v1`.
+  - The evaluator is **deterministic**. Identical inputs
+    always yield identical outputs. No I/O, no clock read,
+    no `EventRepository.append_event` call.
+- **Four new `EventType` values** in `app/core/events.py`:
+  `PAPER_ALPHA_GATE_EVALUATED`,
+  `PAPER_ALPHA_RULE_EVALUATED`,
+  `PAPER_ALPHA_COHORT_EVALUATED`,
+  `PAPER_ALPHA_REPORT_GENERATED`. Every payload carries the
+  brief-mandated identity block (`schema_version`,
+  `paper_alpha_gate_version`, `source_phase`, `report_id`,
+  `dataset_id`, `timestamp`, `gate_status`,
+  `strategy_version`, `scoring_version`,
+  `risk_config_version`, `state_machine_version`).
+- **`StrategyValidationRuntime`** extended:
+  - `flush_report()` now also runs Paper Alpha Gate v0 on
+    the same flush as the dataset / quality-gate emission
+    (only when the dataset was built; otherwise the alpha
+    gate is skipped — there is no input to evaluate).
+  - New runtime properties:
+    `latest_paper_alpha_report`,
+    `paper_alpha_gate_evaluated_count`,
+    `paper_alpha_rule_evaluated_count`,
+    `paper_alpha_cohort_evaluated_count`,
+    `paper_alpha_report_generated_count`.
+  - `metrics_payload()` exposes the new
+    `paper_alpha_*` fields (status, reasons, warnings,
+    sample count, per-cohort results, warning / signal
+    counts, full report payload).
+- **`StrategyValidationRuntimeConfig`** extended with
+  `paper_alpha_gate_enabled` (default `True`) and 8
+  `paper_alpha_*` thresholds; `from_settings_section()` and
+  `from_mapping()` honour all of them. Setting
+  `paper_alpha_gate_enabled=False` disables the new
+  sub-slice without affecting the parent dataset /
+  quality-gate contract.
+- **Daily report**:
+  - `DailyReportSnapshot` extended with
+    `paper_alpha_gate_evaluated_count`,
+    `paper_alpha_rule_evaluated_count`,
+    `paper_alpha_cohort_evaluated_count`,
+    `paper_alpha_report_generated_count`,
+    `paper_alpha_gate_status`,
+    `paper_alpha_gate_reasons`,
+    `paper_alpha_gate_warnings`,
+    `paper_alpha_gate_sample_count`,
+    `paper_alpha_strategy_mode_results`,
+    `paper_alpha_candidate_stage_results`,
+    `paper_alpha_score_bucket_results`,
+    `paper_alpha_cluster_results`,
+    `paper_alpha_missed_alpha_warnings`,
+    `paper_alpha_late_chase_warnings`,
+    `paper_alpha_follow_risk_warnings`,
+    `paper_alpha_leader_preference_signals`,
+    `paper_alpha_gate_report`.
+  - `DailyReportBuilder.build()` cross-checks the runner
+    counters against the events.db type-counts of the four
+    new event types so a stale runner counter cannot
+    under-report.
+  - New Markdown section "Phase 11C.1C-C-B-B-B-A Paper
+    Alpha Gate v0" with explicit "the
+    `paper_alpha_gate_status` is a descriptive label and
+    **MUST NEVER trigger a real trade** and **MUST NEVER**
+    modify position size, leverage, stop-loss, target
+    price, the Risk Engine, or the Execution FSM. Phase 12
+    remains FORBIDDEN" disclaimer.
+- **Tests**:
+  - `tests/unit/test_phase11c_1c_c_b_b_b_a_paper_alpha_gate.py`
+    — 27 brief-mandated cases covering input contract,
+    status vocabulary, cohort dimensions, rule definition,
+    INCONCLUSIVE on low samples, INCONCLUSIVE/FAIL on QG
+    fail, missed_alpha / late_chase / follow_risk warnings,
+    high score bucket signal, early tail bucket signal
+    (positive + negative), cluster leader signal,
+    deterministic, `build_paper_alpha_gate_input` from
+    upstream artefacts, payload roundtrip, legacy payload
+    tolerance, non-mapping rejected, runtime emits the four
+    events, export bundle carries them, replay accepts
+    them, daily report metrics + Markdown, empty-state
+    INCONCLUSIVE, Phase 1 safety flags unchanged, no
+    execution events emitted, Phase 12 forbidden, runtime
+    config knob disables the gate.
+  - `tests/unit/test_phase11b_no_network.py` allow-list
+    extended with the four new event types.
+- **Docs**:
+  - `docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md` —
+    docs-only kickoff document (PR #51) replaced with full
+    IN_REVIEW spec.
+  - `docs/PR52_DESCRIPTION.md` (NEW).
+  - `docs/PROJECT_STATUS.md` updated with Phase
+    11C.1C-C-B-B-B-A IN_REVIEW.
+  - `docs/PHASE_GATE.md` updated with the open phase entry.
+
+#### Changed
+
+- **`StrategyValidationRuntime._build_metrics_payload()`**
+  emits the new `paper_alpha_*` block; the empty-payload
+  branch in `metrics_payload()` mirrors the structure so the
+  daily-report builder can render the new section even when
+  no Paper Alpha Gate report has been built yet.
+
+#### Forbidden by this PR
+
+- Real trading.
+- Binance private API / signed endpoint / listenKey /
+  private WebSocket.
+- LLM / DeepSeek trade decision.
+- Real Telegram outbound.
+- Right-tail score in production scope.
+- `paper_alpha_gate_status` triggering real downstream
+  execution.
+- `paper_alpha_gate_status` modifying position size,
+  leverage, stop-loss, target price, the Risk Engine, or
+  the Execution FSM.
+- AI deciding direction / position size / leverage /
+  stop-loss / target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- Risk Engine override (the Risk Engine remains the single
+  trade-decision gate).
+- Execution FSM override.
+- Phase 11C.1C-C-B-B-B-B implementation (reserved for the
+  next child slice).
+- Complete Strategy Validation Lab follow-up.
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (status: PR #52 in human review)
+
+- 27 brief-mandated tests PASS
+  (`tests/unit/test_phase11c_1c_c_b_b_b_a_paper_alpha_gate.py`).
+- `tests/unit -k phase11c_` PASS (366 = 339 baseline + 27).
+- Full `tests/` PASS (2340 = 2313 baseline + 27, no
+  regression vs. post-PR-#51 main).
+- 30 s dry-run smoke produces an `INCONCLUSIVE` Paper Alpha
+  Gate report (the upstream `validation_quality_gate_status=fail`
+  because samples are necessarily in-flight in a 30 s
+  window — exactly the brief's "sample-insufficient ⇒
+  auditable INCONCLUSIVE" requirement).
+- Real WS 10 min smoke is **NOT required** for this PR (per
+  the brief: this slice is the Paper Alpha Gate contract +
+  deterministic evaluation layer; non-empty sample
+  verification is reserved for a later closeout).
+- Safety boundary held end-to-end (`live_trading=False`,
+  `exchange_live_orders=False`, `trading_mode_paper=True`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no listenKey, no
+  DeepSeek trade decision, no real Telegram outbound).
+- Phase 12 remains FORBIDDEN.
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Docs-only - Phase 11C.1C-C-B-B-B-A (Paper Alpha Gate v0) kickoff / scope alignment (guidance-only)
 
 **Type:** Docs-only kickoff / scope-alignment.

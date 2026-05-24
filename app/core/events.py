@@ -392,6 +392,58 @@ class EventType(str, Enum):
         "STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED"
     )
 
+    # ---- Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0. The Paper
+    # Alpha Gate v0 runtime turns the Phase 11C.1C-C-B-B-A
+    # :class:`StrategyValidationDataset` /
+    # :class:`StrategyValidationQualityGateResult` artefacts (and,
+    # transitively, the Phase 11C.1C-C-B-A
+    # :class:`StrategyValidationReport`) into a single descriptive
+    # alpha-evidence verdict for human review:
+    # ``PASS`` / ``WARN`` / ``FAIL`` / ``INCONCLUSIVE``.
+    #
+    # Phase 11C.1C-C-B-B-B-A boundary:
+    # - Every event below is paper / report only. None of them
+    #   authorises a real trade, modifies a real position, or flips
+    #   a Phase 1 safety flag.
+    # - The ``gate_status`` carried by every payload is a
+    #   *descriptive* label - one of ``PASS`` / ``WARN`` / ``FAIL``
+    #   / ``INCONCLUSIVE``. It is NEVER an input to a trade-decision
+    #   pipeline; the Risk Engine remains the single trade-decision
+    #   gate.
+    # - The verdict MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, or the Execution
+    #   FSM.
+    # - This is **NOT** AI Learning, **NOT** automatic parameter
+    #   optimisation, **NOT** reinforcement learning, **NOT** the
+    #   complete Strategy Validation Lab follow-up, **NOT**
+    #   Phase 12.
+    # - Every payload carries ``schema_version`` so future PRs can
+    #   extend the shape; old events without the v0 sub-block remain
+    #   replayable verbatim.
+    #
+    #   PAPER_ALPHA_GATE_EVALUATED   - the top-level gate decision
+    #     was reached and the verdict (``PASS`` / ``WARN`` /
+    #     ``FAIL`` / ``INCONCLUSIVE``) is recorded together with the
+    #     diagnostic reasons + warnings.
+    #   PAPER_ALPHA_RULE_EVALUATED   - one named rule was checked
+    #     against the input. The payload carries the rule id, the
+    #     observed value, the threshold, the severity, and whether
+    #     the rule fired.
+    #   PAPER_ALPHA_COHORT_EVALUATED - one cohort dimension
+    #     (``strategy_mode`` / ``candidate_stage`` /
+    #     ``opportunity_score_bucket`` /
+    #     ``early_tail_score_bucket`` /
+    #     ``cluster_leader_vs_follower`` /
+    #     ``tail_label_distribution``) was evaluated. The payload
+    #     carries the per-cohort signals, warnings, and metrics.
+    #   PAPER_ALPHA_REPORT_GENERATED - the full
+    #     :class:`PaperAlphaGateReport` payload was assembled and is
+    #     available for export / replay.
+    PAPER_ALPHA_GATE_EVALUATED = "PAPER_ALPHA_GATE_EVALUATED"
+    PAPER_ALPHA_RULE_EVALUATED = "PAPER_ALPHA_RULE_EVALUATED"
+    PAPER_ALPHA_COHORT_EVALUATED = "PAPER_ALPHA_COHORT_EVALUATED"
+    PAPER_ALPHA_REPORT_GENERATED = "PAPER_ALPHA_REPORT_GENERATED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

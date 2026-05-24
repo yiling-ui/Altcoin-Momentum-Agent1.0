@@ -281,6 +281,41 @@ class DailyReportSnapshot:
     validation_quality_gate_result: dict[str, Any] = field(
         default_factory=dict
     )
+    # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0. The runner
+    # passes the :meth:`StrategyValidationRuntime.metrics_payload`
+    # dict through ``strategy_validation_metrics``; the paper alpha
+    # gate sub-block below is read from that dict. Every value is
+    # paper / report only - the ``paper_alpha_gate_status`` is a
+    # *descriptive* label (``PASS`` / ``WARN`` / ``FAIL`` /
+    # ``INCONCLUSIVE``) and **MUST NEVER trigger a real trade**, and
+    # **MUST NEVER** modify position size, leverage, stop-loss,
+    # target price, the Risk Engine, or the Execution FSM. The Risk
+    # Engine remains the single trade-decision gate.
+    paper_alpha_gate_evaluated_count: int = 0
+    paper_alpha_rule_evaluated_count: int = 0
+    paper_alpha_cohort_evaluated_count: int = 0
+    paper_alpha_report_generated_count: int = 0
+    paper_alpha_gate_status: str = ""
+    paper_alpha_gate_reasons: list[str] = field(default_factory=list)
+    paper_alpha_gate_warnings: list[str] = field(default_factory=list)
+    paper_alpha_gate_sample_count: int = 0
+    paper_alpha_strategy_mode_results: dict[str, Any] = field(
+        default_factory=dict
+    )
+    paper_alpha_candidate_stage_results: dict[str, Any] = field(
+        default_factory=dict
+    )
+    paper_alpha_score_bucket_results: dict[str, Any] = field(
+        default_factory=dict
+    )
+    paper_alpha_cluster_results: dict[str, Any] = field(
+        default_factory=dict
+    )
+    paper_alpha_missed_alpha_warnings: int = 0
+    paper_alpha_late_chase_warnings: int = 0
+    paper_alpha_follow_risk_warnings: int = 0
+    paper_alpha_leader_preference_signals: int = 0
+    paper_alpha_gate_report: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -569,6 +604,52 @@ class DailyReportSnapshot:
             "validation_quality_gate_result": dict(
                 self.validation_quality_gate_result
             ),
+            # Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0 fields.
+            "paper_alpha_gate_evaluated_count": int(
+                self.paper_alpha_gate_evaluated_count
+            ),
+            "paper_alpha_rule_evaluated_count": int(
+                self.paper_alpha_rule_evaluated_count
+            ),
+            "paper_alpha_cohort_evaluated_count": int(
+                self.paper_alpha_cohort_evaluated_count
+            ),
+            "paper_alpha_report_generated_count": int(
+                self.paper_alpha_report_generated_count
+            ),
+            "paper_alpha_gate_status": str(self.paper_alpha_gate_status),
+            "paper_alpha_gate_reasons": list(self.paper_alpha_gate_reasons),
+            "paper_alpha_gate_warnings": list(
+                self.paper_alpha_gate_warnings
+            ),
+            "paper_alpha_gate_sample_count": int(
+                self.paper_alpha_gate_sample_count
+            ),
+            "paper_alpha_strategy_mode_results": dict(
+                self.paper_alpha_strategy_mode_results
+            ),
+            "paper_alpha_candidate_stage_results": dict(
+                self.paper_alpha_candidate_stage_results
+            ),
+            "paper_alpha_score_bucket_results": dict(
+                self.paper_alpha_score_bucket_results
+            ),
+            "paper_alpha_cluster_results": dict(
+                self.paper_alpha_cluster_results
+            ),
+            "paper_alpha_missed_alpha_warnings": int(
+                self.paper_alpha_missed_alpha_warnings
+            ),
+            "paper_alpha_late_chase_warnings": int(
+                self.paper_alpha_late_chase_warnings
+            ),
+            "paper_alpha_follow_risk_warnings": int(
+                self.paper_alpha_follow_risk_warnings
+            ),
+            "paper_alpha_leader_preference_signals": int(
+                self.paper_alpha_leader_preference_signals
+            ),
+            "paper_alpha_gate_report": dict(self.paper_alpha_gate_report),
         }
 
 
@@ -1688,6 +1769,153 @@ class DailyReportBuilder:
                 )
                 or {}
             ),
+            # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0 sub-block
+            # read off the runtime metrics payload. Event-log counts
+            # of the four new event types are used as the
+            # cross-check / fall-back so a stale runner counter
+            # cannot under-report a real Paper Alpha Gate event.
+            paper_alpha_gate_evaluated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "paper_alpha_gate_evaluated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.PAPER_ALPHA_GATE_EVALUATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            paper_alpha_rule_evaluated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "paper_alpha_rule_evaluated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.PAPER_ALPHA_RULE_EVALUATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            paper_alpha_cohort_evaluated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "paper_alpha_cohort_evaluated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.PAPER_ALPHA_COHORT_EVALUATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            paper_alpha_report_generated_count=int(
+                max(
+                    int(
+                        (strategy_validation_metrics or {}).get(
+                            "paper_alpha_report_generated_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.PAPER_ALPHA_REPORT_GENERATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            paper_alpha_gate_status=str(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_gate_status", ""
+                )
+                or ""
+            ),
+            paper_alpha_gate_reasons=list(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_gate_reasons", []
+                )
+                or []
+            ),
+            paper_alpha_gate_warnings=list(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_gate_warnings", []
+                )
+                or []
+            ),
+            paper_alpha_gate_sample_count=int(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_gate_sample_count", 0
+                )
+                or 0
+            ),
+            paper_alpha_strategy_mode_results=dict(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_strategy_mode_results", {}
+                )
+                or {}
+            ),
+            paper_alpha_candidate_stage_results=dict(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_candidate_stage_results", {}
+                )
+                or {}
+            ),
+            paper_alpha_score_bucket_results=dict(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_score_bucket_results", {}
+                )
+                or {}
+            ),
+            paper_alpha_cluster_results=dict(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_cluster_results", {}
+                )
+                or {}
+            ),
+            paper_alpha_missed_alpha_warnings=int(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_missed_alpha_warnings", 0
+                )
+                or 0
+            ),
+            paper_alpha_late_chase_warnings=int(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_late_chase_warnings", 0
+                )
+                or 0
+            ),
+            paper_alpha_follow_risk_warnings=int(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_follow_risk_warnings", 0
+                )
+                or 0
+            ),
+            paper_alpha_leader_preference_signals=int(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_leader_preference_signals", 0
+                )
+                or 0
+            ),
+            paper_alpha_gate_report=dict(
+                (strategy_validation_metrics or {}).get(
+                    "paper_alpha_gate_report", {}
+                )
+                or {}
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -2236,6 +2464,98 @@ class DailyReportBuilder:
                 "- (no quality gate reasons in this window)"
             )
 
+        # ---- Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0. Paper /
+        # report only. The ``paper_alpha_gate_status`` is a
+        # *descriptive* label (one of ``PASS`` / ``WARN`` / ``FAIL``
+        # / ``INCONCLUSIVE``) and **MUST NEVER trigger a real
+        # trade** and **MUST NEVER** modify position size,
+        # leverage, stop-loss, target price, the Risk Engine, or
+        # the Execution FSM. The Risk Engine remains the single
+        # trade-decision gate.
+        paper_alpha_block = (
+            f"- PAPER_ALPHA_GATE_EVALUATED count: "
+            f"**{snapshot.paper_alpha_gate_evaluated_count}**\n"
+            f"- PAPER_ALPHA_RULE_EVALUATED count: "
+            f"**{snapshot.paper_alpha_rule_evaluated_count}**\n"
+            f"- PAPER_ALPHA_COHORT_EVALUATED count: "
+            f"**{snapshot.paper_alpha_cohort_evaluated_count}**\n"
+            f"- PAPER_ALPHA_REPORT_GENERATED count: "
+            f"**{snapshot.paper_alpha_report_generated_count}**\n"
+            f"- Paper alpha gate status: "
+            f"**{snapshot.paper_alpha_gate_status or '(not evaluated)'}**\n"
+            f"- Paper alpha gate sample count: "
+            f"**{snapshot.paper_alpha_gate_sample_count}**\n"
+            f"- Paper alpha missed-alpha warnings: "
+            f"**{snapshot.paper_alpha_missed_alpha_warnings}**\n"
+            f"- Paper alpha late-chase warnings: "
+            f"**{snapshot.paper_alpha_late_chase_warnings}**\n"
+            f"- Paper alpha follow-risk warnings: "
+            f"**{snapshot.paper_alpha_follow_risk_warnings}**\n"
+            f"- Paper alpha leader-preference signals: "
+            f"**{snapshot.paper_alpha_leader_preference_signals}**\n"
+        )
+
+        if snapshot.paper_alpha_gate_reasons:
+            paper_alpha_reason_lines = "\n".join(
+                f"- `{r}`" for r in snapshot.paper_alpha_gate_reasons
+            )
+        else:
+            paper_alpha_reason_lines = (
+                "- (no paper alpha gate reasons in this window)"
+            )
+
+        if snapshot.paper_alpha_gate_warnings:
+            paper_alpha_warning_lines = "\n".join(
+                f"- `{w}`" for w in snapshot.paper_alpha_gate_warnings
+            )
+        else:
+            paper_alpha_warning_lines = (
+                "- (no paper alpha gate warnings in this window)"
+            )
+
+        def _cohort_metric_lines(payload: Mapping[str, Any]) -> str:
+            if not isinstance(payload, Mapping) or not payload:
+                return "- (no entries in this window)"
+            status = str(payload.get("status") or "")
+            n = int(payload.get("sample_count", 0) or 0)
+            signals = list(payload.get("signals") or [])
+            warnings = list(payload.get("warnings") or [])
+            metrics = payload.get("metrics") or {}
+            metric_pairs = ", ".join(
+                f"{k}={float(v):.3f}"
+                for k, v in sorted(metrics.items())
+                if isinstance(v, (int, float))
+            )
+            lines = [
+                f"- status=**{status or '(unset)'}** n={n} "
+                f"signals={signals or '-'} warnings={warnings or '-'}"
+            ]
+            if metric_pairs:
+                lines.append(f"  - metrics: {metric_pairs}")
+            return "\n".join(lines)
+
+        paper_alpha_strategy_mode_lines = _cohort_metric_lines(
+            snapshot.paper_alpha_strategy_mode_results
+        )
+        paper_alpha_candidate_stage_lines = _cohort_metric_lines(
+            snapshot.paper_alpha_candidate_stage_results
+        )
+        paper_alpha_opp_bucket_lines = _cohort_metric_lines(
+            (snapshot.paper_alpha_score_bucket_results or {}).get(
+                "opportunity_score_bucket"
+            )
+            or {}
+        )
+        paper_alpha_ets_bucket_lines = _cohort_metric_lines(
+            (snapshot.paper_alpha_score_bucket_results or {}).get(
+                "early_tail_score_bucket"
+            )
+            or {}
+        )
+        paper_alpha_cluster_lines = _cohort_metric_lines(
+            snapshot.paper_alpha_cluster_results
+        )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -2385,6 +2705,32 @@ class DailyReportBuilder:
             f"{sv_dataset_tail_lines}\n\n"
             f"### Validation quality gate reasons\n"
             f"{sv_dataset_reason_lines}\n\n"
+            f"## Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0\n"
+            f"_Paper Alpha Gate v0 sub-blocks are paper / report / "
+            f"evidence-only. The `paper_alpha_gate_status` is a "
+            f"**descriptive** label (one of `PASS` / `WARN` / "
+            f"`FAIL` / `INCONCLUSIVE`) and **MUST NEVER trigger a "
+            f"real trade**, and **MUST NEVER** modify position size, "
+            f"leverage, stop-loss, target price, the Risk Engine, "
+            f"or the Execution FSM. The Risk Engine remains the "
+            f"single trade-decision gate. This is **NOT** AI "
+            f"Learning, **NOT** automatic parameter optimisation, "
+            f"**NOT** reinforcement learning, **NOT** the complete "
+            f"Strategy Validation Lab follow-up; Phase 12 remains "
+            f"FORBIDDEN._\n\n"
+            f"{paper_alpha_block}\n"
+            f"### Paper alpha gate reasons\n{paper_alpha_reason_lines}\n\n"
+            f"### Paper alpha gate warnings\n{paper_alpha_warning_lines}\n\n"
+            f"### Paper alpha strategy_mode results\n"
+            f"{paper_alpha_strategy_mode_lines}\n\n"
+            f"### Paper alpha candidate_stage results\n"
+            f"{paper_alpha_candidate_stage_lines}\n\n"
+            f"### Paper alpha opportunity_score_bucket results\n"
+            f"{paper_alpha_opp_bucket_lines}\n\n"
+            f"### Paper alpha early_tail_score_bucket results\n"
+            f"{paper_alpha_ets_bucket_lines}\n\n"
+            f"### Paper alpha cluster_leader_vs_follower results\n"
+            f"{paper_alpha_cluster_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

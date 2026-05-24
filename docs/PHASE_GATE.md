@@ -42,7 +42,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | #          | Title                                                                | State                       | Detail                                                                 |
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
 | 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up (parent; unchanged definition) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-A (PR #44) merged into `main` on 2026-05-23 (mergeCommit `3ecfc3b`) and is the gating predecessor; Phase 11C.1C-C-B-B-B is reserved for the deeper Strategy Validation Lab follow-up (richer cohort comparisons, extended cluster heuristics, longer-window correlations, dataset-driven retrospective audits). The parent phase is **not** renamed by Paper Alpha Gate v0; the Paper Alpha Gate v0 is one *child slice* under this parent (Phase 11C.1C-C-B-B-B-A), not the parent itself. NOT authorised by Phase 11C.1C-C-B-B-A acceptance bypassing the standard gate; will require its own kickoff PRs (one per child slice), brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
-| 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; docs-only kickoff) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-A is the **first slice** under the Phase 11C.1C-C-B-B-B parent. Docs-only kickoff / scope alignment recorded in `docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`; **NO** runtime code is shipped by the kickoff PR. Paper / report-only when implemented in a separate PR. Reads existing Phase 11C.1C-C-B-B-A `StrategyValidationDataset` / `StrategyValidationQualityGate` / `StrategyValidationReport` artefacts and emits a descriptive alpha-evidence verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) for human review only. **Verdict MUST NEVER trigger a real trade**, modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM. **NOT** live trading, **NOT** AI Learning, **NOT** automatic parameter optimisation, **NOT** reinforcement learning, **NOT** the complete Strategy Validation Lab follow-up, **NOT** Phase 12. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
+| 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; implementation) | **IN_REVIEW (PR #52 open)** | Phase 11C.1C-C-B-B-B-A is the **first slice** under the Phase 11C.1C-C-B-B-B parent. Implementation PR #52 ships `app/adaptive/paper_alpha_gate.py` (pure-function module + value-object models + the nine pure functions), four new typed events (`PAPER_ALPHA_GATE_EVALUATED`, `PAPER_ALPHA_RULE_EVALUATED`, `PAPER_ALPHA_COHORT_EVALUATED`, `PAPER_ALPHA_REPORT_GENERATED`), `StrategyValidationRuntime` extension that emits the gate verdict on the same flush as the dataset / quality gate, and the new "Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0" section in the Phase 11B daily report. Schema version `phase_11c_1c_c_b_b_b_a.paper_alpha_gate.v1`. Paper / report-only. Reads existing Phase 11C.1C-C-B-B-A `StrategyValidationDataset` / `StrategyValidationQualityGate` / `StrategyValidationReport` artefacts and emits a descriptive alpha-evidence verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) for human review only. **Verdict MUST NEVER trigger a real trade**, modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM. **NOT** live trading, **NOT** AI Learning, **NOT** automatic parameter optimisation, **NOT** reinforcement learning, **NOT** the complete Strategy Validation Lab follow-up, **NOT** Phase 12. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
 | 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A acceptance, Phase 11C.1C-C-B-B-B, Phase 11C.1C-C-B-B-B-A, or any other Phase 11C sub-phase). |
 
 
@@ -1126,29 +1126,28 @@ will be authored alongside the kickoff PR and reviewed
 against the Phase 1 safety lock + the AMOS governance rails
 in `docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`.
 
-## Open phase: Phase 11C.1C-C-B-B-B-A (NEXT_ALLOWED / NOT_STARTED)
+## Open phase: Phase 11C.1C-C-B-B-B-A (IN_REVIEW)
 
-**Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (docs-only
-kickoff).** Status: **NEXT_ALLOWED / NOT_STARTED.** This
-section records the **first child slice** under the Phase
-11C.1C-C-B-B-B parent. The parent phase is **not** renamed:
-Phase 11C.1C-C-B-B-B remains *Strategy Validation Lab
-(deeper) & richer Cluster Exposure Control follow-up*.
+**Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (PR #52
+open).** Status: **IN_REVIEW.** Branch:
+`feature/phase-11c1c-c-b-b-b-a-paper-alpha-gate-v0`. PR #51
+(the docs-only kickoff) merged into `main` on 2026-05-24
+and is the gating predecessor; PR #52 ships the runtime.
+
+This section records the **first child slice** under the
+Phase 11C.1C-C-B-B-B parent. The parent phase is **not**
+renamed: Phase 11C.1C-C-B-B-B remains *Strategy Validation
+Lab (deeper) & richer Cluster Exposure Control follow-up*.
 Phase 11C.1C-C-B-B-B-A carves out **only** the *Paper Alpha
 Gate v0* — the smallest auditable evidence-gate on top of
 the Phase 11C.1C-C-B-B-A artefacts — leaving the remaining
 deeper Lab follow-up work for later child slices (B-B-B-B,
 B-B-B-C, …) under the same parent.
 
-The full Phase 11C.1C-C-B-B-B-A scope, boundary, and
-forbidden-item list are recorded in
-`docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`. The PR that
-introduces those docs is **docs-only**: it does **NOT** ship
-any runtime code, **NOT** add any new Python module, **NOT**
-add any new event type, **NOT** modify any runtime
-behaviour, **NOT** modify configuration schemas, and **NOT**
-add or modify tests. It does **NOT** flip any phase's
-acceptance state.
+The full Phase 11C.1C-C-B-B-B-A scope, boundary, forbidden
+list, and acceptance evidence are recorded in
+`docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md` and
+`docs/PR52_DESCRIPTION.md`.
 
 > **Phase 11C.1C-C-B-B-B-A is paper / report only.**
 > **Phase 11C.1C-C-B-B-B-A does NOT authorise live trading.**
