@@ -41,7 +41,8 @@ intentionally short. The full phase-gate ledger lives in
 > only and cannot trigger real trading.
 >
 > **Phase 11C.1C-C-B-B-A = ACCEPTED (closed 2026-05-23; PR #44 merged into `main`, mergeCommit `3ecfc3b`).**
-> **Phase 11C.1C-C-B-B-B = NEXT_ALLOWED / NOT_STARTED (reserved for the deeper Strategy Validation Lab follow-up; will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence).**
+> **Phase 11C.1C-C-B-B-B = NEXT_ALLOWED / NOT_STARTED (parent; unchanged definition — *Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up*; will require its own kickoff PRs (one per child slice), brief, scope, boundary table, forbidden list, and acceptance evidence).**
+> **Phase 11C.1C-C-B-B-B-A = NEXT_ALLOWED / NOT_STARTED (first child slice under Phase 11C.1C-C-B-B-B — *Paper Alpha Gate v0*; docs-only kickoff recorded in `docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`; **NO** runtime code shipped by the kickoff PR; paper / report-only when implemented; verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) MUST NEVER trigger a real trade or modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM).**
 > **Phase 11C.1C-C-B-A = ACCEPTED (closed 2026-05-23; PR #42 merged into `main`, mergeCommit `cc18047`).**
 > **Phase 11C.1C-C-A = ACCEPTED (closed 2026-05-23; PR #40 merged into `main`, mergeCommit `75d3c7c`).**
 > **Phase 11C.1C-B = ACCEPTED (closed 2026-05-22; PR #38 merged into `main`).**
@@ -154,7 +155,8 @@ single trade-decision gate.
 
 | Date (UTC) | Phase    | Tag                                        | State   | Evidence                                                |
 | ---------- | -------- | ------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2026-05-23 | Phase 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up (placeholder; reserved for the deeper Phase 11C.1C-C-B-B follow-up after Phase 11C.1C-C-B-B-A is ACCEPTED) | **NEXT_ALLOWED / NOT_STARTED** — Phase 11C.1C-C-B-B-A is now **ACCEPTED** (PR #44 merged into `main`, mergeCommit `3ecfc3b`), so Phase 11C.1C-C-B-B-B is now **NEXT_ALLOWED**; no implementation has started. Phase 11C.1C-C-B-B-A acceptance does **NOT** authorise Phase 11C.1C-C-B-B-B kickoff bypassing the standard gate; Phase 11C.1C-C-B-B-B will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-B-B-B (NEXT_ALLOWED / NOT_STARTED)" |
+| 2026-05-23 | Phase 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up (parent; unchanged definition; reserved for the deeper Phase 11C.1C-C-B-B follow-up after Phase 11C.1C-C-B-B-A is ACCEPTED) | **NEXT_ALLOWED / NOT_STARTED** — Phase 11C.1C-C-B-B-A is now **ACCEPTED** (PR #44 merged into `main`, mergeCommit `3ecfc3b`), so Phase 11C.1C-C-B-B-B is now **NEXT_ALLOWED**; no implementation has started. The parent phase is **not** renamed by Paper Alpha Gate v0; the Paper Alpha Gate v0 is one *child slice* under this parent (Phase 11C.1C-C-B-B-B-A), not the parent itself. Phase 11C.1C-C-B-B-A acceptance does **NOT** authorise Phase 11C.1C-C-B-B-B kickoff bypassing the standard gate; Phase 11C.1C-C-B-B-B will require its own kickoff PRs (one per child slice), brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-B-B-B (NEXT_ALLOWED / NOT_STARTED)" |
+| 2026-05-24 | Phase 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; docs-only kickoff / scope alignment) | **NEXT_ALLOWED / NOT_STARTED** — Phase 11C.1C-C-B-B-B-A is the **first child slice** under the Phase 11C.1C-C-B-B-B parent. Docs-only kickoff / scope alignment recorded in `docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`; **NO** runtime code is shipped by the kickoff PR. Paper / report-only when implemented in a separate PR. Reads existing Phase 11C.1C-C-B-B-A `StrategyValidationDataset` / `StrategyValidationQualityGate` / `StrategyValidationReport` artefacts and emits a descriptive alpha-evidence verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) for human review only. **Verdict MUST NEVER trigger a real trade**, modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM. **NOT** live trading, **NOT** AI Learning, **NOT** automatic parameter optimisation, **NOT** reinforcement learning, **NOT** the complete Strategy Validation Lab follow-up, **NOT** Phase 12. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`; `docs/PR51_DESCRIPTION.md`; `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-B-B-B-A (NEXT_ALLOWED / NOT_STARTED)" |
 | 2026-05-23 | Phase 11C.1C-C-B-B-A | Strategy Validation Dataset Builder & Quality Gate v0 (paper / report-only first slice of Phase 11C.1C-C-B-B; ships dataset record / dataset / summary / quality-gate contracts + pure functions + the runtime hook that emits three new typed events on top of the Phase 11C.1C-C-B-A `StrategyValidationSample` / `StrategyValidationReport` / `ClusterExposureAssessment` artefacts) | **ACCEPTED (closed 2026-05-23; PR #44 merged into `main`, mergeCommit `3ecfc3b`)** — `tests/unit/test_phase11c_1c_c_b_b_validation_dataset_quality_gate.py` 27/27 PASS (brief-mandated cases); `tests/unit -k phase11c_` 339/339 PASS (312 baseline + 27 new); full `tests/` 2313/2313 PASS on the PR branch (no regression vs. post-PR-#43 main 2286 baseline). 30 s dry-run smoke produced an empty / low-sample report at `data/reports/phase11c/2026-05-23-phase11c-public-market.md` with the new "Phase 11C.1C-C-B-B-A Strategy Validation Dataset Builder & Quality Gate v0" section: `STRATEGY_VALIDATION_DATASET_BUILT=1`, `STRATEGY_VALIDATION_DATASET_EXPORTED=1`, `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED=1`, `validation_dataset_records=2`, `validation_dataset_symbols=BTCUSDT,ETHUSDT`, `validation_quality_gate_status=fail` (expected — the smallest Phase 11C.1C-C-A tracking window is 5 minutes; samples are necessarily in-flight in a 30 s smoke), `validation_dataset_export_ready=True`, `validation_dataset_replay_ready=True`. Real WS 10 min smoke is **NOT required** for this PR — the smallest Phase 11C.1C-C-A tracking window is 5 minutes and cannot complete in 30 s; reserved for Phase 11C.1C-C-B-B-B closeout when non-empty datasets are first observable end-to-end. Safety flags unchanged (`live_trading=False`, `exchange_live_orders=False`, `right_tail=False`, `llm=False`, `trading_mode_paper=True`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`, no API key, no signed endpoint, no private WS, no listenKey, no DeepSeek trade decision, no real Telegram outbound). The `validation_quality_gate_status` field on every `STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED` event is descriptive only (`pass` / `warn` / `fail`) and **MUST NEVER trigger a real trade**; the Risk Engine remains the single trade-decision gate. PR #44 has merged into `main` (mergeCommit `3ecfc3b`, merged 2026-05-23 UTC); the dry-run smoke evidence above was accepted; Phase 11C.1C-C-B-B-A is therefore **ACCEPTED**. Phase 11C.1C-C-B-B-B is now **NEXT_ALLOWED / NOT_STARTED**; Phase 11C.1C-C-B-B-A acceptance does **NOT** authorise Phase 11C.1C-C-B-B-B kickoff bypassing the standard gate. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_C_B_B_VALIDATION_DATASET_QUALITY_GATE.md`; `docs/PR44_DESCRIPTION.md`; `tests/unit/test_phase11c_1c_c_b_b_validation_dataset_quality_gate.py`; `docs/PHASE_GATE.md` §"Closed phase: Phase 11C.1C-C-B-B-A (ACCEPTED)" + §"Open phase: Phase 11C.1C-C-B-B-B (NEXT_ALLOWED / NOT_STARTED)" |
 | 2026-05-23 | Phase 11C.1C-C-B-A | Strategy Validation Lab v0 & Cluster Exposure Control Contracts (paper / report-only first slice of Phase 11C.1C-C-B; ships data contracts + pure aggregators + runtime that emits seven new typed events on top of the Phase 11C.1C-C-A `LabelTrackingRecord` outcomes) | **ACCEPTED (closed 2026-05-23; PR #42 merged into `main`, mergeCommit `cc18047`)** — `tests/unit/test_phase11c_1c_c_b_strategy_validation.py` 25 PASS (brief-mandated cases); `tests/unit -k phase11c_` 312 PASS (287 baseline + 25 new); full `tests/` 2286 PASS on the PR branch (no regression vs. post-PR-#41 main 2261 baseline). 30 s dry-run smoke is contract-only (smallest Phase 11C.1C-C-A tracking window is 5m and cannot complete in 30 s); the runtime emits an empty-but-well-formed `STRATEGY_VALIDATION_REPORT_GENERATED` so the daily report still renders the new section. **Operator-VPS 10 min real public WS smoke PASSED** on 2026-05-23 against PR #42 head (commit `0bedcce`): `duration_seconds=600.0`, `uptime=611s`, `dry_run=false`, `ws_real_transport=true`, `ws_messages_received=76324`, `ws_chains_emitted=27`, `learning_ready_attached=27`, `snapshots_emitted=27`, `ingestion_errors=0`, `HTTP 429 count=0`, `HTTP 418 count=0`, `rate_limit_ban=False`, `ws_reconnect_count=0`, `ws_stale_count=0`, `ws_currently_stale=False`. Authoritative SQLite event-count query (captured after shutdown flush): `STRATEGY_VALIDATION_SAMPLE_CREATED=24`, `STRATEGY_VALIDATION_REPORT_GENERATED=1`, `STRATEGY_MODE_VALIDATED=4`, `CANDIDATE_STAGE_VALIDATED=5`, `SCORE_BUCKET_VALIDATED=8`, `CLUSTER_EXPOSURE_ASSESSED=1`, `CLUSTER_LEADER_VALIDATED=1`. Daily report contains the new "Phase 11C.1C-C-B-A Strategy Validation Lab v0 & Cluster Exposure Control Contracts" section with non-empty cohort lines (`strategy_mode=reject n=24`; `candidate_stage=early n=24`; `opportunity_score_bucket=0-49 n=13` / `50-64 n=11`; `early_tail_score_bucket=0-24 n=24`; `cluster=USDT size=22 correlated=24 leader=PAXGUSDT action=no_action`); `tail_label_distribution = unresolved x 24` (5m primary windows still in-flight at the 10 min boundary, as expected). Daily-report counter snapshot caveat: top event-count lines may show 0 because counters are snapshotted before shutdown flush; SQLite query is authoritative and confirms emission. Safety flags unchanged (`live_trading=False`, `exchange_live_orders=False`, `right_tail=False`, `llm=False`, `trading_mode_paper=True`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`, no API key, no signed endpoint, no private WS, no listenKey, no DeepSeek trade decision, no real Telegram outbound). The Kiro-side sandbox cannot host this smoke (Binance-region HTTP 451 geoblock — historical context only, not the current blocker; same as the Phase 11C.1C-B / Phase 11C.1C-C-A closeouts). The `suggested_cluster_action` field on every `ClusterExposureAssessment` is paper / report only (`leader_only` / `observe_followers` / `reject_cluster` / `no_action`) and **MUST NEVER trigger a real trade**; the Risk Engine remains the single trade-decision gate. PR #42 has merged into `main` (mergeCommit `cc18047`, merged 2026-05-23 UTC); the smoke evidence above was accepted; this docs-only closeout PR therefore flips Phase 11C.1C-C-B-A to **ACCEPTED**, mirroring the PR #36 → PR #37, PR #38 → PR #39, and PR #40 → PR #41 closeout pattern. Phase 11C.1C-C-B-B is now **NEXT_ALLOWED / NOT_STARTED**; Phase 11C.1C-C-B-A acceptance does **NOT** authorise Phase 11C.1C-C-B-B kickoff bypassing the standard gate. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_C_B_STRATEGY_VALIDATION_CLUSTER_CONTROL.md`; `docs/PR42_DESCRIPTION.md`; `tests/unit/test_phase11c_1c_c_b_strategy_validation.py`; `docs/PHASE_GATE.md` §"Closed phase: Phase 11C.1C-C-B-A (ACCEPTED)" + §"Phase 11C.1C-C-B-A acceptance evidence (operator-VPS 10 min real public WS smoke PASSED)" |
 | 2026-05-23 | Phase 11C.1C-C-A | MFE / MAE Label Queue Runtime & Tail Outcome Tracking (paper-only runtime that consumes the Phase 11C.1C-A `LABEL_QUEUE_ENQUEUED` contract and produces forward MFE / MAE / `tail_label` outcomes per ACTIVE candidate) | **ACCEPTED (closed 2026-05-23; PR #40 merged into `main`, mergeCommit `75d3c7c`)** — `tests/unit/test_phase11c_1c_c_a_label_queue_runtime.py` 30 PASS (brief-mandated cases); `tests/unit -k phase11c_` 287 PASS; full `tests/` 2261 PASS on the PR branch (no regression vs. post-PR-#38 main baseline). 30 s dry-run smoke is contract-only (the smallest tracking window is 5m and cannot complete in 30 s). **Operator-VPS 10 min real public WS smoke PASSED** (`duration_seconds=600.0`, `dry_run=false`, `ws_real_transport=true`, `ws_messages_received=56592`, `ws_chains_emitted=27`, `learning_ready_attached=27`, `snapshots_emitted=27`, `LABEL_TRACKING_STARTED=19` runner / `36` events.db, `LABEL_WINDOW_UPDATED=38` / `82`, `LABEL_WINDOW_COMPLETED=11` / `20`, `TAIL_LABEL_ASSIGNED=11` / `20`, `MISSED_TAIL_DETECTED=0`, `FAKE_BREAKOUT_DETECTED=0`, pending=8 / completed=11 / expired=0 / unresolved=0, `HTTP 429 count=0`, `HTTP 418 count=0`, `rate_limit_ban=False`, `ws_reconnect_count=0`, `ws_stale_count=0`, `ws_currently_stale=False`, `ingestion_errors=0`, safety flags unchanged); the Kiro sandbox could not host the smoke (Binance-region HTTP 451 geoblock, same as the Phase 11C.1C-B closeout), so the operator ran it from a Binance-reachable VPS. PR #40 has merged into `main` (mergeCommit `75d3c7c`); the smoke evidence above was accepted; Phase 11C.1C-C-A is therefore **ACCEPTED**. Phase 11C.1C-C-A acceptance does **NOT** authorise Phase 11C.1C-C-B kickoff bypassing the standard gate. Phase 12 remains **FORBIDDEN**. | `docs/PHASE_11C_1C_C_MFE_MAE_LABEL_QUEUE_RUNTIME.md`; `docs/PR40_DESCRIPTION.md`; `tests/unit/test_phase11c_1c_c_a_label_queue_runtime.py`; `docs/PHASE_GATE.md` §"Closed phase: Phase 11C.1C-C-A (ACCEPTED)" + §"Phase 11C.1C-C-A acceptance evidence (closeout)" |
@@ -328,11 +330,93 @@ Phase 11C.1C-C-B-A + Phase 11C.1C-C-B-B-A forbidden item:
   - reinforcement learning that drives trade decisions
   - AI Learning that auto-decides trades
   - the complete Strategy Validation Lab follow-up
-  - Paper Alpha Gate v0
+  - the Paper Alpha Gate v0 (Paper Alpha Gate v0 is NOT
+    implemented by Phase 11C.1C-C-B-B-A; it may only start
+    as the Phase 11C.1C-C-B-B-B-A child slice after this
+    docs-only kickoff and a separate implementation PR;
+    Paper Alpha Gate v0 remains paper-only / report-only
+    and grants no trade authority — verdict (`PASS` /
+    `WARN` / `FAIL` / `INCONCLUSIVE`) MUST NEVER trigger a
+    real trade or modify position size, leverage,
+    stop-loss, target price, the Risk Engine, or the
+    Execution FSM)
 
 See `docs/PHASE_GATE.md` §"Open phase: Phase 11C.1C-C-B-B-B
 (NEXT_ALLOWED / NOT_STARTED)" for the inherited boundary
 table.
+
+### Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (first child slice; docs-only kickoff)
+
+**Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0.** Status:
+**NEXT_ALLOWED / NOT_STARTED.** Phase 11C.1C-C-B-B-B-A is
+the **first child slice** under the Phase 11C.1C-C-B-B-B
+parent. The parent phase is **not** renamed: Phase
+11C.1C-C-B-B-B remains *Strategy Validation Lab (deeper) &
+richer Cluster Exposure Control follow-up*. Phase
+11C.1C-C-B-B-B-A carves out **only** the *Paper Alpha Gate
+v0* — the smallest auditable evidence-gate on top of the
+Phase 11C.1C-C-B-B-A artefacts — leaving the remaining
+deeper Lab follow-up work for later child slices (B-B-B-B,
+B-B-B-C, …) under the same parent.
+
+The full Phase 11C.1C-C-B-B-B-A scope, boundary, and
+forbidden-item list are recorded in
+`docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md`. The PR that
+introduces those docs is **docs-only**: it does **NOT** ship
+any runtime code, **NOT** add any new Python module, **NOT**
+add any new event type, **NOT** modify any runtime behaviour,
+**NOT** modify configuration schemas, and **NOT** add or
+modify tests. It does **NOT** flip any phase's acceptance
+state. Phase 11C.1C-C-B-B-A remains `ACCEPTED`, Phase
+11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`, Phase
+11C.1C-C-B-B-B-A is introduced at `NEXT_ALLOWED /
+NOT_STARTED`, and Phase 12 remains `FORBIDDEN`.
+
+> **Phase 11C.1C-C-B-B-B-A is paper / report only.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise live trading.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise API keys.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise private endpoints.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise DeepSeek trade decisions.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise real Telegram outbound.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise AI Learning.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise automatic parameter optimisation.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise reinforcement learning.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise the complete Strategy Validation Lab follow-up.**
+> **Phase 11C.1C-C-B-B-B-A does NOT authorise Phase 12.**
+> **Paper Alpha Gate v0 verdict (`PASS` / `WARN` / `FAIL` / `INCONCLUSIVE`) cannot trigger real trading**, modify position size, modify leverage, modify stop-loss, modify target price, modify the Risk Engine, or modify the Execution FSM — it is a descriptive label only.
+> **Risk Engine remains the single trade-decision gate.**
+> **Execution FSM remains paper today.**
+> **Phase 12 (real money / live trading) remains FORBIDDEN.**
+
+Phase 11C.1C-C-B-B-B-A is paper / report-only and:
+
+  - is **NOT** real / live trading;
+  - is **NOT** AI Learning;
+  - is **NOT** automatic parameter optimisation;
+  - is **NOT** reinforcement learning;
+  - is **NOT** the complete Strategy Validation Lab
+    follow-up (reserved for later child slices under Phase
+    11C.1C-C-B-B-B);
+  - is **NOT** a strategy-quality / profitability oracle;
+  - is **NOT** a strategy autonomous optimisation loop;
+  - is **NOT** a position-sizing / leverage / stop-loss /
+    target-price modifier;
+  - is **NOT** a Risk Engine override / bypass;
+  - is **NOT** an Execution FSM override / bypass;
+  - is **NOT** a Phase Gate override / bypass;
+  - is **NOT** a path into Phase 12;
+  - is **NOT** a sample-trust gate (the existing Phase
+    11C.1C-C-B-B-A `validation_quality_gate_status` field is
+    the sample-trust gate; Paper Alpha Gate v0 *consumes*
+    that field as an input);
+  - is **NOT** a real-trade authority of any kind.
+
+See `docs/PHASE_11C_1C_C_B_B_B_PAPER_ALPHA_GATE.md` for the
+full Phase 11C.1C-C-B-B-B-A scope, boundary, and
+forbidden-item list; see `docs/PHASE_GATE.md` §"Open phase:
+Phase 11C.1C-C-B-B-B-A (NEXT_ALLOWED / NOT_STARTED)" for the
+inherited boundary table; see `docs/PR51_DESCRIPTION.md` for
+this docs-only kickoff PR.
 
 ## Closed phase: Phase 11C.1C-C-B-B-A (acceptance closeout)
 
@@ -457,7 +541,12 @@ Phase 11C.1C-C-B-B-A acceptance does **NOT** authorise:
   - AI Learning that auto-decides trades
   - automatic parameter optimisation
   - reinforcement learning
-  - Paper Alpha Gate v0
+  - Paper Alpha Gate v0 (Paper Alpha Gate v0 is NOT
+    implemented by Phase 11C.1C-C-B-B-A; it may only start
+    as the Phase 11C.1C-C-B-B-B-A child slice after this
+    docs-only kickoff and a separate implementation PR;
+    Paper Alpha Gate v0 remains paper-only / report-only
+    and grants no trade authority)
   - the complete Strategy Validation Lab follow-up
 
 The `validation_quality_gate_status` field on every
