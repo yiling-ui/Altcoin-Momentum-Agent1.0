@@ -1,19 +1,21 @@
-# Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0 (docs-only kickoff)
+# Phase 11C.1C-C-B-B-B-A — Paper Alpha Gate v0
 
-> **Status: NEXT_ALLOWED / NOT_STARTED.** This document is a
-> **docs-only kickoff / scope-alignment** record for Phase
-> 11C.1C-C-B-B-B-A. **No runtime code is shipped by the PR
-> that introduces this document.** Implementation will land in
-> a separate PR after this kickoff is reviewed and accepted.
+> **Status: IN_REVIEW (PR #52 open).** The implementation PR
+> ships the runtime data contracts + pure-function evaluator +
+> deterministic rule set + four new typed events + daily-report
+> section + tests + docs for the **first child slice** under
+> Phase 11C.1C-C-B-B-B (Paper Alpha Gate v0). PR #51 (the
+> docs-only kickoff) merged into `main` on 2026-05-24 and is
+> the gating predecessor.
 >
 > **Phase 11C.1C-C-B-B-B-A (Paper Alpha Gate v0) is paper /
-> report only.** **NOT** live trading. **NOT** AI Learning.
-> **NOT** automatic parameter optimisation. **NOT**
+> report / evidence-only.** **NOT** live trading. **NOT** AI
+> Learning. **NOT** automatic parameter optimisation. **NOT**
 > reinforcement learning. **NOT** the complete Strategy
 > Validation Lab follow-up. **NOT** Phase 12.
 >
 > The Risk Engine remains the single trade-decision gate. The
-> Paper Alpha Gate v0 result (`PASS` / `WARN` / `FAIL` /
+> Paper Alpha Gate v0 verdict (`PASS` / `WARN` / `FAIL` /
 > `INCONCLUSIVE`) is a **descriptive label** for human review
 > and **MUST NEVER trigger a real trade**, **MUST NEVER**
 > modify position size, leverage, stop-loss, target price,
@@ -29,245 +31,342 @@
     Paper Alpha Gate v0 reads from.
   - **Phase 11C.1C-C-B-B-B** — `NEXT_ALLOWED / NOT_STARTED`.
     *Parent* phase. Strategy Validation Lab (deeper) & richer
-    Cluster Exposure Control follow-up. Phase 11C.1C-C-B-B-B
-    has **NOT** been renamed. The Paper Alpha Gate v0 is one
-    slice under this parent, not the parent itself.
+    Cluster Exposure Control follow-up. The parent phase is
+    **not** renamed by Paper Alpha Gate v0; the Paper Alpha
+    Gate v0 is one *child slice* under this parent.
   - **Phase 11C.1C-C-B-B-B-A** — *this document*.
-    `NEXT_ALLOWED / NOT_STARTED`. **First slice** under Phase
-    11C.1C-C-B-B-B. Paper Alpha Gate v0. Paper / report-only.
-    No trade authority. Reads
+    `IN_REVIEW` (PR #52 open). **First child slice** under
+    Phase 11C.1C-C-B-B-B. Paper Alpha Gate v0. Paper /
+    report-only. No trade authority. Reads
     `StrategyValidationDataset` /
     `StrategyValidationQualityGate` /
     `StrategyValidationReport` artefacts and emits a
     descriptive alpha-evidence verdict.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
-## Why a separate child slice (and not B-B-B itself)?
+## What ships
 
-The deeper Phase 11C.1C-C-B-B follow-up under the parent Phase
-11C.1C-C-B-B-B is broad: richer cohort comparisons, extended
-cluster heuristics, longer-window correlations,
-dataset-driven retrospective audits, and an alpha-evidence
-gate are *all* candidate slices. Bundling them into a single
-PR would conflate independent design decisions, risk
-overscope, and break the established pattern of small,
-auditable child slices (Phase 11C.1C-C-A → Phase 11C.1C-C-B-A
-→ Phase 11C.1C-C-B-B-A → Phase 11C.1C-C-B-B-B-A).
+### 1. New module — `app/adaptive/paper_alpha_gate.py`
 
-Phase 11C.1C-C-B-B-B-A therefore carves out **only** the
-*Paper Alpha Gate v0* — the smallest auditable evidence-gate
-on top of the Phase 11C.1C-C-B-B-A artefacts — leaving the
-remaining deeper Lab follow-up work for later child slices
-(B-B-B-B, B-B-B-C, …) under the same Phase 11C.1C-C-B-B-B
-parent.
+Pure-function module. Models:
 
-## What Paper Alpha Gate v0 is
+  - `PaperAlphaGateStatus` — string-constant holder for the
+    four allowed verdict labels (`PASS` / `WARN` / `FAIL` /
+    `INCONCLUSIVE`).
+  - `PaperAlphaGateRule` — named threshold check definition
+    (rule_id, description, threshold, severity).
+  - `PaperAlphaGateRuleResult` — one rule evaluation outcome
+    (rule_id, triggered, observed_value, threshold, severity,
+    message).
+  - `PaperAlphaGateCohortResult` — one cohort dimension's
+    outcome (dimension, sample_count, status, signals,
+    warnings, notes, metrics).
+  - `PaperAlphaGateInput` — the structured snapshot the gate
+    consumes (report_id, dataset_id, sample_count,
+    completed_tail_label_count, quality_gate_status,
+    quality_gate_reasons, per-mode / per-stage / per-bucket /
+    per-cluster cohort stats, version block,
+    schema_version).
+  - `PaperAlphaGateReport` — top-level report container
+    (report_id, dataset_id, sample_count,
+    quality_gate_status, evaluated_at, gate_status, reasons,
+    warnings, rule_results, cohort_results, version block,
+    schema_version).
 
-Paper Alpha Gate v0 is a **paper-only / report-only
-evidence-gate** that aggregates the existing Phase
-11C.1C-C-B-B-A `StrategyValidationDataset` /
-`StrategyValidationQualityGate` /
-`StrategyValidationReport` artefacts (and, transitively, the
-Phase 11C.1C-C-B-A samples and the Phase 11C.1C-C-A label
-runtime outcomes) into a single descriptive verdict for human
-review.
+Pure functions:
 
-The verdict is one of:
+  - `build_paper_alpha_gate_input(dataset, quality_gate_result,
+    validation_report, *, report_id=None)` → builds a
+    `PaperAlphaGateInput` from the upstream artefacts.
+  - `evaluate_paper_alpha_gate(gate_input, ...)` →
+    `(gate_status, reasons, warnings, cohort_results,
+    rule_results)`. **Deterministic.**
+  - `evaluate_strategy_mode_alpha(gate_input, ...)` →
+    per-strategy_mode `PaperAlphaGateCohortResult`.
+  - `evaluate_candidate_stage_alpha(gate_input, ...)` →
+    per-candidate_stage `PaperAlphaGateCohortResult`.
+  - `evaluate_score_bucket_alpha(gate_input, ...)` → 2-tuple of
+    `PaperAlphaGateCohortResult` for opportunity_score and
+    early_tail_score buckets.
+  - `evaluate_cluster_alpha(gate_input, ...)` → cluster-leader
+    `PaperAlphaGateCohortResult`.
+  - `build_paper_alpha_gate_report(gate_input, *, evaluated_at,
+    ...)` → assembles the full `PaperAlphaGateReport`.
+  - `export_paper_alpha_gate_payload(report)` → JSON-safe
+    dict.
+  - `load_paper_alpha_gate_payload(payload)` → reconstructs a
+    `PaperAlphaGateReport`. Tolerates missing optional fields.
 
-  - `PASS` — the gate's alpha-evidence checks were all met on
-    a trustworthy dataset.
-  - `WARN` — the gate's alpha-evidence checks were partially
-    met or the dataset is borderline; human review required.
-  - `FAIL` — the gate's alpha-evidence checks were not met
-    on a trustworthy dataset.
-  - `INCONCLUSIVE` — the dataset was too thin / too in-flight
-    / failed the prior `validation_quality_gate_status` to
-    support an alpha-evidence verdict.
+### 2. Paper Alpha Gate v0 rule set
 
-The verdict is a **descriptive label only**. It is recorded
-into the daily Markdown report and into a typed event so a
-human reviewer can audit the alpha evidence *post-hoc*. **No
-runtime module reads the verdict to drive execution. The Risk
-Engine remains the single trade-decision gate.**
+The first version judges only "does the validation sample
+support continued paper observation" — it does **not** judge
+whether the strategy is profitable or whether a real trade
+should be placed.
 
-## What Paper Alpha Gate v0 is NOT
+Top-level decision tree:
 
-Paper Alpha Gate v0 is **NOT**:
+  1. `validation_quality_gate_status = fail` → `INCONCLUSIVE`
+     (the dataset is structurally untrustworthy; the brief
+     allows `INCONCLUSIVE` or `FAIL`; we emit `INCONCLUSIVE`
+     so a downstream auditor knows the gate refused to assert
+     "no alpha"). The block-rule
+     `quality_gate_status_must_not_fail` surfaces in the
+     rule_results regardless.
+  2. `sample_count < min_total_samples` → `INCONCLUSIVE`.
+  3. `completed_tail_label_count < min_completed_tail_labels`
+     → `INCONCLUSIVE`.
+  4. Any cohort warning fires → `WARN`.
+  5. High opportunity_score bucket clearly out-performs low
+     bucket **AND** high early_tail_score bucket clearly
+     out-performs low bucket **AND** no warnings → `PASS`.
+  6. Only one positive signal (e.g. opportunity bucket alone,
+     or cluster-leader alone) **AND** no warnings → `WARN`.
+  7. Otherwise → `INCONCLUSIVE`.
 
-  - real / live trading;
-  - AI Learning;
-  - automatic parameter optimisation;
-  - reinforcement learning;
-  - the complete Strategy Validation Lab follow-up;
-  - a strategy-quality / profitability oracle;
-  - a strategy autonomous optimisation loop;
-  - a position-sizing / leverage / stop-loss / target-price
-    modifier;
-  - a Risk Engine override / bypass;
-  - an Execution FSM override / bypass;
-  - a Phase Gate override / bypass;
-  - a path into Phase 12;
-  - a sample-trust gate (the Phase 11C.1C-C-B-B-A
-    `validation_quality_gate_status` field is the existing
-    sample-trust gate; the Paper Alpha Gate v0 *consumes*
-    that gate's status as an input, it does not replace it);
-  - a real-trade authority of any kind.
+Per-cohort warnings raised by the gate:
 
-## Boundary (must hold from day one of the implementation PR)
+  - `follow_risk_warning` — `follow.fake_breakout_rate` is
+    above the `paper_alpha_follow_fake_breakout_rate`
+    threshold on a non-thin cohort.
+  - `missed_alpha_warning` — `observe.strong_tail_rate` or
+    `reject.strong_tail_rate` is above the
+    `paper_alpha_missed_alpha_strong_tail_rate` threshold on
+    a non-thin cohort.
+  - `late_chase_warning` — `late.fake_breakout_rate` or
+    `blowoff.fake_breakout_rate` is above the
+    `paper_alpha_late_chase_fake_breakout_rate` threshold on
+    a non-thin cohort.
+  - `early_tail_no_alpha_advantage` — high early_tail_score
+    bucket failed to beat the low bucket; the gate refuses to
+    `PASS` on early-tail evidence alone (the brief
+    explicitly says "if early tail high bucket has no
+    advantage, the gate cannot PASS").
 
-| Invariant                                   | Required value                |
-| ------------------------------------------- | ----------------------------- |
-| `mode`                                      | `paper`                       |
-| `live_trading`                              | `False`                       |
-| `right_tail`                                | `False`                       |
-| `llm`                                       | `False`                       |
-| `exchange_live_orders`                      | `False`                       |
-| `telegram_outbound_enabled`                 | `False`                       |
-| `binance_private_api_enabled`               | `False`                       |
-| `safety.forbid_*` (11 flags)                | `True` for every flag         |
-| Binance API key / secret                    | refused at construction       |
-| Signed endpoint                             | refused at allowlist check    |
-| `listenKey` / user data stream              | refused                       |
-| Private WebSocket / trading WS API          | refused                       |
-| Routed-private endpoint (`/private`)        | refused                       |
-| DeepSeek trade-decision authority           | NOT permitted                 |
-| Real Telegram outbound                      | NOT permitted                 |
-| Paper Alpha Gate v0 verdict                 | descriptive label only        |
-|   (`PASS` / `WARN` / `FAIL` /               | (`PASS` / `WARN` / `FAIL` /   |
-|   `INCONCLUSIVE`)                           | `INCONCLUSIVE`); MUST NEVER   |
-|                                             | trigger a real trade          |
-| Paper Alpha Gate v0 verdict                 | MUST NEVER modify position    |
-|                                             | size, leverage, stop-loss,    |
-|                                             | target price, Risk Engine     |
-|                                             | state, or Execution FSM state |
-| `validation_quality_gate_status`            | descriptive label only        |
-|   (input to Paper Alpha Gate v0)            | (`pass` / `warn` / `fail`);   |
-|                                             | MUST NEVER trigger a real     |
-|                                             | trade                         |
-| AI Learning                                 | NOT permitted                 |
-| Automatic parameter optimisation            | NOT permitted                 |
-| Reinforcement learning                      | NOT permitted                 |
-| Risk Engine override / bypass               | NOT permitted                 |
-| Execution FSM override / bypass             | NOT permitted                 |
-| Complete Strategy Validation Lab follow-up  | NOT in Paper Alpha Gate v0    |
-|                                             | scope                         |
-| Phase 12 (live trading)                     | FORBIDDEN                     |
+Per-cohort signals raised by the gate:
 
-## Explicitly forbidden (inherited verbatim)
+  - `high_score_bucket_outperforms_low_signal` — high
+    opportunity_score bucket's `strong_tail_rate` /
+    `p_reached_3r` / `p_reached_5r` advantage over the low
+    bucket exceeds `paper_alpha_high_bucket_advantage`.
+  - `high_early_tail_bucket_outperforms_low_signal` — high
+    early_tail_score bucket beats the low bucket on at least
+    one of `strong_tail_rate` / `p_reached_3r`.
+  - `leader_preference_signal` — average leader-vs-follower
+    advantage (across non-thin clusters) exceeds
+    `paper_alpha_leader_preference_advantage` on either
+    `strong_tail_rate` or `avg_mfe`.
+  - `follow_safe_signal` — follow cohort's
+    `fake_breakout_rate` is within threshold.
+  - `follow_strong_tail_present_signal` — follow cohort
+    produced a non-zero `strong_tail_rate`.
 
-  - Real trading.
-  - Live trading.
-  - Connecting to the Binance trading API.
-  - Reading or storing any Binance API key / API secret /
-    `listenKey`.
-  - Calling any signed endpoint.
-  - Subscribing to any user data stream / private WebSocket /
-    trading WebSocket API / account / margin / position /
-    leverage / balance / order private WS variant.
-  - Connecting to the routed-private endpoint
-    `wss://fstream.binance.com/private` (or any `/ws-api` /
-    `/ws-fapi` / `/ws-papi` / `/trading-api` /
-    `/userDataStream` path-root variant).
-  - Connecting to DeepSeek as a trade-decision authority.
-  - Connecting to the real Telegram outbound HTTP transport.
-  - Right-tail score in production scope.
-  - Promoting the Paper Alpha Gate v0 verdict (or any other
-    paper / virtual signal — `validation_quality_gate_status`,
-    `STRATEGY_VALIDATION_DATASET_*` events, the seven
-    `STRATEGY_VALIDATION_*` events from Phase 11C.1C-C-B-A,
-    `strategy_mode`, `early_tail_score`, `mfe_pct`, `mae_pct`,
-    `tail_label`, `MISSED_TAIL_DETECTED`,
-    `FAKE_BREAKOUT_DETECTED`, validation cohort stats,
-    `suggested_cluster_action`) to a real-trade authority.
-  - Letting the Paper Alpha Gate v0 verdict modify position
-    size, leverage, stop-loss, target price, the Risk Engine,
-    or the Execution FSM.
-  - AI deciding direction / position size / leverage /
-    stop-loss / target / execution.
-  - Automatic parameter optimisation that self-modifies the
-    runtime configuration.
-  - Reinforcement learning that drives trade decisions.
-  - AI Learning that auto-decides trades.
-  - Risk Engine override / bypass.
-  - Execution FSM override / bypass.
-  - Phase Gate override / bypass.
-  - Issuing any real order.
-  - Phase 12 / live trading kickoff.
+Default thresholds (configurable via
+`StrategyValidationRuntimeConfig`):
 
-## Acceptance gate (placeholder; populated by the implementation PR)
+  - `paper_alpha_min_total_samples = 20`
+  - `paper_alpha_min_completed_tail_labels = 10`
+  - `paper_alpha_min_bucket_samples = 5`
+  - `paper_alpha_high_bucket_advantage = 0.10`
+  - `paper_alpha_late_chase_fake_breakout_rate = 0.30`
+  - `paper_alpha_missed_alpha_strong_tail_rate = 0.20`
+  - `paper_alpha_follow_fake_breakout_rate = 0.30`
+  - `paper_alpha_leader_preference_advantage = 0.10`
 
-This docs-only kickoff intentionally does **not** define the
-runtime contract, event names, schema versions, dataclasses,
-or threshold defaults of Paper Alpha Gate v0. Those will be
-authored alongside the implementation PR and reviewed against:
+### 3. New event types
 
-  - the Phase 1 safety lock;
-  - the AMOS governance rails in
-    `docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`
-    (Truth Layer / Reality Check / Anti-overfitting /
-    Feedback Isolation / Limited Complexity);
-  - the boundary table above (held end-to-end);
-  - the explicitly-forbidden list above (held verbatim);
-  - the requirement that the verdict is descriptive only and
-    grants no trade authority;
-  - the requirement that no module reads the verdict to drive
-    execution, sizing, leverage, stops, targets, the Risk
-    Engine, or the Execution FSM;
-  - the requirement that Phase 12 stays `FORBIDDEN`.
+Four new typed events emitted through `EventRepository` with
+the brief-mandated identity block (`schema_version`,
+`paper_alpha_gate_version`, `source_phase`, `report_id`,
+`dataset_id`, `timestamp`, `gate_status`, `strategy_version`,
+`scoring_version`, `risk_config_version`,
+`state_machine_version`):
 
-The implementation PR's acceptance evidence will follow the
-established pattern (brief-mandated tests + `tests/unit -k
-phase11c_` baseline + full pytest baseline + dry-run smoke
-and/or operator-VPS real public WS smoke as appropriate;
-Phase 1 safety lock unchanged end-to-end). It is **out of
-scope for this kickoff PR** to assert any test count, smoke
-duration, or evidence transcript.
+  - `PAPER_ALPHA_GATE_EVALUATED`
+  - `PAPER_ALPHA_RULE_EVALUATED`
+  - `PAPER_ALPHA_COHORT_EVALUATED`
+  - `PAPER_ALPHA_REPORT_GENERATED`
 
-## What this kickoff PR does *not* do
+Schema version: `phase_11c_1c_c_b_b_b_a.paper_alpha_gate.v1`.
 
-  - It does **not** implement Paper Alpha Gate v0.
-  - It does **not** add any new Python module under `app/`.
-  - It does **not** add any new event type.
-  - It does **not** modify any runtime behaviour.
-  - It does **not** modify configuration schemas, defaults,
-    or YAML.
-  - It does **not** add or modify tests.
-  - It does **not** flip any phase's acceptance state. Phase
-    11C.1C-C-B-B-A remains `ACCEPTED`. Phase 11C.1C-C-B-B-B
-    remains `NEXT_ALLOWED / NOT_STARTED`. Phase
-    11C.1C-C-B-B-B-A is introduced at `NEXT_ALLOWED /
-    NOT_STARTED`. Phase 12 remains `FORBIDDEN`.
-  - It does **not** rename Phase 11C.1C-C-B-B-B. The parent
-    phase keeps its existing definition: *Strategy Validation
-    Lab (deeper) & richer Cluster Exposure Control
-    follow-up*.
-  - It does **not** authorise live trading, API keys, private
-    endpoints, DeepSeek trade decisions, real Telegram
-    outbound, AI Learning, automatic parameter optimisation,
-    reinforcement learning, or Phase 12.
+### 4. Runtime wiring
 
-## Safety flags (Phase 1 lock unchanged)
+The Phase 11C.1C-C-B-B-A `StrategyValidationRuntime` is
+extended:
+
+  - `flush_report()` calls
+    `_build_and_emit_paper_alpha_gate_events` after the
+    dataset / quality-gate emission. The Paper Alpha Gate v0
+    runs on the same flush as the dataset / quality gate so
+    the four artefacts share the same `report_id` /
+    `dataset_id`.
+  - New runtime properties: `latest_paper_alpha_report`,
+    `paper_alpha_gate_evaluated_count`,
+    `paper_alpha_rule_evaluated_count`,
+    `paper_alpha_cohort_evaluated_count`,
+    `paper_alpha_report_generated_count`.
+  - `metrics_payload()` exposes
+    `paper_alpha_gate_status`, `paper_alpha_gate_reasons`,
+    `paper_alpha_gate_warnings`,
+    `paper_alpha_gate_sample_count`,
+    `paper_alpha_strategy_mode_results`,
+    `paper_alpha_candidate_stage_results`,
+    `paper_alpha_score_bucket_results`,
+    `paper_alpha_cluster_results`,
+    `paper_alpha_missed_alpha_warnings`,
+    `paper_alpha_late_chase_warnings`,
+    `paper_alpha_follow_risk_warnings`,
+    `paper_alpha_leader_preference_signals`, plus the four
+    event counters and the full
+    `paper_alpha_gate_report` payload.
+  - `StrategyValidationRuntimeConfig` is extended with
+    `paper_alpha_gate_enabled` (default `True`) and the eight
+    `paper_alpha_*` thresholds. Setting
+    `paper_alpha_gate_enabled=False` disables the new
+    sub-slice without affecting the parent dataset /
+    quality-gate contract.
+
+### 5. Daily report
+
+The Phase 11B daily report carries a new section
+"Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0" with:
+
+  - `PAPER_ALPHA_GATE_EVALUATED` count (event-log + runner
+    counter cross-check).
+  - `PAPER_ALPHA_RULE_EVALUATED` count.
+  - `PAPER_ALPHA_COHORT_EVALUATED` count.
+  - `PAPER_ALPHA_REPORT_GENERATED` count.
+  - `paper_alpha_gate_status` (descriptive label only).
+  - `paper_alpha_gate_sample_count`.
+  - `paper_alpha_missed_alpha_warnings`.
+  - `paper_alpha_late_chase_warnings`.
+  - `paper_alpha_follow_risk_warnings`.
+  - `paper_alpha_leader_preference_signals`.
+  - `paper_alpha_gate_reasons`.
+  - `paper_alpha_gate_warnings`.
+  - Per-dimension cohort metric lines for `strategy_mode`,
+    `candidate_stage`, `opportunity_score_bucket`,
+    `early_tail_score_bucket`, `cluster_leader_vs_follower`.
+
+The Markdown body explicitly disclaims the descriptive nature
+of `paper_alpha_gate_status` and reiterates that the verdict
+**MUST NEVER trigger a real trade** and **MUST NEVER** modify
+position size, leverage, stop-loss, target price, the Risk
+Engine, or the Execution FSM. **Phase 12 remains FORBIDDEN.**
+
+### 6. Export / replay
+
+The Phase 8.5 export bundle `events.jsonl` carries the four
+new event types automatically (the export service streams
+every row from events.db). The Phase 10A replay engine
+accepts the rows without raising; legacy / future rows
+missing `schema_version` are tolerated.
+
+## What does NOT ship
+
+  - **Real trading**. The Paper Alpha Gate v0 is paper /
+    report only. No `ORDER_*` / `POSITION_*` / `STOP_*` /
+    `TELEGRAM_MESSAGE_SENT` / `EXIT_TRIGGERED` event is ever
+    emitted by this slice.
+  - **AI Learning** (Phase 12). FORBIDDEN.
+  - **Automatic parameter optimisation**. FORBIDDEN.
+  - **Reinforcement learning**. FORBIDDEN.
+  - **Complete Strategy Validation Lab follow-up
+    (Phase 11C.1C-C-B-B-B-B and beyond)**. Reserved for the
+    next gate.
+  - **Trade decisions driven by gate verdict**. The Risk
+    Engine remains the single trade-decision gate.
+    `gate_status` cannot enable / disable orders, modify
+    position size, leverage, stop-loss, target price, the
+    Risk Engine, or the Execution FSM.
+  - **Strategy quality / profitability oracle**. The gate
+    only judges "does this sample support continued paper
+    observation"; profitability is out of scope.
+
+## Real-WS smoke not required for this PR
+
+The Phase 11C.1C-C-B-B-B-A scope is **Paper Alpha Gate v0
+contract + deterministic evaluation layer**. The brief
+explicitly waives the real WS smoke for this slice:
+
+  > "本 PR 不强制要求 10min real WS smoke，原因：本 PR 是
+  > Paper Alpha Gate contract + deterministic evaluation
+  > layer，目标是样本不足时也能输出可审计 gate result；真实非
+  > 空样本验证留到后续阶段或 closeout。"
+
+The 30 s dry-run produces an `INCONCLUSIVE` Paper Alpha Gate
+report (because the dataset is too thin / the upstream
+quality gate has emitted `fail`); that is the brief's
+"sample-insufficient ⇒ auditable INCONCLUSIVE" requirement.
+A non-empty Paper Alpha Gate verdict is reserved for a later
+closeout when the upstream dataset has accumulated enough
+completed primary-window samples to make a decision.
+
+## Safety boundary (held end-to-end)
 
 ```
-trading_mode                    = paper
+mode                            = paper
 live_trading_enabled            = False
+exchange_live_order_enabled     = False
 right_tail_enabled              = False
 llm_enabled                     = False
-exchange_live_order_enabled     = False
+trading_mode_paper              = True
 telegram_outbound_enabled       = False
 binance_private_api_enabled     = False
-real Binance API key            = not loaded
-real Binance API secret         = not loaded
-real signed endpoint call       = none
-real private WebSocket          = none
-real listenKey / user data WS   = none
-real DeepSeek trade decision    = none
-real Telegram outbound          = none
-Phase 12                        = FORBIDDEN (gate unchanged)
+no API key                      = confirmed
+no signed endpoint              = confirmed
+no private websocket            = confirmed
+no listenKey                    = confirmed
+no DeepSeek trade decision      = confirmed
+no real Telegram outbound       = confirmed
+Phase 12                        = FORBIDDEN
 ```
 
-The Risk Engine remains the single trade-decision gate. The
-Paper Alpha Gate v0 verdict, once implemented, will be a
-*descriptive evidence label* read only by human reviewers and
-by the daily Markdown report; it will **never** be read by an
-execution path.
+## Tests
+
+  - `tests/unit/test_phase11c_1c_c_b_b_b_a_paper_alpha_gate.py`
+    — 27 brief-mandated cases (input contract, status
+    vocabulary, cohort dimensions, rule definition,
+    INCONCLUSIVE on low samples, INCONCLUSIVE/FAIL on QG fail,
+    missed_alpha / late_chase / follow_risk warnings, high
+    score bucket signal, early tail bucket signal positive +
+    negative, cluster leader signal, deterministic,
+    `build_paper_alpha_gate_input` from upstream artefacts,
+    payload roundtrip, legacy payload tolerance, non-mapping
+    rejected, runtime emits the four events, export bundle
+    carries them, replay accepts them, daily report metrics
+    + Markdown, empty-state INCONCLUSIVE, Phase 1 safety
+    flags unchanged, no execution events emitted, Phase 12
+    forbidden, runtime config knob disables the gate).
+  - `tests/unit/test_phase11b_no_network.py` —
+    `test_phase11b_event_emission_does_not_invent_new_event_types`
+    extended to allow the four new event types.
+  - Full pytest run: 2340 passed (2313 baseline + 27 new). No
+    regression.
+  - `tests/unit/ -k phase11c_` filter: 366 passed (339
+    baseline + 27 new).
+
+## Forbidden by this PR
+
+  - Live trading (`live_trading_enabled=False` cannot flip to
+    `True`).
+  - Binance private API / signed endpoint / listenKey /
+    private WebSocket.
+  - LLM / DeepSeek trade decision.
+  - Real Telegram outbound.
+  - Right-tail score in production scope (Phase 1 safety
+    lock).
+  - Paper Alpha Gate v0 verdict triggering real downstream
+    execution.
+  - Paper Alpha Gate v0 verdict modifying position size,
+    leverage, stop-loss, target price, the Risk Engine, or
+    the Execution FSM.
+  - AI deciding direction / position size / leverage /
+    stop-loss / target / execution.
+  - Automatic parameter optimisation.
+  - Reinforcement learning.
+  - Risk Engine override (the Risk Engine remains the single
+    trade-decision gate).
+  - Phase 11C.1C-C-B-B-B-B implementation (reserved for the
+    next child slice).
+  - Phase 12 / live trading kickoff.

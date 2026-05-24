@@ -448,6 +448,21 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         "STRATEGY_VALIDATION_DATASET_BUILT",
         "STRATEGY_VALIDATION_DATASET_EXPORTED",
         "STRATEGY_VALIDATION_QUALITY_GATE_EVALUATED",
+        # Phase 11C.1C-C-B-B-B-A - Paper Alpha Gate v0. Emission
+        # lives in app/adaptive/strategy_validation_runtime.py; the
+        # paper_run daily-report builder counts these events as a
+        # cross-check against the runtime's runner-side
+        # ``metrics_payload``. None of these events authorise a real
+        # trade; the ``gate_status`` field is descriptive (``PASS``
+        # / ``WARN`` / ``FAIL`` / ``INCONCLUSIVE``) and **MUST
+        # NEVER trigger a real trade, modify position size,
+        # leverage, stop-loss, target price, the Risk Engine, or
+        # the Execution FSM**. The Risk Engine remains the single
+        # trade-decision gate.
+        "PAPER_ALPHA_GATE_EVALUATED",
+        "PAPER_ALPHA_RULE_EVALUATED",
+        "PAPER_ALPHA_COHORT_EVALUATED",
+        "PAPER_ALPHA_REPORT_GENERATED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (
