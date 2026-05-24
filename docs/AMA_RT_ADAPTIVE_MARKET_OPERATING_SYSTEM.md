@@ -665,7 +665,6 @@ The companion edits to `docs/PROJECT_STATUS.md`,
 `docs/PHASE_GATE.md`, and `docs/CHANGELOG.md` shipped in
 this PR record only the following:
 
-
   - A new **architecture governance document** has been
     added (this file).
   - The new document is **guidance-only**.
