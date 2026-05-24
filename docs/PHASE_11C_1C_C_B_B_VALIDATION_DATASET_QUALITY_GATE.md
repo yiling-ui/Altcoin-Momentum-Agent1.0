@@ -1,15 +1,32 @@
 # Phase 11C.1C-C-B-B-A — Strategy Validation Dataset Builder & Quality Gate v0
 
+> **Status: ACCEPTED (closed 2026-05-23; PR #44 merged into
+> `main`, mergeCommit `3ecfc3b`).**
+>
 > **Phase 11C.1C-C-B-B-A is paper / report only.** **NOT** live
 > trading. **NOT** AI Learning. **NOT** automatic parameter
 > optimisation. **NOT** reinforcement learning. **NOT** the
 > complete Strategy Validation Lab follow-up
-> (Phase 11C.1C-C-B-B-B). **NOT** Phase 12.
+> (Phase 11C.1C-C-B-B-B). **NOT** the Paper Alpha Gate v0.
+> **NOT** Phase 12.
+>
+> **Phase 11C.1C-C-B-B-A acceptance does NOT authorise live
+> trading, API keys, private endpoints, DeepSeek trade
+> decisions, real Telegram outbound, Phase 11C.1C-C-B-B-B
+> kickoff bypassing the standard gate, the Paper Alpha Gate
+> v0, the complete Strategy Validation Lab follow-up, AI
+> Learning, automatic parameter optimisation, reinforcement
+> learning, or Phase 12.**
 >
 > The Risk Engine remains the single trade-decision gate. The
 > ``validation_quality_gate_status`` produced by this slice
-> (``pass`` / ``warn`` / ``fail``) is a **descriptive label** for
-> human review and **MUST NEVER trigger a real trade**.
+> (``pass`` / ``warn`` / ``fail``) is a **descriptive label**
+> for human review and **MUST NEVER trigger a real trade**.
+> ``validation_quality_gate_status=fail`` is the **expected**
+> output for the low-sample 30 s dry-run because the smallest
+> Phase 11C.1C-C-A primary tracking window is 5 minutes and
+> samples that landed in the 30 s window are necessarily
+> in-flight / unresolved.
 
 ## Phase boundary
 
@@ -17,20 +34,24 @@
     `main`, 2026-05-23, mergeCommit `cc18047`). Ships the
     Strategy Validation Lab v0 contracts + aggregators + the
     runtime that emits the seven typed events.
-  - **Phase 11C.1C-C-B-B-A** — *this PR*. `NEXT_ALLOWED →
-    IN_REVIEW`. Ships the Strategy Validation Dataset Builder &
-    Quality Gate v0 on top of the Phase 11C.1C-C-B-A
+  - **Phase 11C.1C-C-B-B-A** — `ACCEPTED` (PR #44 merged into
+    `main`, 2026-05-23, mergeCommit `3ecfc3b`). Ships the
+    Strategy Validation Dataset Builder & Quality Gate v0 on
+    top of the Phase 11C.1C-C-B-A
     `StrategyValidationSample` / `StrategyValidationReport` /
     `ClusterExposureAssessment` artefacts. Three new typed
-    events. The dataset is exportable + replayable + auditable.
-    The quality gate is a *sample trust* gate, not a *strategy
-    quality* gate.
-  - **Phase 11C.1C-C-B-B-B** — `FORBIDDEN by this PR`. Reserved
-    for the deeper Strategy Validation Lab follow-up (richer
-    cohort comparisons, extended cluster heuristics,
-    longer-window correlations). Phase 11C.1C-C-B-B-A acceptance
-    does NOT authorise Phase 11C.1C-C-B-B-B kickoff bypassing
-    the standard gate.
+    events. The dataset is exportable + replayable +
+    auditable. The quality gate is a *sample trust* gate, not
+    a *strategy quality* gate.
+  - **Phase 11C.1C-C-B-B-B** — `NEXT_ALLOWED / NOT_STARTED`.
+    Reserved for the deeper Strategy Validation Lab follow-up
+    (richer cohort comparisons, extended cluster heuristics,
+    longer-window correlations, dataset-driven retrospective
+    audits). Phase 11C.1C-C-B-B-A acceptance does NOT
+    authorise Phase 11C.1C-C-B-B-B kickoff bypassing the
+    standard gate; will require its own kickoff PR, brief,
+    scope, boundary table, forbidden list, and acceptance
+    evidence.
   - **Phase 12** — `FORBIDDEN`. Phase 1 safety lock unchanged.
 
 ## What ships
