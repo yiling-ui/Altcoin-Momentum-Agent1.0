@@ -7,6 +7,358 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Docs-only - Phase 11C.1C-C-B-B-B-C (Long-Window Cohort Stability & Sample Sufficiency Protocol v0) kickoff / scope alignment (PR #58)
+
+**Type:** Docs-only kickoff / scope-alignment.
+**Runtime effect:** **none.**
+**Phase ledger effect:** **defines** Phase
+11C.1C-C-B-B-B-C in place at `NEXT_ALLOWED / NOT_STARTED`
+as the **third child slice** under the Phase
+11C.1C-C-B-B-B parent. **No phase's acceptance state is
+flipped.** Phase 11C.1C-C-B-B-B-A remains `ACCEPTED`.
+Phase 11C.1C-C-B-B-B-B remains `ACCEPTED`. Phase
+11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`
+(parent; **unchanged definition** — *Strategy Validation
+Lab (deeper) & richer Cluster Exposure Control
+follow-up*). Phase 11C.1C-C-B-B-B-C remains `NEXT_ALLOWED
+/ NOT_STARTED` (this PR scopes the slice; it does not
+flip its state).
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **This PR is paper / report / evidence only.** **NOT**
+> live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning.
+> **NOT** a strategy implementation. **NOT** a trading
+> module. **NOT** a new runtime module. **NOT** the
+> complete Strategy Validation Lab follow-up. **NOT** the
+> Phase 11C.1C-C-B-B-B-C *closeout* (the closeout will be
+> a separate docs-only PR after the operator captures
+> W1 / W2 / W3 paper evidence). **NOT** Phase 12.
+>
+> The Long-Window Cohort Stability & Sample Sufficiency
+> Protocol v0 is **docs / evidence-template only**
+> end-to-end. It does not add a new runtime module, a new
+> event type, a new strategy, a new execution surface, a
+> new optimiser, or a new AI authority. It defines the
+> long-window paper data-collection cadence (1 h → 4 h →
+> 24 h, with multi-day reserved), the sample sufficiency
+> rule, the cohort stability acceptance criteria, and the
+> evidence-template shape that any future closeout PR
+> must follow. The Risk Engine remains the single
+> trade-decision gate.
+
+#### Why this slice exists
+
+PR #56 merged the Regime & Cluster Cohort Evidence Pack
+v0 implementation into `main` (mergeCommit `1a9abe2`); PR
+#57 merged the docs-only closeout and flipped Phase
+11C.1C-C-B-B-B-B to `ACCEPTED`. The operator-VPS 10 min
+WS paper smoke evidence was accepted as well-formed
+(`duration_seconds=600.0`, `uptime≈608s`, `ws_first=true`,
+`ws_real_transport=true`, `ingestion_errors=0`, `HTTP
+429=0`, `HTTP 418=0`), and the runtime / daily-report /
+Phase 8.5 export pipeline is functional. **However**: the
+window's `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE`,
+`sample_count=14<20`, `completed_tail_label_count=0<10`.
+Runtime / report / export are correct, but the 10 min
+observation window is too short to support a Regime /
+Cluster right-tail conclusion. The right next step is
+**not** to add a new strategy module, a new AI authority,
+or a new optimiser; the right next step is to
+**accumulate structural data across longer paper
+observation windows**. This slice codifies that step as a
+**protocol** — a long-window paper data-collection
+cadence, a sample sufficiency rule, and cohort stability
+acceptance criteria — while keeping all of the Phase 1
+safety lock invariants in force.
+
+#### Added
+
+- **`docs/PHASE_11C_1C_C_B_B_B_C_LONG_WINDOW_COHORT_STABILITY.md`**
+  (NEW) — *Phase 11C.1C-C-B-B-B-C — Long-Window Cohort
+  Stability & Sample Sufficiency Protocol v0 (docs-only
+  kickoff)* / *长窗口 Cohort 稳定性与样本充足协议 v0*.
+  Records the parent / child relationship (Phase
+  11C.1C-C-B-B-B-C is the **third child slice** under
+  Phase 11C.1C-C-B-B-B; the parent phase is **not**
+  renamed); the **why** (PR #57 closeout flipped B-B-B-B
+  to `ACCEPTED` with `INSUFFICIENT_SAMPLE`; runtime /
+  report / export are correct but the observation window
+  is too short to support a Regime / Cluster right-tail
+  conclusion; the right next step is to accumulate
+  structural data across longer paper observation
+  windows); the long-window run cadence (W1=1 h, W2=4 h,
+  W3=24 h, W4+ multi-day reserved; **operator-driven; not
+  auto-scheduled**); the per-window evidence fields the
+  operator must capture verbatim
+  (`REGIME_CLUSTER_EVIDENCE_PACK_GENERATED`,
+  `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED`,
+  `PAPER_ALPHA_GATE_EVALUATED`,
+  `PAPER_ALPHA_RULE_EVALUATED`,
+  `PAPER_ALPHA_COHORT_EVALUATED`,
+  `PAPER_ALPHA_REPORT_GENERATED`, daily report Regime &
+  Cluster section, daily report Paper Alpha Gate section,
+  `sample_count`, `completed_tail_label_count`,
+  `regime_cluster_evidence_status`,
+  `paper_alpha_gate_status`, `insufficient_sample_reasons`,
+  Phase 8.5 export package, export contains
+  `REGIME_CLUSTER_*` events, export contains
+  `PAPER_ALPHA_*` events, safety flags); the sample
+  sufficiency principle (low samples cannot output
+  strong conclusions; `INSUFFICIENT_SAMPLE` /
+  `INCONCLUSIVE` are valid outputs not failures; cohort
+  signals only allowed once sample-sufficient; cohort
+  signals remain paper-only / report-only /
+  evidence-only); the cohort stability principle (signals
+  must persist across windows to count as evidence;
+  inversion is a warning; biased toward "do nothing" when
+  stability is unclear); the **allowed outputs** (docs /
+  evidence templates only — `long_window_run_plan`,
+  `sample_sufficiency_checklist`,
+  `cohort_stability_checklist`,
+  `operator_vps_evidence_template`,
+  `export_replay_evidence_template`,
+  `closeout_acceptance_template`); the **boundary table**
+  (Phase 1 safety lock + outputs-are-descriptive-only
+  invariants); the **forbidden list** (inherited
+  verbatim + slice-specific items including no
+  auto-scheduling, no new runtime module across the
+  slice's lifecycle, no `INSUFFICIENT_SAMPLE` /
+  `INCONCLUSIVE` rule replacement); and the
+  **acceptance-gate placeholder** for the future closeout
+  PR.
+- **`docs/PR58_DESCRIPTION.md`** (NEW) — describes this
+  docs-only kickoff PR (changed files, allowed /
+  forbidden edits, confirmation checklist).
+
+#### Changed
+
+- **`docs/PHASE_GATE.md`** — *Open / Reserved phases*
+  table Phase 11C.1C-C-B-B-B-C row redefined from "Next
+  child slice (placeholder; not yet defined)" to
+  *Long-Window Cohort Stability & Sample Sufficiency
+  Protocol v0 (docs / evidence-template-only third child
+  slice under Phase 11C.1C-C-B-B-B; docs-only kickoff via
+  PR #58)* with full scope language, allowed-outputs
+  list, long-window cadence, sample-sufficiency / cohort-
+  stability principles, slice-specific forbidden items,
+  and inherited-forbidden-list reference. *Open phase:
+  Phase 11C.1C-C-B-B-B-C (NEXT_ALLOWED / NOT_STARTED)*
+  section rewritten with full scope (long-window cadence,
+  per-window evidence fields, sample sufficiency
+  principle, cohort stability principle, allowed outputs,
+  boundary table, forbidden list, acceptance-gate
+  placeholder, kickoff acceptance gate). *Architecture
+  governance (guidance-only; no phase change)* closing
+  paragraph refreshed to reflect the current open-phase
+  state (B-B-A = ACCEPTED; B-B-B = NEXT_ALLOWED /
+  NOT_STARTED; B-B-B-A = ACCEPTED; B-B-B-B = ACCEPTED;
+  B-B-B-C = NEXT_ALLOWED / NOT_STARTED with full scope;
+  Phase 12 = FORBIDDEN).
+- **`docs/PROJECT_STATUS.md`** — current-phase block
+  B-B-B-C inline summary line refreshed with the new
+  defined name (Long-Window Cohort Stability & Sample
+  Sufficiency Protocol v0 / 长窗口 Cohort 稳定性与样本
+  充足协议 v0), the docs-only-kickoff scope, and the
+  paper / report / evidence-only safety language.
+  Per-phase table B-B-B-C row redefined with full scope,
+  allowed outputs, long-window cadence, per-window
+  evidence fields, sample sufficiency / cohort stability
+  principles, and the inherited forbidden list reference.
+  The B-B-B-C prose subsection rewritten to record
+  positioning under AMOS, the **why** (PR #57 closeout
+  flipped B-B-B-B to `ACCEPTED` with `INSUFFICIENT_SAMPLE`;
+  runtime / report / export are correct but the
+  observation window is too short), allowed outputs, the
+  long-window cadence, the per-window evidence fields,
+  the sample sufficiency principle, the cohort stability
+  principle, and the slice-specific forbidden items.
+- **`docs/CHANGELOG.md`** — *this entry*.
+
+#### Phase 11C.1C-C-B-B-B-C exists to record the following protocol
+
+  - **Long-window paper data-collection cadence
+    (operator-driven; not auto-scheduled):**
+      - **W1 — 1 h paper WS run** (first meaningful sample
+        window).
+      - **W2 — 4 h paper WS run** (cohort stability check).
+      - **W3 — 24 h paper WS run** (day-level structural
+        evidence).
+      - **W4+ — multi-day paper observation** (reserved;
+        out of scope; not implemented in this PR; not
+        auto-scheduled in this PR).
+  - **Per-window evidence the operator must capture:**
+      - `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED`
+      - `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED`
+      - `PAPER_ALPHA_GATE_EVALUATED`
+      - `PAPER_ALPHA_RULE_EVALUATED`
+      - `PAPER_ALPHA_COHORT_EVALUATED`
+      - `PAPER_ALPHA_REPORT_GENERATED`
+      - daily report Regime & Cluster section
+      - daily report Paper Alpha Gate section
+      - `sample_count`
+      - `completed_tail_label_count`
+      - `regime_cluster_evidence_status`
+      - `paper_alpha_gate_status`
+      - `insufficient_sample_reasons`
+      - Phase 8.5 export package
+      - export contains `REGIME_CLUSTER_*` events
+      - export contains `PAPER_ALPHA_*` events
+      - safety flags
+
+#### Sample sufficiency principle (carries forward verbatim)
+
+  - Low samples cannot output strong conclusions.
+  - When `completed_tail_label_count` is below the Regime
+    & Cluster Evidence Pack v0 minimum, no Regime /
+    Cluster right-tail conclusion is permitted.
+  - `INSUFFICIENT_SAMPLE` (Regime & Cluster) and
+    `INCONCLUSIVE` (Paper Alpha Gate) are **valid
+    outputs, not failures**.
+  - Cohort signals are only allowed once samples are
+    sufficient.
+  - Cohort signals — even when sample-sufficient — remain
+    paper-only / report-only / evidence-only.
+  - Cohort signals cannot trigger trades, modify
+    parameters, relax rules, or enter Phase 12.
+
+#### Cohort stability principle (carries forward verbatim)
+
+  - A signal that appears in one short window and
+    disappears in the next is **not** treated as evidence.
+  - A signal that persists across W1 / W2 / W3 *and*
+    survives the Phase 8.5 export / Phase 10A replay
+    round-trip is treated as a **paper-only candidate
+    signal worth continued observation** — but it still
+    does not authorise any runtime change, parameter
+    optimisation, rule relaxation, or trade.
+  - A signal whose direction inverts across consecutive
+    windows is logged as `regime_outcome_inverted_warning`
+    and is **not** acted on.
+  - The protocol is biased toward "do nothing" when
+    stability is unclear.
+
+#### Allowed outputs (docs / evidence templates only)
+
+Each is a **descriptive document or evidence template
+only**. None has trade authority. None is read by the
+Risk Engine or the Execution FSM. None is a new Python
+module, a new event type, or a new runtime hook:
+
+  - `long_window_run_plan`
+  - `sample_sufficiency_checklist`
+  - `cohort_stability_checklist`
+  - `operator_vps_evidence_template`
+  - `export_replay_evidence_template`
+  - `closeout_acceptance_template`
+
+#### Forbidden by this PR (carries forward verbatim + slice-specific items)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop /
+  target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- AI Learning that auto-decides trades.
+- Auto-rule-relaxation on low samples.
+- Auto-scheduling W1 / W2 / W3 / W4+ runs from runtime
+  code.
+- Risk Engine override / bypass.
+- Execution FSM override / bypass.
+- Phase Gate override / bypass.
+- Triggering a real trade from any protocol artefact.
+- Modifying position size / leverage / stop-loss / target
+  price from any protocol artefact.
+- Modifying the Risk Engine or the Execution FSM from any
+  protocol artefact.
+- Replacing the Regime & Cluster Cohort Evidence Pack v0
+  `INSUFFICIENT_SAMPLE` rule with a relaxed rule.
+- Replacing the Paper Alpha Gate v0 `INCONCLUSIVE` rule
+  with a relaxed rule.
+- Implementing the Long-Window Cohort Stability & Sample
+  Sufficiency Protocol v0 as a new runtime module — the
+  slice is intentionally **docs / evidence template only**
+  end-to-end.
+- Adding new event types, new Python modules, or new
+  runtime behaviour at any point in this slice's
+  lifecycle.
+- Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+  `risk/`, `execution/`, `llm/`, `telegram/`, or
+  `exchange/`.
+- Modifying configuration schemas, defaults, or YAML.
+- Adding or modifying tests.
+- Running tests as part of this kickoff PR.
+- Modifying strategy runtime code.
+- Modifying runtime behavior.
+- Implementing new functionality.
+- Flipping any phase's acceptance state. Phase
+  11C.1C-C-B-B-B-A remains `ACCEPTED`. Phase
+  11C.1C-C-B-B-B-B remains `ACCEPTED`. Phase
+  11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`.
+  Phase 11C.1C-C-B-B-B-C remains `NEXT_ALLOWED /
+  NOT_STARTED` (scoped by this PR; not flipped). Phase
+  12 remains `FORBIDDEN`.
+- Renaming Phase 11C.1C-C-B-B-B. The parent phase keeps
+  its existing definition — *Strategy Validation Lab
+  (deeper) & richer Cluster Exposure Control follow-up*.
+- Phase 11C.1C-C-B-B-B-C *closeout* (out of scope; will
+  be authored after the operator captures W1 / W2 / W3
+  paper evidence and a separate docs-only closeout PR
+  flips the slice to `ACCEPTED`).
+- Phase 11C.1C-C-B-B-B-D / B-B-B-E / further child
+  slices (out of scope; will require their own kickoff
+  PRs).
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only)
+
+- Docs-only PR. **No code modified** under `app/`,
+  `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`,
+  `llm/`, `telegram/`, or `exchange/`.
+- **No new Python files.**
+- **No new event types.**
+- **No new tests.**
+- **No tests run.**
+- **No dry-run / smoke required** (no runtime change).
+- **No phase acceptance state flipped.**
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no Binance API
+  key, no Binance API secret, no signed endpoint, no
+  account / order / position / leverage / margin
+  endpoint, no private WebSocket, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Phase 11C.1C-C-B-B-B-B accepted - Regime & Cluster Cohort Evidence Pack v0 docs-only closeout (PR #57)
 
 **Type:** Docs-only closeout / acceptance flip.

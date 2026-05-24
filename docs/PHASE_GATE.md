@@ -46,7 +46,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up (parent; unchanged definition) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-A (PR #44) merged into `main` on 2026-05-23 (mergeCommit `3ecfc3b`) and is the gating predecessor; Phase 11C.1C-C-B-B-B is reserved for the deeper Strategy Validation Lab follow-up (richer cohort comparisons, extended cluster heuristics, longer-window correlations, dataset-driven retrospective audits). The parent phase is **not** renamed by Paper Alpha Gate v0; the Paper Alpha Gate v0 is one *child slice* under this parent (Phase 11C.1C-C-B-B-B-A), not the parent itself. NOT authorised by Phase 11C.1C-C-B-B-A acceptance bypassing the standard gate; will require its own kickoff PRs (one per child slice), brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
 | 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #52 + PR #54 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-A is now `ACCEPTED` (PR #52 merged into `main` on 2026-05-24, mergeCommit `f8ba315`; this docs-only closeout PR #54 records the operator-VPS paper evidence). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript, the Paper Alpha Gate daily-report excerpt, the four `PAPER_ALPHA_*` event counts, the Phase 8.5 export bundle reference, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-A (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-A acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `paper_alpha_gate_status=INCONCLUSIVE` was an **expected and accepted** result for this smoke window because `completed_tail_label_count=0<10`; the Paper Alpha Gate correctly refused to overfit or force a `PASS`. `INCONCLUSIVE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise live trading, does NOT authorise Phase 12. Paper Alpha Gate verdicts remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-B | Regime & Cluster Cohort Evidence Pack v0 (paper / report / evidence-only second child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #56 implementation + PR #57 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-B is now `ACCEPTED` (PR #56 merged into `main` on 2026-05-24, mergeCommit `1a9abe2`; this docs-only closeout PR #57 records the operator-VPS paper evidence). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript, the Regime & Cluster Cohort Evidence Pack daily-report excerpt, the two `REGIME_CLUSTER_*` event counts, the Phase 8.5 export bundle reference, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-B (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-B acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` was an **expected and accepted** result for this smoke window because `sample_count=14<20` and `completed_tail_label_count=0<10`; the Regime & Cluster Evidence Pack correctly refused to overfit or force a regime / cluster conclusion when structural samples were insufficient. `INSUFFICIENT_SAMPLE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise rule relaxation, does NOT authorise live trading, does NOT authorise Phase 12. Regime & Cluster Evidence Pack outputs remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
-| 11C.1C-C-B-B-B-C | Next child slice under Phase 11C.1C-C-B-B-B (placeholder; not yet defined) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-B is `ACCEPTED` (PR #56 merged into `main` on 2026-05-24, mergeCommit `1a9abe2`; closeout via PR #57), so Phase 11C.1C-C-B-B-B-C is **NEXT_ALLOWED**. Slice scope, allowed outputs, boundary, and forbidden list are **not yet defined**; they will be authored in a separate **docs-only kickoff PR** that opens Phase 11C.1C-C-B-B-B-C with full scope alignment under the AMOS rails in `docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`, mirroring the PR #51 (B-B-B-A kickoff) → PR #52 (B-B-B-A implementation) → PR #54 (B-B-B-A closeout) and PR #55 (B-B-B-B kickoff) → PR #56 (B-B-B-B implementation) → PR #57 (B-B-B-B closeout) pattern. NOT authorised by Phase 11C.1C-C-B-B-B-B acceptance bypassing the standard gate; will require its own kickoff PR, brief, scope, boundary table, forbidden list, and a separate implementation PR + closeout PR cycle. Paper / report / evidence-only when defined; will grant no trade authority and **MUST NEVER** trigger a real trade or modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B forbidden item verbatim. Phase 12 remains **FORBIDDEN**. |
+| 11C.1C-C-B-B-B-C | Long-Window Cohort Stability & Sample Sufficiency Protocol v0 (*长窗口 Cohort 稳定性与样本充足协议 v0*; docs / evidence-template-only third child slice under Phase 11C.1C-C-B-B-B; docs-only kickoff via PR #58) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-B is `ACCEPTED` (PR #56 merged into `main` on 2026-05-24, mergeCommit `1a9abe2`; closeout via PR #57), so Phase 11C.1C-C-B-B-B-C is **NEXT_ALLOWED**. PR #58 is the **docs-only kickoff / scope alignment** for this slice; **no runtime code is shipped by the kickoff PR**, and the slice itself is intentionally **docs / evidence-template only** end-to-end (no future implementation PR will add a new runtime module under this slice — if such a need emerges it must be opened as a separate child slice). Allowed outputs (docs / evidence templates only): `long_window_run_plan`, `sample_sufficiency_checklist`, `cohort_stability_checklist`, `operator_vps_evidence_template`, `export_replay_evidence_template`, `closeout_acceptance_template` — each is a descriptive document only and **MUST NEVER trigger a real trade**, **MUST NEVER** modify position size, leverage, stop-loss, target price, the Risk Engine, or the Execution FSM; the Risk Engine remains the single trade-decision gate. Slice exists because PR #57 closeout flipped B-B-B-B to `ACCEPTED` with `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` (`sample_count=14<20`, `completed_tail_label_count=0<10`) — runtime / report / export are correct but the 10 min observation window is too short to support a Regime / Cluster right-tail conclusion; the right next step is to **accumulate structural data across longer paper observation windows** (W1 = 1 h, W2 = 4 h, W3 = 24 h, W4+ multi-day reserved; operator-driven; **not** auto-scheduled) and to record per-window evidence verbatim (`REGIME_CLUSTER_*` and `PAPER_ALPHA_*` event counts, daily-report Regime & Cluster section, daily-report Paper Alpha Gate section, `sample_count`, `completed_tail_label_count`, `regime_cluster_evidence_status`, `paper_alpha_gate_status`, `insufficient_sample_reasons`, Phase 8.5 export bundle, safety flags). Core principles: low samples cannot output strong conclusions; `INSUFFICIENT_SAMPLE` / `INCONCLUSIVE` are valid outputs not failures; cohort signals are only allowed once samples are sufficient; cohort signals remain paper-only / report-only / evidence-only; signals must persist across windows to count; protocol is biased toward "do nothing" when stability is unclear; forbid loosening rules on low samples; forbid auto-scheduling; forbid runtime change. NOT authorised by Phase 11C.1C-C-B-B-B-B acceptance bypassing the standard gate; will require its own docs-only closeout PR (after the operator captures W1 / W2 / W3 paper evidence) to flip the slice to `ACCEPTED`. **NOT** live trading, **NOT** AI Learning, **NOT** automatic parameter optimisation, **NOT** reinforcement learning, **NOT** a strategy implementation, **NOT** a trading module, **NOT** a new runtime module, **NOT** the complete Strategy Validation Lab follow-up, **NOT** Phase 12. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B forbidden item verbatim. Phase 12 remains **FORBIDDEN**. |
 | 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A acceptance, Phase 11C.1C-C-B-B-B-A acceptance, Phase 11C.1C-C-B-B-B-B acceptance, Phase 11C.1C-C-B-B-B, Phase 11C.1C-C-B-B-B-C, or any other Phase 11C sub-phase). |
 
 
@@ -1705,35 +1705,36 @@ Phase 12                        = FORBIDDEN
 
 ## Open phase: Phase 11C.1C-C-B-B-B-C (NEXT_ALLOWED / NOT_STARTED)
 
-**Phase 11C.1C-C-B-B-B-C — Next child slice under Phase
-11C.1C-C-B-B-B (placeholder; not yet defined).** Status:
-**NEXT_ALLOWED / NOT_STARTED.** Phase 11C.1C-C-B-B-B-B
-(*Regime & Cluster Cohort Evidence Pack v0*) is now
-**ACCEPTED** (PR #56 merged into `main` on 2026-05-24,
-mergeCommit `1a9abe2`; closeout via PR #57), so Phase
-11C.1C-C-B-B-B-C is **NEXT_ALLOWED**. The slice is a
-**placeholder**; its scope, allowed outputs, boundary
-table, and forbidden list will be defined by a separate
-**docs-only kickoff PR** that opens Phase 11C.1C-C-B-B-B-C
-with full scope alignment under the AMOS rails in
-`docs/AMA_RT_ADAPTIVE_MARKET_OPERATING_SYSTEM.md`. Phase
-11C.1C-C-B-B-B-C will then require its own implementation
-PR + closeout PR cycle, mirroring the PR #51 → PR #52 → PR
-#54 (B-B-B-A) and PR #55 → PR #56 → PR #57 (B-B-B-B)
-pattern.
+**Phase 11C.1C-C-B-B-B-C — Long-Window Cohort Stability &
+Sample Sufficiency Protocol v0 / 长窗口 Cohort 稳定性与样
+本充足协议 v0.** Status: **NEXT_ALLOWED / NOT_STARTED
+(docs-only kickoff / scope alignment).** Phase
+11C.1C-C-B-B-B-B (*Regime & Cluster Cohort Evidence Pack
+v0*) is now **ACCEPTED** (PR #56 merged into `main` on
+2026-05-24, mergeCommit `1a9abe2`; closeout via PR #57),
+so Phase 11C.1C-C-B-B-B-C is **NEXT_ALLOWED**. PR #58 is
+the **docs-only kickoff / scope alignment** for this
+slice; **no runtime code is shipped by the kickoff PR**,
+and the slice itself is intentionally **docs / evidence-
+template only** end-to-end (no future implementation PR
+will add a new runtime module under this slice — if such
+a need emerges it must be opened as a separate child
+slice with its own kickoff / implementation / closeout
+cycle).
 
 The parent phase is **not** renamed: Phase 11C.1C-C-B-B-B
 remains *Strategy Validation Lab (deeper) & richer Cluster
-Exposure Control follow-up*. Phase 11C.1C-C-B-B-B-C will
-carve out a single, small, auditable evidence-only slice
-under that parent — exactly like B-B-B-A (Paper Alpha Gate
-v0) and B-B-B-B (Regime & Cluster Cohort Evidence Pack v0).
+Exposure Control follow-up*. Phase 11C.1C-C-B-B-B-C carves
+out the third small, auditable slice under that parent —
+following B-B-B-A (Paper Alpha Gate v0) and B-B-B-B
+(Regime & Cluster Cohort Evidence Pack v0).
 
 > **Phase 11C.1C-C-B-B-B-B acceptance does NOT authorise Phase 11C.1C-C-B-B-B-C kickoff bypassing the standard gate.**
-> **Phase 11C.1C-C-B-B-B-C will be paper / report / evidence-only when defined.**
-> **Phase 11C.1C-C-B-B-B-C will grant no trade authority.**
+> **Phase 11C.1C-C-B-B-B-C is paper / report / evidence-only.**
+> **Phase 11C.1C-C-B-B-B-C grants no trade authority.**
 > **Phase 11C.1C-C-B-B-B-C is NOT a strategy implementation.**
 > **Phase 11C.1C-C-B-B-B-C is NOT a trading module.**
+> **Phase 11C.1C-C-B-B-B-C is NOT a new runtime module.**
 > **Phase 11C.1C-C-B-B-B-C is NOT AI Learning.**
 > **Phase 11C.1C-C-B-B-B-C is NOT automatic parameter optimisation.**
 > **Phase 11C.1C-C-B-B-B-C is NOT reinforcement learning.**
@@ -1742,25 +1743,267 @@ v0) and B-B-B-B (Regime & Cluster Cohort Evidence Pack v0).
 > **Phase 11C.1C-C-B-B-B-C inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B forbidden item verbatim.**
 > **Phase 12 (live trading) remains FORBIDDEN.**
 
-### Phase 11C.1C-C-B-B-B-C acceptance gate (placeholder; will be detailed by the docs-only kickoff PR)
+### Why Phase 11C.1C-C-B-B-B-C exists (positioning under AMOS)
 
-The Phase 11C.1C-C-B-B-B-C kickoff PR will define the
-substantive scope, allowed outputs, boundary table,
-forbidden list, and acceptance-gate placeholder. Pattern:
+PR #56 merged the Regime & Cluster Cohort Evidence Pack v0
+implementation into `main` (mergeCommit `1a9abe2`); PR #57
+merged the docs-only closeout and flipped Phase
+11C.1C-C-B-B-B-B to `ACCEPTED`. The operator-VPS 10 min WS
+paper smoke evidence was accepted as well-formed
+(`duration_seconds=600.0`, `uptime≈608s`, `ws_first=true`,
+`ws_real_transport=true`, `ingestion_errors=0`, `HTTP
+429=0`, `HTTP 418=0`), and the runtime / daily-report /
+Phase 8.5 export pipeline is functional
+(`REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=1`,
+`REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=5`, the daily
+report contains the new `## Phase 11C.1C-C-B-B-B-B Regime
+& Cluster Cohort Evidence Pack v0` section).
 
-  - Docs-only kickoff PR introduces Phase 11C.1C-C-B-B-B-C
-    at `NEXT_ALLOWED / NOT_STARTED` with full scope,
-    boundary, and forbidden list (mirrors PR #55 for
-    B-B-B-B and PR #51 for B-B-B-A).
-  - Implementation PR ships the runtime contract +
-    pure-function module + new typed events (if any) +
-    runtime hook + daily-report section + brief-mandated
-    tests (mirrors PR #56 for B-B-B-B and PR #52 for
-    B-B-B-A).
-  - Docs-only closeout PR records the operator-VPS paper
-    smoke evidence and flips the slice to `ACCEPTED`
-    (mirrors PR #57 for B-B-B-B and PR #54 for B-B-B-A).
-  - Safety flags unchanged across the cycle (`mode=paper`,
+**However**: the window's
+`regime_cluster_evidence_status=INSUFFICIENT_SAMPLE`,
+`sample_count=14<20`, and
+`completed_tail_label_count=0<10`. **Runtime / report /
+export are correct, but the 10 min observation window is
+too short to support a Regime / Cluster right-tail
+conclusion.** The right next step is **not** to add a new
+strategy module, a new AI authority, or a new optimiser;
+the right next step is to **accumulate structural data
+across longer paper observation windows** until cohort
+samples are large enough for the Regime & Cluster Cohort
+Evidence Pack and the Paper Alpha Gate to produce
+non-`INSUFFICIENT_SAMPLE` / non-`INCONCLUSIVE` verdicts
+that a human can act on as evidence.
+
+This slice codifies that step as a **protocol** — a
+long-window paper data-collection cadence, a sample
+sufficiency rule, and cohort stability acceptance criteria
+— while keeping all of the Phase 1 safety lock invariants
+in force.
+
+### Phase 11C.1C-C-B-B-B-C scope (defined by PR #58 docs-only kickoff)
+
+  - **Long-window paper data-collection cadence
+    (operator-driven; not auto-scheduled in this PR or
+    any future PR under this slice):**
+      - **W1 — 1 h paper WS run** (first meaningful sample
+        window).
+      - **W2 — 4 h paper WS run** (cohort stability check).
+      - **W3 — 24 h paper WS run** (day-level structural
+        evidence).
+      - **W4+ — multi-day paper observation** (reserved;
+        out of scope; not implemented in this PR; not
+        auto-scheduled in this PR; will require its own
+        child slice when formally opened).
+  - **Per-window evidence the operator must capture
+    verbatim:**
+      - `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED` count.
+      - `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED` count.
+      - `PAPER_ALPHA_GATE_EVALUATED` count.
+      - `PAPER_ALPHA_RULE_EVALUATED` count.
+      - `PAPER_ALPHA_COHORT_EVALUATED` count.
+      - `PAPER_ALPHA_REPORT_GENERATED` count.
+      - daily report Regime & Cluster section
+        (`## Phase 11C.1C-C-B-B-B-B …` header + body).
+      - daily report Paper Alpha Gate section
+        (`## Phase 11C.1C-C-B-B-B-A …` header + body).
+      - `sample_count`.
+      - `completed_tail_label_count`.
+      - `regime_cluster_evidence_status` (one of
+        `INSUFFICIENT_SAMPLE` / `OBSERVE_ONLY` / `WARNING`
+        / `EVIDENCE_SIGNAL`).
+      - `paper_alpha_gate_status` (one of `PASS` / `WARN`
+        / `FAIL` / `INCONCLUSIVE`).
+      - `insufficient_sample_reasons` (verbatim list).
+      - Phase 8.5 export package (zip generated, manifest
+        event count sane, redaction applied,
+        `events.jsonl` exists).
+      - export contains `REGIME_CLUSTER_*` events.
+      - export contains `PAPER_ALPHA_*` events.
+      - safety flags (`mode=paper`, `live_trading=False`,
+        `exchange_live_orders=False`, `right_tail=False`,
+        `llm=False`, `telegram_outbound_enabled=False`,
+        `binance_private_api_enabled=False`, no API key,
+        no signed endpoint, no private WS, no `listenKey`,
+        no DeepSeek trade decision, no real Telegram
+        outbound).
+  - **Allowed outputs (docs / evidence templates only):**
+      - `long_window_run_plan`.
+      - `sample_sufficiency_checklist`.
+      - `cohort_stability_checklist`.
+      - `operator_vps_evidence_template`.
+      - `export_replay_evidence_template`.
+      - `closeout_acceptance_template`.
+
+### Phase 11C.1C-C-B-B-B-C sample sufficiency principle (carries forward verbatim)
+
+  - Low samples cannot output strong conclusions.
+  - When `completed_tail_label_count` is below the Regime
+    & Cluster Evidence Pack v0 minimum, no Regime /
+    Cluster right-tail conclusion is permitted from the
+    cohort rows.
+  - `INSUFFICIENT_SAMPLE` (Regime & Cluster) and
+    `INCONCLUSIVE` (Paper Alpha Gate) are **valid
+    outputs, not failures**.
+  - Cohort signals are only allowed once samples are
+    sufficient.
+  - Cohort signals — even when sample-sufficient — remain
+    paper-only / report-only / evidence-only.
+  - Cohort signals cannot trigger trades, modify
+    parameters, relax rules, or enter Phase 12.
+
+### Phase 11C.1C-C-B-B-B-C cohort stability principle (carries forward verbatim)
+
+  - A signal that appears in one short window and
+    disappears in the next is **not** treated as evidence.
+  - A signal that persists across W1 / W2 / W3 *and*
+    survives the Phase 8.5 export / Phase 10A replay
+    round-trip is treated as a **paper-only candidate
+    signal worth continued observation** — but it still
+    does not authorise any runtime change, parameter
+    optimisation, rule relaxation, or trade.
+  - A signal whose direction inverts across consecutive
+    windows is logged as `regime_outcome_inverted_warning`
+    and is **not** acted on.
+  - The protocol is biased toward "do nothing" when
+    stability is unclear.
+
+### Phase 11C.1C-C-B-B-B-C boundary (must hold from day one)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| `safety.forbid_*` (11 flags)                | `True` for every flag        |
+| Binance API key / secret                    | refused at construction      |
+| Signed endpoint                             | refused at allowlist check   |
+| `listenKey` / user data stream              | refused                      |
+| Private WebSocket / trading WS API          | refused                      |
+| Routed-private endpoint (`/private`)        | refused                      |
+| DeepSeek trade-decision authority           | NOT permitted                |
+| Real Telegram outbound                      | NOT permitted                |
+| Risk Engine authority                       | unchanged; remains the single trade-decision gate |
+| Execution FSM authority                     | unchanged                    |
+| Position size / leverage / stop-loss / target price | unchanged; cannot be modified by any protocol output |
+| `long_window_run_plan`                      | descriptive document only; MUST NEVER trigger a real trade |
+| `sample_sufficiency_checklist`              | descriptive document only; MUST NEVER trigger a real trade |
+| `cohort_stability_checklist`                | descriptive document only; MUST NEVER trigger a real trade |
+| `operator_vps_evidence_template`            | descriptive document only; MUST NEVER trigger a real trade |
+| `export_replay_evidence_template`           | descriptive document only; MUST NEVER trigger a real trade |
+| `closeout_acceptance_template`              | descriptive document only; MUST NEVER trigger a real trade |
+| AI authority                                | NOT permitted to decide direction / position size / leverage / stop / target / execution |
+| Automatic parameter optimisation            | NOT permitted                |
+| Reinforcement learning                      | NOT permitted                |
+| Auto-rule-relaxation on low samples         | NOT permitted                |
+| Automatic scheduling of W1 / W2 / W3 / W4+  | NOT permitted                |
+| Phase 12 (live trading)                     | FORBIDDEN                    |
+
+### Phase 11C.1C-C-B-B-B-C explicitly forbidden
+
+This slice carries forward every Phase 1 / 11C.1B /
+11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A /
+11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B
+forbidden item verbatim, and adds the following
+slice-specific forbidden items:
+
+  - Triggering a real trade.
+  - Modifying position size.
+  - Modifying leverage.
+  - Modifying stop-loss.
+  - Modifying target price.
+  - Modifying the Risk Engine.
+  - Modifying the Execution FSM.
+  - Letting AI / LLM decide direction, position size,
+    leverage, stop-loss, target price, or execution.
+  - Auto-optimising parameters in response to long-window
+    cohort signals.
+  - Auto-relaxing rules in response to low-sample windows.
+  - Auto-scheduling W1 / W2 / W3 / W4+ runs from runtime
+    code.
+  - Replacing the Regime & Cluster Cohort Evidence Pack v0
+    `INSUFFICIENT_SAMPLE` rule with a relaxed rule.
+  - Replacing the Paper Alpha Gate v0 `INCONCLUSIVE` rule
+    with a relaxed rule.
+  - Implementing the Long-Window Cohort Stability & Sample
+    Sufficiency Protocol v0 as a new runtime module — the
+    slice is intentionally **docs / evidence template
+    only** end-to-end.
+  - Adding new event types, new Python modules, or new
+    runtime behaviour at any point in this slice's
+    lifecycle.
+  - Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+    `risk/`, `execution/`, `llm/`, `telegram/`, or
+    `exchange/` at any point in this slice's lifecycle.
+  - Modifying configuration schemas, defaults, or YAML.
+  - Adding or modifying tests.
+  - Running tests as part of this kickoff PR.
+  - Flipping any phase's acceptance state.
+  - Renaming Phase 11C.1C-C-B-B-B.
+  - Phase 11C.1C-C-B-B-B-C *closeout* (out of scope for
+    this kickoff PR; will be authored after the operator
+    captures W1 / W2 / W3 paper evidence).
+  - Phase 12 / live trading kickoff.
+
+### Phase 11C.1C-C-B-B-B-C acceptance gate (placeholder; will be detailed by the closeout PR)
+
+The Phase 11C.1C-C-B-B-B-C closeout PR (a **future**
+docs-only PR; not this one) will be authored only **after**
+the operator-VPS captures the W1 / W2 / W3 paper evidence
+required by this protocol. The placeholders below record
+what the gate is **expected** to require:
+
+  - W1 (1 h) operator-VPS evidence captured verbatim
+    (event counts, daily-report sections, sufficiency
+    fields, export-bundle reference, safety-flag
+    invariants).
+  - W2 (4 h) operator-VPS evidence captured verbatim
+    (same fields).
+  - W3 (24 h) operator-VPS evidence captured verbatim
+    (same fields).
+  - Cohort stability checklist filled in across W1 / W2 /
+    W3.
+  - Either at least one window with non-`INSUFFICIENT_SAMPLE`
+    Regime & Cluster verdict, **or** an explicit recorded
+    statement that all three windows returned
+    `INSUFFICIENT_SAMPLE` and that further W4+ multi-day
+    observation is therefore the next-step
+    recommendation. **Either outcome is acceptable.**
+  - Phase 8.5 export bundle round-trip evidence captured
+    for W1 / W2 / W3.
+  - Phase 10A replay engine accepts each window's export
+    bundle without raising.
+  - Safety flags unchanged across every window
+    (`mode=paper`, `live_trading=False`,
+    `exchange_live_orders=False`, `right_tail=False`,
+    `llm=False`, `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`, no Binance API
+    key, no Binance API secret, no signed endpoint, no
+    account / order / position / leverage / margin
+    endpoint, no private WebSocket, no `listenKey`, no
+    DeepSeek trade decision, no real Telegram outbound).
+  - No `ORDER_*` / `POSITION_*` / `STOP_*` /
+    `TELEGRAM_MESSAGE_SENT` / `EXIT_TRIGGERED` event
+    emitted by any window.
+  - No protocol artefact is read by the Risk Engine or
+    the Execution FSM.
+  - Phase 12 stays `FORBIDDEN`.
+
+### Phase 11C.1C-C-B-B-B-C kickoff acceptance gate (PR #58 docs-only)
+
+  - Docs-only PR. **No code modified** under `app/`,
+    `scripts/`, `tests/`, `configs/`, `risk/`,
+    `execution/`, `llm/`, `telegram/`, or `exchange/`.
+  - **No new Python files.**
+  - **No new event types.**
+  - **No new tests.**
+  - **No tests run.**
+  - **No dry-run / smoke required** (no runtime change).
+  - **No phase acceptance state flipped.**
+  - Safety boundary held end-to-end (`mode=paper`,
     `live_trading=False`, `exchange_live_orders=False`,
     `right_tail=False`, `llm=False`,
     `telegram_outbound_enabled=False`,
@@ -1769,7 +2012,7 @@ forbidden list, and acceptance-gate placeholder. Pattern:
     account / order / position / leverage / margin
     endpoint, no private WebSocket, no `listenKey`, no
     DeepSeek trade decision, no real Telegram outbound).
-  - **Phase 12 stays FORBIDDEN.**
+  - **Phase 12 remains FORBIDDEN.**
 
 ## Phase 11C.1C-C-B-B-A acceptance evidence (closeout)
 
@@ -3192,10 +3435,34 @@ operator-VPS 10 min WS paper smoke PASSED with
 `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=1`,
 `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=5`, Phase 8.5
 export bundle generated and verified, Phase 1 safety lock
-held end-to-end); **Phase 11C.1C-C-B-B-B-C = NEXT_ALLOWED /
-NOT_STARTED** (next child slice under Phase 11C.1C-C-B-B-B
-— placeholder; not yet defined; will require its own
-docs-only kickoff PR + implementation PR + closeout PR
-cycle, mirroring the B-B-B-A and B-B-B-B pattern; paper /
-report / evidence-only when defined; no trade authority);
-and **Phase 12 remains FORBIDDEN**.
+held end-to-end); and **Phase 11C.1C-C-B-B-B-C =
+NEXT_ALLOWED / NOT_STARTED** (third child slice under
+Phase 11C.1C-C-B-B-B — *Long-Window Cohort Stability &
+Sample Sufficiency Protocol v0 / 长窗口 Cohort 稳定性与样
+本充足协议 v0*; PR #58 docs-only kickoff defines the
+slice in place; **docs / evidence-template only**
+end-to-end — no future runtime module under this slice;
+records the operator-driven long-window cadence W1 = 1 h /
+W2 = 4 h / W3 = 24 h / W4+ multi-day reserved; per-window
+evidence to be captured verbatim — `REGIME_CLUSTER_*` and
+`PAPER_ALPHA_*` event counts, daily-report Regime &
+Cluster section, daily-report Paper Alpha Gate section,
+`sample_count`, `completed_tail_label_count`,
+`regime_cluster_evidence_status`,
+`paper_alpha_gate_status`, `insufficient_sample_reasons`,
+Phase 8.5 export bundle, safety flags; sample sufficiency
+principle: low samples cannot output strong conclusions,
+`INSUFFICIENT_SAMPLE` / `INCONCLUSIVE` are valid outputs
+not failures, cohort signals only allowed once
+sample-sufficient, cohort signals remain
+paper-only / report-only / evidence-only; cohort stability
+principle: signals must persist across windows, inversion
+is a warning, biased toward "do nothing" when stability
+is unclear; allowed outputs are docs / evidence templates
+only — `long_window_run_plan`,
+`sample_sufficiency_checklist`,
+`cohort_stability_checklist`,
+`operator_vps_evidence_template`,
+`export_replay_evidence_template`,
+`closeout_acceptance_template`; no trade authority); and
+**Phase 12 remains FORBIDDEN**.
