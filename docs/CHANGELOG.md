@@ -7,6 +7,330 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-C accepted - Long-Window Cohort Stability & Sample Sufficiency Protocol v0 docs-only closeout (PR #59)
+
+**Type:** Docs-only closeout / acceptance flip.
+**Runtime effect:** **none.**
+**Phase ledger effect:** flips Phase 11C.1C-C-B-B-B-C from
+`NEXT_ALLOWED / NOT_STARTED` (defined in place by PR #58
+docs-only kickoff) to `ACCEPTED`; introduces Phase
+11C.1C-C-B-B-B-D as `NEXT_ALLOWED / NOT_STARTED`
+(placeholder; not yet defined).
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **Status: ACCEPTED (closed 2026-05-25; PR #58 docs-only
+> kickoff merged into `main` on 2026-05-25; this docs-only
+> closeout PR #59 records the operator-VPS W1 / W1+ 2 h,
+> W2 4 h, and W3 24 h upper-bound early-stop paper WS
+> evidence and flips the slice to `ACCEPTED`).**
+> Long-Window Cohort Stability & Sample Sufficiency
+> Protocol v0 / *长窗口 Cohort 稳定性与样本充足协议 v0* —
+> third child slice under the Phase 11C.1C-C-B-B-B parent
+> — paper / report / evidence only. **NOT** live trading.
+> **NOT** AI Learning. **NOT** automatic parameter
+> optimisation. **NOT** reinforcement learning. **NOT**
+> rule relaxation based on low samples. **NOT** a Risk
+> Engine change. **NOT** an Execution FSM change. **NOT**
+> the complete Strategy Validation Lab follow-up. **NOT**
+> Phase 12.
+
+#### Phase 11C.1C-C-B-B-B-C accepted (closeout summary)
+
+  - Long-window cohort stability and sample sufficiency
+    protocol completed.
+  - W1 / W1+ 2 h paper WS evidence recorded.
+  - W2 4 h paper WS evidence recorded.
+  - W3 24 h upper-bound early-stop evidence recorded.
+  - W3 reached completed-tail-label sufficiency early:
+    `total_elapsed_seconds=900`,
+    `final_tail_labels_since_start=20>=10`,
+    `SAMPLE_SUFFICIENCY_REACHED=final_tail_labels=20>=10`,
+    24 h full runtime NOT NEEDED.
+  - Export packages verified: W1 `data/reports/exports/ama_rt_test_data_1779693570447_export_d.zip`
+    `manifest_event_count=23001`
+    `EXPORT_LONG_WINDOW_W1_2H_CHECK=PASS`; W2
+    `data/reports/exports/ama_rt_test_data_1779708773055_export_8.zip`
+    `manifest_event_count=61546`
+    `EXPORT_LONG_WINDOW_W2_4H_CHECK=PASS`; W3
+    `data/reports/exports/ama_rt_test_data_1779712866542_export_6.zip`
+    generated 2026-05-25 12:41 UTC
+    `manifest_event_count=62761`
+    `EXPORT_LONG_WINDOW_W3_EARLY_STOP_CHECK=PASS`.
+  - `REGIME_CLUSTER_*` and `PAPER_ALPHA_*` events verified
+    (2 h: `PAPER_ALPHA_COHORT_EVALUATED=18`,
+    `PAPER_ALPHA_GATE_EVALUATED=3`,
+    `PAPER_ALPHA_REPORT_GENERATED=3`,
+    `PAPER_ALPHA_RULE_EVALUATED=27`,
+    `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=10`,
+    `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=2`; 4 h:
+    `PAPER_ALPHA_COHORT_EVALUATED=24`,
+    `PAPER_ALPHA_GATE_EVALUATED=4`,
+    `PAPER_ALPHA_REPORT_GENERATED=4`,
+    `PAPER_ALPHA_RULE_EVALUATED=36`,
+    `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=15`,
+    `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=3`; W3
+    export-range: `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=4`,
+    `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=20`,
+    `PAPER_ALPHA_GATE_EVALUATED=5`,
+    `PAPER_ALPHA_RULE_EVALUATED=45`,
+    `PAPER_ALPHA_COHORT_EVALUATED=30`,
+    `PAPER_ALPHA_REPORT_GENERATED=5`).
+  - `TAIL_LABEL_ASSIGNED` and `LABEL_WINDOW_COMPLETED`
+    events verified in W3 export-range
+    (`TAIL_LABEL_ASSIGNED=495`,
+    `LABEL_WINDOW_COMPLETED=495`,
+    `STRATEGY_VALIDATION_SAMPLE_CREATED=397`).
+  - No runtime behavior changed by closeout.
+  - Paper-only, no live trading, Phase 12 forbidden.
+
+#### Closeout interpretation (must be read verbatim)
+
+  - **B-B-B-C acceptance is acceptance of the long-window
+    data collection and sample-sufficiency protocol.**
+  - It does **NOT** mean any Regime / Cluster has proven
+    right-tail advantage yet.
+  - It does **NOT** mean strategy effectiveness is proven.
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise Phase 12.
+  - It does **NOT** authorise rule relaxation based on low
+    samples.
+  - It does **NOT** authorise automatic parameter
+    optimisation.
+  - It does **NOT** authorise AI Learning.
+  - It does **NOT** authorise reinforcement learning.
+  - It does **NOT** authorise changing the Risk Engine or
+    the Execution FSM.
+  - It does **NOT** authorise Phase 11C.1C-C-B-B-B-D
+    kickoff bypassing the standard gate.
+  - It records that:
+      - 2 h paper WS run works.
+      - 4 h paper WS run works.
+      - completed labels begin to appear over longer
+        windows.
+      - 24 h upper-bound early-stop works.
+      - completed-tail-label sufficiency threshold can be
+        reached early.
+      - export / replay evidence preserves the results.
+      - low-sample states remain conservative
+        (`INSUFFICIENT_SAMPLE` / `INCONCLUSIVE` are valid
+        outputs not failures).
+      - no trade authority was granted by any window.
+
+#### Important interpretation of W2
+
+The 4 h window showed **progress** from
+`completed_tail_label_count=0` (W1 / W1+ 2 h) to
+`completed_tail_label_count=2` (W2 4 h) — completed tail
+labels are starting to appear as the observation window
+lengthens, exactly as the protocol predicted. However,
+`2` is still **below the 10 completed-tail-label
+sufficiency threshold**, so
+`regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` and
+`paper_alpha_gate_status=INCONCLUSIVE` remained the
+**correct** results for W2. **This does NOT indicate
+runtime failure.** **This does NOT authorise rule
+relaxation** — the protocol's central rule is that low
+samples cannot output strong conclusions, and the rule
+holds verbatim. The right next step was therefore to
+extend the observation window further (W3 24 h
+upper-bound), which we did.
+
+#### Important interpretation of W3
+
+W3 was started as a **24 h upper-bound** paper WS run. A
+watcher monitored `final_tail_labels_since_start` and
+stopped the run early once tail-label sufficiency was
+reached (`final_tail_labels_since_start=20>=10`). The run
+terminated cleanly at `total_elapsed_seconds=900`; the
+full 24 h runtime was **not needed**. **This proves the
+B-B-B-C sample sufficiency protocol can save runtime
+while preserving evidence.** Clarification on the two W3
+numbers: `final_tail_labels_since_start=20` is the
+**watcher early-stop condition** for the 900 s live
+window; `TAIL_LABEL_ASSIGNED=495` is the **24 h
+export-range event count** captured from the Phase 8.5
+export bundle — both valid, different scopes. **Do not
+confuse the two numbers.**
+
+#### Phase 11C.1C-C-B-B-B-C acceptance does NOT authorise
+
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise live trading.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise API keys.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise private endpoints.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise DeepSeek trade decisions.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise real Telegram outbound.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise Phase 12.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise automatic parameter optimisation.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise AI Learning.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise reinforcement learning.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise rule relaxation based on low samples.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise changing the Risk Engine or the Execution
+    FSM.
+  - Phase 11C.1C-C-B-B-B-C acceptance does **NOT**
+    authorise Phase 11C.1C-C-B-B-B-D kickoff bypassing
+    the standard gate.
+  - Long-window protocol outputs and per-window outputs
+    remain paper-only / report-only / evidence-only.
+  - Long-window protocol outputs and per-window outputs
+    cannot trigger orders, leverage, position sizing,
+    stop changes, target changes, Risk Engine changes, or
+    Execution FSM changes.
+
+#### Changed
+
+- **`docs/PROJECT_STATUS.md`** — current-phase block now
+  leads with Phase 11C.1C-C-B-B-B-C = `ACCEPTED`; inline
+  summary list flips B-B-B-C from `NEXT_ALLOWED /
+  NOT_STARTED` to `ACCEPTED` with verbatim W1 / W1+ 2 h,
+  W2 4 h, W3 24 h upper-bound early-stop evidence summary
+  + adds Phase 11C.1C-C-B-B-B-D = `NEXT_ALLOWED /
+  NOT_STARTED` placeholder; "does NOT authorise" block
+  extended for B-B-B-C with the verbatim list of
+  prohibitions (live trading / API keys / private
+  endpoints / DeepSeek / Telegram / Phase 12 / parameter
+  optimisation / AI Learning / reinforcement learning /
+  rule relaxation / Risk Engine / Execution FSM / B-B-B-D
+  bypass) and the W2 progress 0→2 / W3 early-stop
+  interpretations. Per-phase table: new 2026-05-25
+  B-B-B-C closeout `ACCEPTED` row + new B-B-B-D placeholder
+  row inserted (legacy B-B-B-C kickoff row annotated
+  `SUPERSEDED`); per-phase prose section converted to
+  *ACCEPTED via PR #58 docs-only kickoff + PR #59
+  docs-only closeout* with full operator-VPS evidence
+  subsection.
+- **`docs/PHASE_GATE.md`** — Phase 11C.1C-C-B-B-B-C row
+  added to the *Closed phases* table; *Open / Reserved
+  phases* table updated (B-B-B-C → `ACCEPTED — see Closed
+  phases table above`, B-B-B-D → `NEXT_ALLOWED /
+  NOT_STARTED` placeholder); the *Open phase: Phase
+  11C.1C-C-B-B-B-C* header replaced with *Closed phase:
+  Phase 11C.1C-C-B-B-B-C (ACCEPTED)*; new *Phase
+  11C.1C-C-B-B-B-C acceptance evidence (operator-VPS W1
+  / W1+ 2 h, W2 4 h, W3 24 h upper-bound early-stop
+  paper WS evidence PASSED)* section inserted carrying
+  the verbatim W1 / W1+, W2, W3 transcripts + W3 export
+  evidence + acceptance criteria + closeout
+  interpretation; new *Open phase: Phase 11C.1C-C-B-B-B-D
+  (NEXT_ALLOWED / NOT_STARTED)* section + acceptance gate
+  placeholder; Phase 12 forbidden row updated to mention
+  B-B-B-C and B-B-B-D explicitly; *Architecture
+  governance (guidance-only; no phase change)* closing
+  paragraph refreshed (B-B-B-A = ACCEPTED; B-B-B-B =
+  ACCEPTED; B-B-B-C = ACCEPTED; B-B-B-D = NEXT_ALLOWED /
+  NOT_STARTED; Phase 12 = FORBIDDEN).
+- **`docs/PHASE_11C_1C_C_B_B_B_C_LONG_WINDOW_COHORT_STABILITY.md`**
+  — status banner flipped from `NEXT_ALLOWED / NOT_STARTED
+  (docs-only kickoff / scope alignment)` to `ACCEPTED`;
+  parent / child relationship updated to mention B-B-B-D;
+  new "Phase 11C.1C-C-B-B-B-C acceptance evidence
+  (operator-VPS W1 / W1+ 2 h, W2 4 h, W3 24 h upper-bound
+  early-stop paper WS evidence) — FILED via PR #59"
+  section added with W1 / W1+, W2, W3 verbatim
+  transcripts + W3 export-range event counts + W2
+  progress / W3 early-stop interpretations + every-gate-met
+  acceptance criteria + closeout-does-not-authorise list.
+- **`docs/CHANGELOG.md`** — *this entry*.
+
+#### Added
+
+- **`docs/PR59_DESCRIPTION.md`** (NEW) — describes this
+  docs-only closeout PR (changed files, allowed /
+  forbidden edits, confirmation checklist, acceptance
+  evidence).
+
+#### Forbidden by this PR (carries forward verbatim)
+
+- Real trading.
+- Live trading.
+- Binance API key / secret.
+- Signed endpoint / `listenKey` / private WebSocket.
+- Account / order / position / leverage / margin endpoint.
+- DeepSeek trade decision.
+- Real Telegram outbound.
+- AI deciding direction / position size / leverage / stop
+  / target / execution.
+- Automatic parameter optimisation.
+- Reinforcement learning.
+- AI Learning that auto-decides trades.
+- Auto-rule-relaxation on low samples.
+- Risk Engine override / bypass.
+- Execution FSM override / bypass.
+- Phase Gate override / bypass.
+- Modifying `app/`, `scripts/`, `tests/`, `configs/`,
+  `risk/`, `execution/`, `llm/`, `telegram/`, or
+  `exchange/`.
+- Modifying configuration schemas, defaults, or YAML.
+- Modifying strategy runtime code.
+- Adding or modifying tests.
+- Adding new Python modules.
+- Adding new event types.
+- Modifying runtime behavior.
+- Implementing new functionality.
+- Phase 11C.1C-C-B-B-B-D implementation (reserved for the
+  next child slice; will require its own kickoff PR,
+  brief, scope, boundary table, forbidden list, and
+  acceptance evidence).
+- Phase 11C.1C-C-B-B-B-D kickoff bypassing the standard
+  gate.
+- Phase 12 / live trading kickoff.
+
+#### Acceptance gate (docs-only closeout)
+
+- Docs-only PR. **No code modified** under `app/`,
+  `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`,
+  `llm/`, `telegram/`, or `exchange/`.
+- **No new Python files.**
+- **No new event types.**
+- **No new tests.**
+- **No tests run.**
+- **No dry-run / smoke required** by this PR (the
+  operator-VPS W1 / W1+ 2 h, W2 4 h, W3 24 h upper-bound
+  early-stop paper WS evidence was captured pre-PR; this
+  PR **records** the evidence in the ledger).
+- Phase 11C.1C-C-B-B-B-C flipped to `ACCEPTED`.
+- Phase 11C.1C-C-B-B-B-D introduced at `NEXT_ALLOWED /
+  NOT_STARTED`.
+- Safety boundary held end-to-end (`mode=paper`,
+  `live_trading=False`, `exchange_live_orders=False`,
+  `right_tail=False`, `llm=False`,
+  `telegram_outbound_enabled=False`,
+  `binance_private_api_enabled=False`, no API key, no
+  signed endpoint, no private WS, no `listenKey`, no
+  DeepSeek trade decision, no real Telegram outbound).
+- **Phase 12 remains FORBIDDEN.**
+
+#### Safety flags after this PR (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
 ### Docs-only - Phase 11C.1C-C-B-B-B-C (Long-Window Cohort Stability & Sample Sufficiency Protocol v0) kickoff / scope alignment (PR #58)
 
 **Type:** Docs-only kickoff / scope-alignment.
