@@ -1076,3 +1076,304 @@ The closeout will then flip the slice to `ACCEPTED`.
     any later phase
   - this PR MUST NOT implement Historical 30D+ Blind
     Replay / Walk-forward Validation
+
+
+
+---
+
+## Closeout (PR #62 — ACCEPTED)
+
+This section records the **closeout** of the Mover Capture
+Recall & Missed-Tail Coverage Audit v0 slice. The slice
+was defined in place by the docs-only kickoff PR #60,
+implemented by PR #61, and is **flipped to `ACCEPTED` by
+this docs-only closeout PR #62**. **No runtime code is
+modified by this closeout PR.** **No phase below Phase
+11C.1C-C-B-B-B-D has its acceptance state changed.** **No
+new event type, no new Python file, no new test, no
+configuration change.** Phase 12 remains **FORBIDDEN**.
+
+> **PR #62 is paper / report / evidence only.** Nothing
+> in this PR authorises a real trade, modifies a real
+> position, modifies the Risk Engine or the Execution
+> FSM, modifies `symbol_limit` / candidate-pool capacity
+> / anomaly thresholds / Regime weights, or flips a
+> Phase 1 safety flag. The Risk Engine remains the
+> single trade-decision gate. **NOT** a new strategy,
+> **NOT** a trading module, **NOT** AI Learning,
+> **NOT** automatic parameter optimisation, **NOT**
+> reinforcement learning, **NOT** rule relaxation based
+> on SAGAUSDT or any small number of movers, **NOT** a
+> Historical 30D+ Blind Replay / Walk-forward
+> Validation gate (that gate is a Phase 12 candidate
+> pre-gate and is explicitly out of scope here),
+> **NOT** the complete Strategy Validation Lab
+> follow-up, **NOT** Phase 12.
+
+### PR #61 implementation summary (recorded for closeout audit trail)
+
+  - **PR #61 implemented Phase 11C.1C-C-B-B-B-D Mover
+    Capture Recall & Missed-Tail Coverage Audit v0.**
+  - It implemented paper-only / report-only /
+    evidence-only audit logic.
+  - It does **not** implement a trading strategy.
+  - It does **not** authorise live trading.
+  - It does **not** authorise AI Learning.
+  - It does **not** authorise automatic parameter
+    optimisation.
+  - It does **not** authorise Phase 12.
+
+Implementation included:
+
+  - **Top mover reference set** — built from the public
+    24h-ticker rows, intersected with the eligible
+    USDT-perpetual universe and the `SymbolUniverse` /
+    `exchangeInfo`-as-truth catalogue.
+  - **Capture path audit** — per-mover walk over the
+    discovery-layer events emitted by Phase 11C.1B →
+    Phase 11C.1C-C-B-A.
+  - **Miss reason classification** — structured
+    `MissReason` taxonomy (13 reasons drawn verbatim
+    from the kickoff brief).
+  - **Daily report section** — new
+    `## Phase 11C.1C-C-B-B-B-D Mover Capture Recall &
+    Missed-Tail Coverage Audit v0` Markdown section with
+    every brief-mandated field.
+  - **Export / replay readable audit events** — two new
+    typed events (`MOVER_CAPTURE_RECALL_AUDIT_GENERATED`,
+    `MOVER_CAPTURE_PATH_AUDITED`) flowing through the
+    Phase 8.5 export bundle and accepted by the Phase
+    10A replay engine.
+  - **`EventRepository` integration** — events are
+    persisted alongside the rest of the Phase 11B / 11C
+    event stream.
+  - **Deterministic unit tests** — 21 cases pin every
+    brief-mandated behaviour.
+  - **Safety boundary preservation** — audit results
+    NEVER trigger orders, NEVER modify position size /
+    leverage / stop-loss / target price, NEVER modify
+    the Risk Engine / Execution FSM / `symbol_limit` /
+    candidate-pool capacity / anomaly thresholds /
+    Regime weights, NEVER call private API, NEVER touch
+    Telegram outbound / DeepSeek / live trading.
+
+### Operator-VPS 10 min WS paper smoke evidence
+
+```
+duration_seconds                = 600.0
+dry_run                         = false
+ws_first                        = true
+ws_real_transport               = true
+ingestion_errors                = 0
+risk_approved                   = 0
+HTTP 429                        = 0
+HTTP 418                        = 0
+ws_reconnect_count              = 0
+ws_stale_count                  = 0
+live_trading_enabled            = False
+exchange_live_order_enabled     = False
+llm_enabled                     = False
+right_tail_enabled              = False
+```
+
+Mover Capture event counts (events.db, authoritative):
+
+```
+MOVER_CAPTURE_RECALL_AUDIT_GENERATED = 1
+MOVER_CAPTURE_PATH_AUDITED           = 20
+```
+
+Daily report contains the new section:
+
+```
+## Phase 11C.1C-C-B-B-B-D Mover Capture Recall & Missed-Tail Coverage Audit v0
+```
+
+### Audit result
+
+```
+mover_capture_audit_status      = DEGRADED
+top_mover_count                 = 20
+captured_top_mover_count        = 4
+missed_top_mover_count          = 16
+capture_recall_rate             = 0.2000
+data_unreliable_count           = 4
+risk_rejected_mover_count       = 4
+```
+
+#### Audit-result interpretation (must be read verbatim)
+
+  - **`DEGRADED` is an accepted audit output, not a
+    runtime failure.**
+  - **`DEGRADED` means the audit layer successfully
+    surfaced coverage weakness / uncertainty.**
+  - **Captured-but-risk-rejected does not mean discovery
+    failure.** The Risk Engine remains the single
+    trade-decision gate; rejecting a captured mover for
+    sound conservative reasons is the correct paper
+    behaviour.
+  - **Missed-with-`unknown` reason is a `review` signal,
+    not permission to loosen rules.**
+  - **Low capture recall does NOT authorise automatic
+    `symbol_limit` expansion.**
+  - **Low capture recall does NOT authorise anomaly
+    threshold changes.**
+  - **Low capture recall does NOT authorise candidate
+    pool capacity changes.**
+  - **Low capture recall does NOT authorise Regime
+    weight changes.**
+  - **Low capture recall does NOT authorise Risk Engine
+    changes.**
+  - **High capture recall would also NOT authorise live
+    trading.**
+
+### Phase 8.5 export evidence
+
+```
+export_test_data                = OK
+export zip                      = data/reports/exports/ama_rt_test_data_1779721036065_export_d.zip
+manifest_event_count            = 63968
+redaction_applied               = True
+events.jsonl exists             = True
+export contains MOVER_CAPTURE_* events
+MOVER_CAPTURE_RECALL_AUDIT_GENERATED = 1
+MOVER_CAPTURE_PATH_AUDITED           = 20
+EXPORT_MOVER_CAPTURE_RECALL_CHECK = PASS
+```
+
+Export package files observed (under the export zip):
+
+  - `manifest.json`
+  - `summary_report.md`
+  - `events.jsonl`
+  - `opportunities.jsonl`
+  - `signal_snapshots.jsonl`
+  - `risk_decisions.jsonl`
+  - `state_transitions.jsonl`
+  - `capital_events.jsonl`
+  - `virtual_trade_plans.jsonl`
+
+### Why next slice is Phase 11C.1C-C-B-B-B-D-A (Historical 60D Mover Coverage Backfill Audit v0)
+
+  - PR #61 proves the audit layer can run in real paper
+    mode and export `MOVER_CAPTURE_*` evidence.
+  - However, a 10 min live window may be too short and
+    market-dependent.
+  - Example: a real mover like SAGAUSDT can be missed or
+    classified as `unknown` in a short audit window.
+  - Waiting several quiet days may waste time if the
+    market is calm.
+  - Therefore the next slice should evaluate
+    discovery-layer coverage over the past 60 days.
+  - This is **not** complete strategy blind testing.
+  - This is **not** Phase 12 pre-live validation.
+  - This is **only** a discovery-layer coverage backfill
+    audit.
+
+D-A must require:
+
+  - 60D top mover reference set;
+  - eligible USDT perpetual universe filter;
+  - `first_seen_time_utc` for every captured mover;
+  - `first_seen_event_type`;
+  - `first_seen_latency_seconds` where a mover reference
+    timestamp exists;
+  - `capture_path_depth`;
+  - per-mover status (`captured` / `partially_captured` /
+    `missed` / `excluded`);
+  - miss-reason classification;
+  - report / export / replay evidence.
+
+### Phase 11C.1C-C-B-B-B-D-A boundary (verbatim)
+
+D-A is **allowed** to answer:
+
+  - over the past 60 days, **which eligible movers did
+    AMA-RT detect**;
+  - **when did AMA-RT first detect them**;
+  - **which capture-path layer did they reach**;
+  - **which movers were missed**;
+  - **why were they missed**;
+  - **which misses are universe-coverage issues** vs.
+    discovery-layer warnings.
+
+D-A must **NOT** answer:
+
+  - whether the strategy is profitable;
+  - whether live trading is allowed;
+  - whether leverage / position / stops should change;
+  - whether `symbol_limit` should auto-expand;
+  - whether anomaly thresholds should auto-change;
+  - whether candidate pool capacity should auto-change;
+  - whether Phase 12 can begin.
+
+### Phase 11C.1C-C-B-B-B-D acceptance does NOT authorise (must be read verbatim)
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise API keys.
+  - It does **NOT** authorise private endpoints.
+  - It does **NOT** authorise DeepSeek trade decisions.
+  - It does **NOT** authorise real Telegram outbound.
+  - It does **NOT** authorise Phase 12.
+  - It does **NOT** authorise automatic parameter
+    optimisation.
+  - It does **NOT** authorise AI Learning.
+  - It does **NOT** authorise rule relaxation based on
+    SAGAUSDT or any small number of movers.
+  - It does **NOT** authorise changing the Risk Engine or
+    the Execution FSM.
+  - It does **NOT** authorise automatic `symbol_limit`
+    expansion.
+  - It does **NOT** authorise automatic anomaly threshold
+    changes.
+  - It does **NOT** authorise automatic candidate-pool
+    capacity changes.
+  - It does **NOT** authorise automatic Regime weight
+    changes.
+  - It does **NOT** authorise Phase 11C.1C-C-B-B-B-D-A
+    kickoff bypassing the standard gate.
+
+### Safety boundary held end-to-end (Phase 1 lock unchanged)
+
+| Invariant                                   | Required value               |
+| ------------------------------------------- | ---------------------------- |
+| `mode`                                      | `paper`                      |
+| `live_trading`                              | `False`                      |
+| `right_tail`                                | `False`                      |
+| `llm`                                       | `False`                      |
+| `exchange_live_orders`                      | `False`                      |
+| `telegram_outbound_enabled`                 | `False`                      |
+| `binance_private_api_enabled`               | `False`                      |
+| Binance API key                             | not loaded                   |
+| Binance API secret                          | not loaded                   |
+| signed endpoint call                        | none                         |
+| account / order / position / leverage / margin endpoint | none             |
+| private WebSocket                           | none                         |
+| `listenKey` / user data stream              | none                         |
+| DeepSeek trade decision                     | none                         |
+| real Telegram outbound                      | none                         |
+| Phase 12                                    | FORBIDDEN (gate unchanged)   |
+
+### Forbidden surfaces (verbatim)
+
+  - audit results MUST NEVER trigger a real trade
+  - audit results MUST NEVER modify position size,
+    leverage, stop-loss, target price
+  - audit results MUST NEVER modify the Risk Engine
+  - audit results MUST NEVER modify the Execution FSM
+  - audit results MUST NEVER modify `symbol_limit`
+  - audit results MUST NEVER modify candidate-pool
+    capacity
+  - audit results MUST NEVER modify anomaly thresholds
+  - audit results MUST NEVER modify Regime weights
+  - audit results MUST NEVER auto-optimise parameters
+  - a single coin (incl. SAGAUSDT) MUST NEVER authorise
+    rule relaxation
+  - low coverage MUST NOT auto-relax rules; it is a
+    `review` outcome, not a `relax` outcome
+  - high coverage MUST NOT authorise live trading
+  - this PR MUST NOT implement Phase 11C.1C-C-B-B-B-D-A
+    or any later phase
+  - this PR MUST NOT implement Historical 30D+ Blind
+    Replay / Walk-forward Validation
+  - Phase 12 remains **FORBIDDEN**
