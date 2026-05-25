@@ -495,6 +495,69 @@ class EventType(str, Enum):
         "REGIME_CLUSTER_COHORT_SUMMARY_GENERATED"
     )
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D - Mover Capture Recall & Missed-Tail
+    # Coverage Audit v0 (*异动币捕捉召回与漏捕右尾覆盖审计 v0*).
+    #
+    # The Mover Capture Recall & Missed-Tail Coverage Audit v0 is a
+    # paper-only / report-only / evidence-only coverage audit layer
+    # that institutionalises the operator's "did the system see this
+    # mover?" cross-check. It consumes existing surfaces (Binance
+    # public 24h ticker / public market data, ``EventRepository``,
+    # daily report, Phase 8.5 export / Phase 10A replay,
+    # ``StrategyValidationDataset``, ``PaperAlphaGateReport``,
+    # ``RegimeClusterEvidencePack``, ``SymbolUniverse`` /
+    # exchangeInfo-as-truth catalogue) and produces:
+    #
+    #   - one :class:`MoverCaptureRecallAuditReport` per audit
+    #     window;
+    #   - one :class:`MoverCaptureAuditRecord` per top mover
+    #     (captured, partially captured, missed, excluded, or
+    #     insufficient-data);
+    #   - per-mover capture-path evidence + miss-reason taxonomy.
+    #
+    # Phase 11C.1C-C-B-B-B-D boundary:
+    # - Every event below is paper / report / evidence only. None of
+    #   them authorises a real trade, modifies a real position, or
+    #   flips a Phase 1 safety flag.
+    # - The ``audit_status`` carried by every payload is a
+    #   *descriptive* label - one of ``CAPTURED`` /
+    #   ``PARTIALLY_CAPTURED`` / ``MISSED`` / ``EXCLUDED`` /
+    #   ``INSUFFICIENT_DATA``. It is NEVER an input to a
+    #   trade-decision pipeline; the Risk Engine remains the single
+    #   trade-decision gate.
+    # - The audit MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution FSM,
+    #   ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - This is **NOT** a new strategy, **NOT** a trading module,
+    #   **NOT** AI Learning, **NOT** automatic parameter
+    #   optimisation, **NOT** reinforcement learning, **NOT** a
+    #   Historical 30D+ Blind Replay / Walk-forward Validation gate
+    #   (that gate is a Phase 12 candidate pre-gate and is
+    #   explicitly out of scope here), **NOT** Phase 12.
+    # - Captured-but-rejected ≠ failure; missed-but-not-in-universe
+    #   ≠ failure; coverage warnings only fire when the mover is in
+    #   the eligible USDT-perpetual universe AND shows a clear
+    #   right-tail signal AND was missed for a system-correctable
+    #   reason. A single coin proves nothing.
+    # - Every payload carries ``schema_version`` so future PRs can
+    #   extend the shape; old events without the v0 sub-block remain
+    #   replayable verbatim.
+    #
+    #   MOVER_CAPTURE_RECALL_AUDIT_GENERATED - the full
+    #     :class:`MoverCaptureRecallAuditReport` payload was
+    #     assembled and is available for export / replay.
+    #   MOVER_CAPTURE_PATH_AUDITED           - one per audited top
+    #     mover. Carries the per-mover capture-path evidence + the
+    #     descriptive ``audit_status`` + the ``miss_reasons`` (if
+    #     any). Paper / evidence only - cannot trigger orders or
+    #     modify the Risk Engine / Execution FSM.
+    MOVER_CAPTURE_RECALL_AUDIT_GENERATED = (
+        "MOVER_CAPTURE_RECALL_AUDIT_GENERATED"
+    )
+    MOVER_CAPTURE_PATH_AUDITED = "MOVER_CAPTURE_PATH_AUDITED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

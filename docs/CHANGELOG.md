@@ -7,6 +7,162 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D implementation - Mover Capture Recall & Missed-Tail Coverage Audit v0 (PR #61)
+
+**Type:** Implementation. Paper / report / evidence
+only.
+**Runtime effect:** new `app/adaptive/mover_capture_recall_audit.py`
+module + new
+:class:`MoverCaptureRecallAuditRuntime` orchestrator;
+runner builds + flushes the audit on shutdown; daily
+report renders a new section with every brief-mandated
+field; two new typed events
+`MOVER_CAPTURE_RECALL_AUDIT_GENERATED` /
+`MOVER_CAPTURE_PATH_AUDITED` added to `app/core/events.py`.
+**Phase ledger effect:** Phase 11C.1C-C-B-B-B-D moves to
+`IN_REVIEW` (implementation PR #61). The slice will move
+to `ACCEPTED` after a separate docs-only **closeout** PR
+records the operator-VPS paper WS evidence.
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key,
+no Binance API secret, no signed endpoint, no
+account / order / position / leverage / margin endpoint,
+no private WebSocket, no `listenKey`, no DeepSeek trade
+decision, no real Telegram outbound. Phase 12 remains
+**FORBIDDEN**.
+**Trade authority granted:** **none.** Audit results
+NEVER trigger orders, NEVER modify position size /
+leverage / stop-loss / target price, NEVER modify the
+Risk Engine / Execution FSM / `symbol_limit` /
+candidate-pool capacity / anomaly thresholds / Regime
+weights, NEVER call private API, NEVER touch Telegram
+outbound / DeepSeek / live trading.
+
+> **Status: PAPER / REPORT / EVIDENCE ONLY.** This PR
+> implements the deterministic, paper-only Mover
+> Capture Recall & Missed-Tail Coverage Audit v0 layer
+> defined in place by the docs-only kickoff PR #60
+> (Phase 11C.1C-C-B-B-B-D). The audit institutionalises
+> "operator looks at gainer board vs. did the system
+> see it" as a structured coverage protocol, replacing
+> ad-hoc human screenshots with deterministic per-mover
+> evidence + descriptive ``audit_status`` /
+> ``miss_reasons`` taxonomies. **NOT** a new strategy,
+> **NOT** a trading module, **NOT** AI Learning, **NOT**
+> automatic parameter optimisation, **NOT**
+> reinforcement learning, **NOT** a Historical 30D+
+> Blind Replay / Walk-forward Validation gate (that
+> gate is a Phase 12 candidate pre-gate and is
+> explicitly out of scope here), **NOT** the complete
+> Strategy Validation Lab follow-up, **NOT** Phase 12.
+
+#### What changed
+
+  - **`app/core/events.py`** - added two new typed
+    events: `MOVER_CAPTURE_RECALL_AUDIT_GENERATED` (one
+    per audit window) and `MOVER_CAPTURE_PATH_AUDITED`
+    (one per audited top mover). Both are paper /
+    report / evidence only and **MUST NEVER** be
+    consumed by the Risk Engine or the Execution FSM as
+    a trade trigger.
+  - **`app/adaptive/mover_capture_recall_audit.py`** -
+    new module shipping the data models
+    (`TopMoverReference`, `CapturePathEvidence`,
+    `MoverCaptureAuditRecord`,
+    `MoverCaptureRecallAuditInput`,
+    `MoverCaptureRecallAuditReport`), the descriptive
+    status / miss-reason taxonomies
+    (`MoverCaptureRecallAuditStatus` =
+    ``OK`` / ``INSUFFICIENT_DATA`` / ``DEGRADED``;
+    `CapturePathStatus` = ``CAPTURED`` /
+    ``PARTIALLY_CAPTURED`` / ``MISSED`` / ``EXCLUDED``
+    / ``INSUFFICIENT_DATA``; `MissReason` =
+    13 brief-verbatim reasons), the deterministic pure
+    functions (`build_top_mover_reference_set`,
+    `audit_mover_capture_path`, `classify_miss_reason`,
+    `build_mover_capture_recall_audit_report`,
+    `export_mover_capture_recall_audit_payload`,
+    `load_mover_capture_recall_audit_payload`), and the
+    thin `MoverCaptureRecallAuditRuntime` orchestrator.
+  - **`scripts/run_public_market_paper.py`** - the
+    runner now builds a
+    :class:`MoverCaptureRecallAuditInput` from the
+    public radar snapshot + `EventRepository`
+    capture-path stages + `SymbolUniverse` exchangeInfo
+    bootstrap, calls
+    `MoverCaptureRecallAuditRuntime.flush(...)` on
+    shutdown, and threads the metrics into the daily
+    report via the new `mover_capture_audit_metrics`
+    kwarg. Empty input degrades safely to
+    ``INSUFFICIENT_DATA``.
+  - **`app/paper_run/daily_report.py`** - new
+    `mover_capture_audit_metrics` kwarg on `build()` /
+    `_aggregate()`. New snapshot fields:
+    `mover_capture_recall_audit_generated_count`,
+    `mover_capture_path_audited_count`,
+    `mover_capture_audit_status`, `top_mover_count`,
+    `captured_top_mover_count`,
+    `partially_captured_top_mover_count`,
+    `missed_top_mover_count`, `excluded_top_mover_count`,
+    `insufficient_data_top_mover_count`,
+    `capture_recall_rate`, `anomaly_detected_rate`,
+    `label_tracking_rate`, `tail_label_assigned_rate`,
+    `strategy_validation_sample_rate`,
+    `risk_rejected_mover_count`,
+    `not_in_universe_count`, `capacity_evicted_count`,
+    `data_unreliable_count`,
+    `median_first_seen_latency_seconds`,
+    `mover_capture_records`, `miss_reason_summary`,
+    `coverage_warnings`,
+    `mover_capture_audit_insufficient_reasons`,
+    `mover_capture_audit_warnings`,
+    `mover_capture_audit_report`. New Markdown section
+    `## Phase 11C.1C-C-B-B-B-D Mover Capture Recall &
+    Missed-Tail Coverage Audit v0` rendered with every
+    field + per-mover record table.
+  - **`tests/unit/test_phase11c_1c_c_b_b_b_d_mover_capture_recall_audit.py`**
+    - 21 new deterministic test cases covering the
+    top-mover reference set contract, full / partial /
+    missed / excluded capture audit, every miss-reason
+    classification, top-level metrics, payload
+    round-trip, EventRepository emit, replay, daily-
+    report integration, no execution side effects,
+    safety-flag invariants, and a Phase 12 surface
+    forbidden-list check.
+  - **`tests/unit/test_phase11b_no_network.py`** -
+    extended the "Phase 11B references unexpected
+    EventType values" allowlist to include
+    `MOVER_CAPTURE_RECALL_AUDIT_GENERATED` /
+    `MOVER_CAPTURE_PATH_AUDITED`. No other test or
+    behaviour changed.
+  - **`docs/PROJECT_STATUS.md`** - active-phase block
+    extended with the Phase 11C.1C-C-B-B-B-D = IN_REVIEW
+    line; timeline table extended with the implementation
+    PR row.
+  - **`docs/PHASE_GATE.md`** - added the Phase
+    11C.1C-C-B-B-B-D IN_REVIEW row directly under the
+    NEXT_ALLOWED definition row.
+  - **`docs/PHASE_11C_1C_C_B_B_B_D_MOVER_CAPTURE_RECALL_AUDIT.md`**
+    - new "Implementation (PR #61 — IN_REVIEW)" section
+    appended at the bottom of the kickoff doc with the
+    full implementation summary + safety-boundary table
+    + forbidden-surface list.
+  - **`docs/PR61_DESCRIPTION.md`** - new PR description
+    file.
+
+#### Test summary
+
+| Surface | Result |
+| ------- | ------ |
+| `tests/unit/test_phase11c_1c_c_b_b_b_d_mover_capture_recall_audit.py` | **21 / 21 PASS** |
+| `tests/unit/ -k phase11c_` | **410 / 410 PASS** (post-PR #60 baseline + 21 new) |
+| `tests/` (full surface) | **2384 / 2384 PASS** (no regression vs. post-PR #60 main baseline) |
+| 30 s `--dry-run` smoke | Daily report contains the new Phase 11C.1C-C-B-B-B-D section; `mover_capture_audit_status=INSUFFICIENT_DATA` (expected for a 30 s dry-run window — the dry-run transport does not push real ticker rows; the audit correctly degrades); explicit `mover_capture_audit_insufficient_reasons` populated; no `ORDER_*` / `POSITION_*` / `STOP_*` / `RISK_APPROVED` events emitted by the audit. |
+| Real-WS 10 min smoke | **NOT REQUIRED** for this PR. PR #61 is a deterministic coverage audit layer; non-empty top-mover coverage validation depends on a real WS push and the upstream Phase 11C.1C-C-A primary tracking window resolving. Real coverage validation is reserved for the Phase 11C.1C-C-B-B-B-D **closeout** PR. |
+
 ### Phase 11C.1C-C-B-B-B-D kickoff - Mover Capture Recall & Missed-Tail Coverage Audit v0 docs-only kickoff (PR #60)
 
 **Type:** Docs-only kickoff / scope alignment.

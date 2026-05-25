@@ -477,6 +477,24 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         # Engine remains the single trade-decision gate.
         "REGIME_CLUSTER_EVIDENCE_PACK_GENERATED",
         "REGIME_CLUSTER_COHORT_SUMMARY_GENERATED",
+        # Phase 11C.1C-C-B-B-B-D - Mover Capture Recall &
+        # Missed-Tail Coverage Audit v0. Emission lives in
+        # app/adaptive/mover_capture_recall_audit.py; the paper_run
+        # daily-report builder counts these events as a cross-check
+        # against the runtime's runner-side ``metrics_payload``.
+        # None of these events authorise a real trade; the
+        # ``audit_status`` field is descriptive (``OK`` /
+        # ``INSUFFICIENT_DATA`` / ``DEGRADED``) and the per-mover
+        # ``audit_status`` is descriptive (``CAPTURED`` /
+        # ``PARTIALLY_CAPTURED`` / ``MISSED`` / ``EXCLUDED`` /
+        # ``INSUFFICIENT_DATA``) and **MUST NEVER trigger a real
+        # trade, modify position size, leverage, stop-loss, target
+        # price, the Risk Engine, the Execution FSM,
+        # ``symbol_limit``, candidate-pool capacity, anomaly
+        # thresholds, Regime weights, or any other runtime knob**.
+        # The Risk Engine remains the single trade-decision gate.
+        "MOVER_CAPTURE_RECALL_AUDIT_GENERATED",
+        "MOVER_CAPTURE_PATH_AUDITED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (

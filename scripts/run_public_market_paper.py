@@ -94,6 +94,16 @@ from app.adaptive.strategy_validation_runtime import (  # noqa: E402
     StrategyValidationRuntime,
     StrategyValidationRuntimeConfig,
 )
+from app.adaptive.mover_capture_recall_audit import (  # noqa: E402
+    DEFAULT_MIN_PRICE_CHANGE_PCT,
+    DEFAULT_MIN_QUOTE_VOLUME_USDT,
+    DEFAULT_TOP_MOVER_LIMIT,
+    CapturePathEvidence,
+    MoverCaptureRecallAuditInput,
+    MoverCaptureRecallAuditRuntime,
+    TopMoverReference,
+    build_top_mover_reference_set,
+)
 
 from app.market_data_public import (  # noqa: E402
     AllMarketRadarBuffer,
@@ -688,6 +698,193 @@ def _push_dry_run_ws_messages(
             ],
             received_at_ms=ts_now,
         )
+    )
+
+
+def _build_mover_capture_recall_audit_input(
+    *,
+    event_repo: EventRepository,
+    radar_buffer: AllMarketRadarBuffer | None,
+    symbol_universe: SymbolUniverse | None,
+    window_start_ts: int,
+    window_end_ts: int,
+    top_mover_limit: int = DEFAULT_TOP_MOVER_LIMIT,
+    min_price_change_pct: float = DEFAULT_MIN_PRICE_CHANGE_PCT,
+    min_quote_volume_usdt: float = DEFAULT_MIN_QUOTE_VOLUME_USDT,
+) -> MoverCaptureRecallAuditInput:
+    """Phase 11C.1C-C-B-B-B-D - assemble the audit input from
+    existing public surfaces.
+
+    Pure aside from the read-only :class:`EventRepository` lookup +
+    the radar-buffer snapshot read; never raises on missing data.
+    Both ``radar_buffer`` and ``symbol_universe`` are optional - a
+    missing surface degrades the audit safely (an empty ``top_movers``
+    yields an ``INSUFFICIENT_DATA`` report).
+
+    The helper enforces the Phase 11C.1C-C-B-B-B-D safety contract:
+
+      - it does NOT call any private API;
+      - it does NOT call any signed REST endpoint;
+      - it reads only the public radar snapshot, the EventRepository
+        capture-path stages, and the SymbolUniverse exchangeInfo
+        bootstrap;
+      - the resulting :class:`MoverCaptureRecallAuditInput` carries
+        the descriptive deny lists / stage observations the audit
+        builder needs - it does NOT mutate any of those surfaces.
+    """
+    # --- Build the top mover reference set from the radar buffer ---
+    ticker_rows: list[dict[str, Any]] = []
+    if radar_buffer is not None:
+        try:
+            for snap in radar_buffer.all_snapshots():
+                pct = (
+                    float(snap.price_change_pct_24h)
+                    if snap.price_change_pct_24h is not None
+                    else 0.0
+                )
+                qv = float(getattr(snap, "quote_volume", 0.0) or 0.0)
+                last_price = float(getattr(snap, "last_price", 0.0) or 0.0)
+                ticker_rows.append(
+                    {
+                        "symbol": str(snap.symbol),
+                        # The radar buffer normalises Binance's
+                        # ``priceChangePercent`` (a percent-string
+                        # like ``"15.2"``) into a decimal fraction
+                        # (``0.152``); mark that with the
+                        # ``price_change_pct`` key so
+                        # :func:`build_top_mover_reference_set` does
+                        # not divide by 100 again.
+                        "price_change_pct": pct,
+                        "quote_volume_usdt": qv,
+                        "last_price": last_price,
+                    }
+                )
+        except Exception:  # pragma: no cover - defensive
+            ticker_rows = []
+
+    known_universe: tuple[str, ...] = ()
+    if symbol_universe is not None:
+        try:
+            known_universe = tuple(
+                str(s) for s in symbol_universe.valid_symbol_set
+            )
+        except Exception:  # pragma: no cover - defensive
+            known_universe = ()
+
+    top_movers = build_top_mover_reference_set(
+        ticker_rows=ticker_rows,
+        known_universe=known_universe,
+        not_usdt_perpetual_symbols=(),
+        min_price_change_pct=float(min_price_change_pct),
+        min_quote_volume_usdt=float(min_quote_volume_usdt),
+        top_mover_limit=int(top_mover_limit),
+        now_ms_value=int(window_start_ts),
+    )
+
+    # --- Walk the EventRepository for capture-path stages + deny
+    # lists. The audit MUST tolerate a missing repository row.
+    stage_observations: dict[str, dict[str, CapturePathEvidence]] = {}
+    risk_rejected: set[str] = set()
+    data_unreliable: set[str] = set()
+    candidate_pool_evicted: set[str] = set()
+
+    target_event_types = (
+        "MARKET_SNAPSHOT",
+        "PRE_ANOMALY_DETECTED",
+        "ANOMALY_DETECTED",
+        "MARKET_REGIME_ASSESSED",
+        "CANDIDATE_STAGE_CLASSIFIED",
+        "OPPORTUNITY_SCORED",
+        "STRATEGY_MODE_SELECTED",
+        "CLUSTER_CONTEXT_ATTACHED",
+        "LABEL_QUEUE_ENQUEUED",
+        "LABEL_TRACKING_STARTED",
+        "LABEL_WINDOW_COMPLETED",
+        "TAIL_LABEL_ASSIGNED",
+        "STRATEGY_VALIDATION_SAMPLE_CREATED",
+        "RISK_REJECTED",
+        "DATA_UNRELIABLE",
+    )
+
+    def _record(symbol: str, stage: str, event) -> None:
+        sym = str(symbol or "").strip()
+        if not sym:
+            return
+        per_sym = stage_observations.setdefault(sym, {})
+        existing = per_sym.get(stage)
+        ts = int(getattr(event, "timestamp", 0) or 0)
+        eid = str(getattr(event, "event_id", "") or "")
+        if existing is None:
+            per_sym[stage] = CapturePathEvidence(
+                stage=stage,
+                observed=True,
+                count=1,
+                first_seen_ts=ts,
+                last_seen_ts=ts,
+                event_ids=(eid,) if eid else (),
+            )
+        else:
+            new_event_ids = list(existing.event_ids)
+            if eid and len(new_event_ids) < 8 and eid not in new_event_ids:
+                new_event_ids.append(eid)
+            per_sym[stage] = CapturePathEvidence(
+                stage=stage,
+                observed=True,
+                count=int(existing.count) + 1,
+                first_seen_ts=min(int(existing.first_seen_ts) or ts, ts)
+                if existing.first_seen_ts
+                else ts,
+                last_seen_ts=max(int(existing.last_seen_ts) or ts, ts),
+                event_ids=tuple(new_event_ids),
+            )
+
+    try:
+        events = event_repo.list_events(
+            event_types=target_event_types,
+            since_ts=int(window_start_ts) if window_start_ts else None,
+            until_ts=int(window_end_ts) if window_end_ts else None,
+        )
+    except Exception:  # pragma: no cover - defensive
+        events = []
+
+    for event in events:
+        event_type_value = (
+            event.event_type.value
+            if hasattr(event.event_type, "value")
+            else str(event.event_type)
+        )
+        sym = str(event.symbol or "").strip()
+        if not sym:
+            payload = event.payload or {}
+            if isinstance(payload, dict):
+                sym = str(payload.get("symbol") or "").strip()
+        if not sym:
+            continue
+        # Stage record - one stage per known event type.
+        if event_type_value in target_event_types:
+            _record(sym, event_type_value, event)
+        if event_type_value == "RISK_REJECTED":
+            risk_rejected.add(sym)
+        if event_type_value == "DATA_UNRELIABLE":
+            data_unreliable.add(sym)
+        # Detect candidate-pool eviction tag in payload.
+        payload = event.payload or {}
+        if isinstance(payload, dict):
+            reason = str(payload.get("reason") or "").lower()
+            if "evict" in reason:
+                candidate_pool_evicted.add(sym)
+
+    return MoverCaptureRecallAuditInput(
+        top_movers=tuple(top_movers),
+        known_universe=known_universe,
+        risk_rejected_symbols=tuple(sorted(risk_rejected)),
+        data_unreliable_symbols=tuple(sorted(data_unreliable)),
+        candidate_pool_evicted_symbols=tuple(
+            sorted(candidate_pool_evicted)
+        ),
+        stage_observations=stage_observations,
+        window_start_ts=int(window_start_ts),
+        window_end_ts=int(window_end_ts),
     )
 
 
@@ -1603,6 +1800,51 @@ def main(argv: list[str] | None = None) -> int:
 
     # 11. Build the daily report on shutdown.
     daily_report_path = None
+    # ----------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D - Mover Capture Recall & Missed-Tail
+    # Coverage Audit v0. Paper / report / evidence only. The audit
+    # consumes the public radar snapshot + the EventRepository
+    # capture-path stage observations + the SymbolUniverse
+    # exchangeInfo bootstrap and produces a descriptive
+    # :class:`MoverCaptureRecallAuditReport`. Nothing the audit
+    # produces authorises a real trade or modifies any runtime
+    # knob; the Risk Engine remains the single trade-decision gate.
+    mover_capture_audit_metrics: dict[str, Any] = {}
+    try:
+        mover_audit_runtime = MoverCaptureRecallAuditRuntime(
+            event_repo=event_repo
+        )
+        mover_audit_input = _build_mover_capture_recall_audit_input(
+            event_repo=event_repo,
+            radar_buffer=radar_buffer,
+            symbol_universe=locals().get("symbol_universe", None),
+            window_start_ts=int(stats.started_at_ms),
+            window_end_ts=int(
+                stats.finished_at_ms
+                if stats.finished_at_ms
+                else now_ms()
+            ),
+            top_mover_limit=DEFAULT_TOP_MOVER_LIMIT,
+            min_price_change_pct=DEFAULT_MIN_PRICE_CHANGE_PCT,
+            min_quote_volume_usdt=DEFAULT_MIN_QUOTE_VOLUME_USDT,
+        )
+        mover_audit_runtime.flush(
+            mover_audit_input,
+            generated_at_ms=int(
+                stats.finished_at_ms
+                if stats.finished_at_ms
+                else now_ms()
+            ),
+            emit_events=True,
+        )
+        mover_capture_audit_metrics = (
+            mover_audit_runtime.metrics_payload()
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        stats.notes.append(
+            f"mover_capture_audit_error:{type(exc).__name__}"
+        )
+
     if args.write_daily_report:
         try:
             daily_dir = settings.data_dir / "reports/phase11c"
@@ -1665,6 +1907,9 @@ def main(argv: list[str] | None = None) -> int:
                 label_runtime_metrics=dict(stats.label_runtime_metrics),
                 strategy_validation_metrics=dict(
                     stats.strategy_validation_metrics
+                ),
+                mover_capture_audit_metrics=dict(
+                    mover_capture_audit_metrics
                 ),
             )
             daily_report_path = (
