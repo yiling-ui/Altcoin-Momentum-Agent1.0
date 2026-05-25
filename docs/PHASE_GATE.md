@@ -38,6 +38,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report / evidence-only first child slice under Phase 11C.1C-C-B-B-B) | 2026-05-24 | PR #52 merged into `main` (mergeCommit `f8ba315`); this docs-only closeout PR #54 records the operator-VPS paper evidence and flips the slice to `ACCEPTED`. Operator-VPS 10 min WS paper smoke PASSED: `duration_seconds=600.0`, `uptime≈608s`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`. Daily report contains `"## Phase 11C.1C-C-B-B-B-A Paper Alpha Gate v0"` with `paper_alpha_gate_status=INCONCLUSIVE`, `paper_alpha_gate_sample_count=20`, reason `completed_tail_label_count_below_min=0<10`. `PAPER_ALPHA_GATE_EVALUATED=1`, `PAPER_ALPHA_RULE_EVALUATED=9`, `PAPER_ALPHA_COHORT_EVALUATED=6`, `PAPER_ALPHA_REPORT_GENERATED=1`. Phase 8.5 export bundle: `data/reports/exports/ama_rt_test_data_1779627957433_export_1.zip`, `manifest_event_count=1572`, `redaction_applied=True`, `events.jsonl` exists, export contains `PAPER_ALPHA_*` events, `EXPORT_PAPER_ALPHA_GATE_CHECK=PASS`; export package files observed: `manifest.json`, `summary_report.md`, `events.jsonl`, `opportunities.jsonl`, `signal_snapshots.jsonl`, `risk_decisions.jsonl`, `state_transitions.jsonl`, `capital_events.jsonl`, `virtual_trade_plans.jsonl`. `paper_alpha_gate_status=INCONCLUSIVE` is the **expected and accepted** result for this smoke window because `completed_tail_label_count=0<10` — the Paper Alpha Gate correctly refused to overfit or force a `PASS` when completed tail labels were insufficient; `INCONCLUSIVE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise live trading, does NOT authorise Phase 12. Paper Alpha Gate verdicts remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes; the Risk Engine remains the single trade-decision gate. Safety flags unchanged across the operator-VPS run. See "Closed phase: Phase 11C.1C-C-B-B-B-A (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-A acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. |
 | 11C.1C-C-B-B-B-B | Regime & Cluster Cohort Evidence Pack v0 (paper / report / evidence-only second child slice under Phase 11C.1C-C-B-B-B) | 2026-05-24 | PR #56 merged into `main` (mergeCommit `1a9abe2`); this docs-only closeout PR #57 records the operator-VPS paper evidence and flips the slice to `ACCEPTED`. Operator-VPS 10 min WS paper smoke PASSED: `duration_seconds=600.0`, `uptime≈608s`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`. Daily report contains `"## Phase 11C.1C-C-B-B-B-B Regime & Cluster Cohort Evidence Pack v0"` with `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE`, `sample_count=14`, `completed_tail_label_count=0`, `insufficient_sample_reasons=[sample_count_below_min=14<20, completed_tail_label_count_below_min=0<10]`. `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=1`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=5`. Phase 8.5 export bundle: `data/reports/exports/ama_rt_test_data_1779635774169_export_d.zip`, `manifest_event_count=3151`, `redaction_applied=True`, `events.jsonl` exists, export contains `REGIME_CLUSTER_*` events, `EXPORT_REGIME_CLUSTER_EVIDENCE_CHECK=PASS`; export package files observed: `manifest.json`, `summary_report.md`, `events.jsonl`, `opportunities.jsonl`, `signal_snapshots.jsonl`, `risk_decisions.jsonl`, `state_transitions.jsonl`, `capital_events.jsonl`, `virtual_trade_plans.jsonl`. `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` is the **expected and accepted** result for this smoke window because `sample_count=14<20` and `completed_tail_label_count=0<10` — the Regime & Cluster Evidence Pack correctly refused to overfit or force a regime / cluster conclusion when structural samples were insufficient; `INSUFFICIENT_SAMPLE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise rule relaxation, does NOT authorise live trading, does NOT authorise Phase 12. Regime & Cluster Evidence Pack outputs remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes; the Risk Engine remains the single trade-decision gate. Safety flags unchanged across the operator-VPS run. See "Closed phase: Phase 11C.1C-C-B-B-B-B (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-B acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. |
 | 11C.1C-C-B-B-B-C | Long-Window Cohort Stability & Sample Sufficiency Protocol v0 (*长窗口 Cohort 稳定性与样本充足协议 v0*; docs / evidence-template-only third child slice under Phase 11C.1C-C-B-B-B) | 2026-05-25 | PR #58 docs-only kickoff merged into `main`; this docs-only closeout PR #59 records the operator-VPS W1 / W1+ 2 h, W2 4 h, and W3 24 h upper-bound early-stop paper WS evidence and flips the slice to `ACCEPTED`. **W1 / W1+ 2 h paper WS run PASSED**: `duration_seconds=7200.0`, `uptime≈7238s`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`, `risk_approved=0`, live trading disabled; 2 h event counts `PAPER_ALPHA_COHORT_EVALUATED=18`, `PAPER_ALPHA_GATE_EVALUATED=3`, `PAPER_ALPHA_REPORT_GENERATED=3`, `PAPER_ALPHA_RULE_EVALUATED=27`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=10`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=2`; daily report contains both the Paper Alpha Gate section and the Regime & Cluster Cohort Evidence Pack section; `regime_cluster_sample_count=189`, `regime_cluster_completed_tail_label_count=0`, status remained `INSUFFICIENT_SAMPLE` / `INCONCLUSIVE` because `completed_tail_label_count=0<10` (accepted as valid low-completed-label evidence, not runtime failure); 2 h export `data/reports/exports/ama_rt_test_data_1779693570447_export_d.zip`, `manifest_event_count=23001`, `redaction_applied=True`, `EXPORT_LONG_WINDOW_W1_2H_CHECK=PASS`. **W2 4 h paper WS run PASSED**: configured `duration_seconds=14400.0`, actual runtime ≈ `14417s`, `iterations=237`, `chains_emitted=704`, `ws_chains_emitted=704`, `ws_real_transport=True`, `ws_reconnect_count=0`, `ws_staleness_ms_max=0`, `ws_stale_count=0`, `ingestion_errors=0`, `public_endpoint_calls=4226`, `ws_messages_received=1324423`, `radar_candidates_seen=152221`, `candidate_pool_size_max=20`, `liquidation_events_seen=4076`, `rate_limit_429_count=0`, `rate_limit_418_count=0`, `rate_limit_ban=False`, `risk_approved=0`, `risk_rejected=704`; 4 h event counts `PAPER_ALPHA_COHORT_EVALUATED=24`, `PAPER_ALPHA_GATE_EVALUATED=4`, `PAPER_ALPHA_REPORT_GENERATED=4`, `PAPER_ALPHA_RULE_EVALUATED=36`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=15`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=3`; daily report `paper_alpha_gate_status=INCONCLUSIVE`, `paper_alpha_gate_sample_count=164`, reason `completed_tail_label_count_below_min=2<10`; `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE`, `regime_cluster_sample_count=164`, `regime_cluster_completed_tail_label_count=2`, reason `completed_tail_label_count_below_min=2<10` — progress from 0 to 2 completed labels, still below the 10-label threshold, therefore `INCONCLUSIVE` / `INSUFFICIENT_SAMPLE` remained the correct result (does NOT indicate runtime failure; does NOT authorise rule relaxation); 4 h export `data/reports/exports/ama_rt_test_data_1779708773055_export_8.zip`, `manifest_event_count=61546`, `redaction_applied=True`, `EXPORT_LONG_WINDOW_W2_4H_CHECK=PASS`. **W3 24 h upper-bound run PASSED with watcher early-stop**: `total_elapsed_seconds=900`, `final_tail_labels_since_start=20`, `SAMPLE_SUFFICIENCY_REACHED=final_tail_labels=20>=10`, 24 h full runtime NOT NEEDED — proves the B-B-B-C sample sufficiency protocol can save runtime while preserving evidence; W3 safety summary held end-to-end (`mode=paper`, `live_trading=False`, `right_tail=False`, `llm=False`, `exchange_live_orders=False`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`, `risk_approved=0`, `ingestion_errors=0`, `rate_limit_429_count=0`, `rate_limit_418_count=0`, `ws_real_transport=True`); watcher logs `data/logs/pr58_w3_24h_ws_2026-05-25T11:56:10Z.log`, `data/logs/pr58_w3_24h_watch_2026-05-25T11:56:10Z.log`. **W3 export PASSED**: latest export zip after W3 early-stop `data/reports/exports/ama_rt_test_data_1779712866542_export_6.zip`, generated 2026-05-25 12:41 UTC, `manifest_event_count=62761`, `redaction_applied=True`, `events.jsonl` exists, `EXPORT_LONG_WINDOW_W3_EARLY_STOP_CHECK=PASS`; W3 export-range event counts `TAIL_LABEL_ASSIGNED=495`, `LABEL_WINDOW_COMPLETED=495`, `STRATEGY_VALIDATION_SAMPLE_CREATED=397`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=4`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=20`, `PAPER_ALPHA_GATE_EVALUATED=5`, `PAPER_ALPHA_RULE_EVALUATED=45`, `PAPER_ALPHA_COHORT_EVALUATED=30`, `PAPER_ALPHA_REPORT_GENERATED=5` (clarification: `final_tail_labels_since_start=20` is the watcher early-stop condition for the 900 s live window; `TAIL_LABEL_ASSIGNED=495` is the 24 h export-range event count — both valid, different scopes). **B-B-B-C acceptance is acceptance of the long-window data collection and sample-sufficiency protocol.** It does **NOT** mean any Regime / Cluster has proven right-tail advantage yet, does **NOT** mean strategy effectiveness is proven, does **NOT** authorise live trading, does **NOT** authorise rule relaxation based on low samples, does **NOT** authorise automatic parameter optimisation, does **NOT** authorise AI Learning, does **NOT** authorise changing the Risk Engine or the Execution FSM, does **NOT** authorise Phase 12. It records: 2 h run works; 4 h run works; completed labels begin to appear over longer windows; 24 h upper-bound early-stop works; completed-tail-label sufficiency threshold can be reached early; export / replay evidence preserves the results; low-sample states remain conservative; no trade authority granted. Long-window protocol outputs (`long_window_run_plan`, `sample_sufficiency_checklist`, `cohort_stability_checklist`, `operator_vps_evidence_template`, `export_replay_evidence_template`, `closeout_acceptance_template`) remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes; the Risk Engine remains the single trade-decision gate. Safety flags unchanged across W1 / W1+ 2 h, W2 4 h, and W3 24 h upper-bound early-stop runs. See "Closed phase: Phase 11C.1C-C-B-B-B-C (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-C acceptance evidence (operator-VPS W1 / W1+ 2 h, W2 4 h, W3 24 h upper-bound early-stop paper WS evidence PASSED)" below. |
+| 11C.1C-C-B-B-B-D | Mover Capture Recall & Missed-Tail Coverage Audit v0 (*异动币捕捉召回与漏捕右尾覆盖审计 v0*; paper / report / evidence-only fourth child slice under Phase 11C.1C-C-B-B-B) | 2026-05-25 | PR #60 docs-only kickoff merged into `main`; PR #61 implementation merged into `main`; this docs-only closeout PR #62 records the operator-VPS 10 min WS paper smoke evidence + daily report Mover Capture section + `MOVER_CAPTURE_*` event counts + Phase 8.5 export bundle + audit result `mover_capture_audit_status=DEGRADED` and flips the slice to `ACCEPTED`. **Operator-VPS 10 min WS paper smoke PASSED**: `duration_seconds=600.0`, `dry_run=false`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `risk_approved=0`, `HTTP 429=0`, `HTTP 418=0`, `ws_reconnect_count=0`, `ws_stale_count=0`, `live_trading_enabled=False`, `exchange_live_order_enabled=False`, `llm_enabled=False`, `right_tail_enabled=False`. **Mover Capture event counts**: `MOVER_CAPTURE_RECALL_AUDIT_GENERATED=1`, `MOVER_CAPTURE_PATH_AUDITED=20`. **Daily report** contains `## Phase 11C.1C-C-B-B-B-D Mover Capture Recall & Missed-Tail Coverage Audit v0` section. **Audit result**: `mover_capture_audit_status=DEGRADED`, `top_mover_count=20`, `captured_top_mover_count=4`, `missed_top_mover_count=16`, `capture_recall_rate=0.2000`, `data_unreliable_count=4`, `risk_rejected_mover_count=4`. `DEGRADED` is the **expected and accepted** audit output for this smoke window because the audit layer successfully surfaced coverage weakness / uncertainty — `DEGRADED` is **NOT** a runtime failure; captured-but-risk-rejected does **NOT** mean discovery failure; missed-with-unknown reason is a `review` signal, **not** permission to loosen rules; low capture recall does **NOT** authorise automatic `symbol_limit` expansion / anomaly threshold changes / candidate pool capacity changes / Regime weight changes / Risk Engine changes; high capture recall would also **NOT** authorise live trading. **Phase 8.5 export bundle**: `data/reports/exports/ama_rt_test_data_1779721036065_export_d.zip`, `manifest_event_count=63968`, `redaction_applied=True`, `events.jsonl` exists, export contains `MOVER_CAPTURE_*` events, `MOVER_CAPTURE_RECALL_AUDIT_GENERATED=1`, `MOVER_CAPTURE_PATH_AUDITED=20`, `EXPORT_MOVER_CAPTURE_RECALL_CHECK=PASS`; export package files observed: `manifest.json`, `summary_report.md`, `events.jsonl`, `opportunities.jsonl`, `signal_snapshots.jsonl`, `risk_decisions.jsonl`, `state_transitions.jsonl`, `capital_events.jsonl`, `virtual_trade_plans.jsonl`. Mover Capture Recall & Missed-Tail Coverage Audit v0 outputs (`top_mover_capture_summary` / `captured_mover_evidence` / `missed_mover_audit` / `symbol_universe_exclusion_summary` / `candidate_eviction_summary` / `risk_rejection_summary` / `first_seen_latency_summary` / `capture_recall_rate` / `missed_tail_candidate_list` / `coverage_warning` / `insufficient_coverage_reasons`) remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes; the Risk Engine remains the single trade-decision gate. Safety flags unchanged across the operator-VPS run. See "Closed phase: Phase 11C.1C-C-B-B-B-D (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-D acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. |
 
 
 ## Open / Reserved phases
@@ -48,10 +49,9 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #52 + PR #54 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-A is now `ACCEPTED` (PR #52 merged into `main` on 2026-05-24, mergeCommit `f8ba315`; this docs-only closeout PR #54 records the operator-VPS paper evidence). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript, the Paper Alpha Gate daily-report excerpt, the four `PAPER_ALPHA_*` event counts, the Phase 8.5 export bundle reference, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-A (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-A acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `paper_alpha_gate_status=INCONCLUSIVE` was an **expected and accepted** result for this smoke window because `completed_tail_label_count=0<10`; the Paper Alpha Gate correctly refused to overfit or force a `PASS`. `INCONCLUSIVE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise live trading, does NOT authorise Phase 12. Paper Alpha Gate verdicts remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-B | Regime & Cluster Cohort Evidence Pack v0 (paper / report / evidence-only second child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #56 implementation + PR #57 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-B is now `ACCEPTED` (PR #56 merged into `main` on 2026-05-24, mergeCommit `1a9abe2`; this docs-only closeout PR #57 records the operator-VPS paper evidence). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript, the Regime & Cluster Cohort Evidence Pack daily-report excerpt, the two `REGIME_CLUSTER_*` event counts, the Phase 8.5 export bundle reference, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-B (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-B acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` was an **expected and accepted** result for this smoke window because `sample_count=14<20` and `completed_tail_label_count=0<10`; the Regime & Cluster Evidence Pack correctly refused to overfit or force a regime / cluster conclusion when structural samples were insufficient. `INSUFFICIENT_SAMPLE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise rule relaxation, does NOT authorise live trading, does NOT authorise Phase 12. Regime & Cluster Evidence Pack outputs remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-C | Long-Window Cohort Stability & Sample Sufficiency Protocol v0 (*长窗口 Cohort 稳定性与样本充足协议 v0*; docs / evidence-template-only third child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #58 docs-only kickoff + PR #59 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-C is now `ACCEPTED` (PR #58 docs-only kickoff merged into `main`; this docs-only closeout PR #59 records the operator-VPS W1 / W1+ 2 h, W2 4 h, and W3 24 h upper-bound early-stop paper WS evidence and flips the slice to `ACCEPTED`). The full closeout — including the W1 / W1+ 2 h paper WS run transcript (`duration_seconds=7200.0`, `uptime≈7238s`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`, `risk_approved=0`, live trading disabled; 2 h event counts; daily report with `regime_cluster_sample_count=189`, `completed_tail_label_count=0`, status `INSUFFICIENT_SAMPLE` / `INCONCLUSIVE` accepted as valid low-completed-label evidence; 2 h export `data/reports/exports/ama_rt_test_data_1779693570447_export_d.zip`, `manifest_event_count=23001`, `EXPORT_LONG_WINDOW_W1_2H_CHECK=PASS`), the W2 4 h paper WS run transcript (configured `duration_seconds=14400.0`, actual runtime ≈ `14417s`, `iterations=237`, `chains_emitted=704`, `ws_messages_received=1324423`, `radar_candidates_seen=152221`, `liquidation_events_seen=4076`, `risk_rejected=704`; 4 h event counts; `paper_alpha_gate_status=INCONCLUSIVE` `sample_count=164` reason `completed_tail_label_count_below_min=2<10`; `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` `sample_count=164` `completed_tail_label_count=2` reason `completed_tail_label_count_below_min=2<10` — progress from 0 to 2 completed labels still below the 10-label threshold, therefore `INCONCLUSIVE` / `INSUFFICIENT_SAMPLE` remained the correct result; 4 h export `data/reports/exports/ama_rt_test_data_1779708773055_export_8.zip`, `manifest_event_count=61546`, `EXPORT_LONG_WINDOW_W2_4H_CHECK=PASS`), the W3 24 h upper-bound watcher early-stop transcript (`total_elapsed_seconds=900`, `final_tail_labels_since_start=20>=10`, `SAMPLE_SUFFICIENCY_REACHED=final_tail_labels=20>=10`, 24 h full runtime NOT NEEDED, safety summary held end-to-end; watcher logs `data/logs/pr58_w3_24h_ws_2026-05-25T11:56:10Z.log`, `data/logs/pr58_w3_24h_watch_2026-05-25T11:56:10Z.log`), and the W3 export evidence (latest export zip after W3 early-stop `data/reports/exports/ama_rt_test_data_1779712866542_export_6.zip`, generated 2026-05-25 12:41 UTC, `manifest_event_count=62761`, `EXPORT_LONG_WINDOW_W3_EARLY_STOP_CHECK=PASS`; W3 export-range event counts `TAIL_LABEL_ASSIGNED=495`, `LABEL_WINDOW_COMPLETED=495`, `STRATEGY_VALIDATION_SAMPLE_CREATED=397`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=4`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=20`, `PAPER_ALPHA_GATE_EVALUATED=5`, `PAPER_ALPHA_RULE_EVALUATED=45`, `PAPER_ALPHA_COHORT_EVALUATED=30`, `PAPER_ALPHA_REPORT_GENERATED=5`; clarification — `final_tail_labels_since_start=20` is the watcher early-stop condition for the 900 s live window, `TAIL_LABEL_ASSIGNED=495` is the 24 h export-range event count, do not confuse the two numbers, both valid, different scopes) — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-C (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-C acceptance evidence (operator-VPS W1 / W1+ 2 h, W2 4 h, W3 24 h upper-bound early-stop paper WS evidence PASSED)" below. **B-B-B-C acceptance is acceptance of the long-window data collection and sample-sufficiency protocol** — it does **NOT** mean any Regime / Cluster has proven right-tail advantage yet, does **NOT** mean strategy effectiveness is proven, does **NOT** authorise live trading, does **NOT** authorise rule relaxation based on low samples, does **NOT** authorise automatic parameter optimisation, does **NOT** authorise AI Learning, does **NOT** authorise changing the Risk Engine or the Execution FSM, does **NOT** authorise Phase 12. It records that 2 h works, 4 h works, completed labels begin to appear over longer windows, 24 h upper-bound early-stop works, completed-tail-label sufficiency threshold can be reached early, export / replay evidence preserves the results, low-sample states remain conservative, and no trade authority was granted. Long-window protocol outputs remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
-| 11C.1C-C-B-B-B-D | Next child slice (placeholder; not yet defined) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-C is now `ACCEPTED` (PR #58 docs-only kickoff merged into `main`; closeout via PR #59), so Phase 11C.1C-C-B-B-B-D is now **NEXT_ALLOWED**; no implementation has started; no kickoff PR has been opened. The child slice is **not yet defined by name or scope** in this PR — Phase 11C.1C-C-B-B-B-C acceptance does **NOT** authorise Phase 11C.1C-C-B-B-B-D kickoff bypassing the standard gate. Phase 11C.1C-C-B-B-B-D will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. The parent phase is **not** renamed: Phase 11C.1C-C-B-B-B remains *Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up*. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C forbidden item verbatim. Paper / report / evidence-only; grants no trade authority. Phase 12 remains **FORBIDDEN**. |
-| 11C.1C-C-B-B-B-D | Mover Capture Recall & Missed-Tail Coverage Audit v0 / *异动币捕捉召回与漏捕右尾覆盖审计 v0* (paper / report / evidence-only fourth child slice under Phase 11C.1C-C-B-B-B; defined in place by docs-only kickoff PR #60) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-C is now `ACCEPTED` (PR #58 docs-only kickoff merged into `main`; closeout via PR #59), so Phase 11C.1C-C-B-B-B-D is **NEXT_ALLOWED**. This docs-only kickoff PR #60 **defines** the slice in place — name, scope, boundary, allowed outputs, forbidden list, key metrics, interpretation principles, audit cadence (A1 / A2 with A3+ reserved), audit input sources (Binance public 24 h ticker / public market data, `EventRepository`, daily report, Phase 8.5 export / Phase 10A replay, `StrategyValidationDataset`, `PaperAlphaGateReport`, `RegimeClusterEvidencePack`, `SymbolUniverse` / `exchangeInfo`-as-truth catalogue, candidate pool logs / capacity-eviction evidence where available), audit objects (top gainers / top movers in eligible USDT-perpetual universe, detected anomalies, pre-anomaly candidates, label-tracked candidates, validation samples, risk-rejected movers, movers excluded because not in the current tradable universe), and acceptance-gate placeholder — but **does NOT flip its state**. The slice answers seven coverage questions: (1) did real movers get captured by the system, (2) at which discovery layer (`MARKET_SNAPSHOT` / `PRE_ANOMALY_DETECTED` / `ANOMALY_DETECTED` / `MARKET_REGIME_ASSESSED` / `CANDIDATE_STAGE_CLASSIFIED` / `OPPORTUNITY_SCORED` / `STRATEGY_MODE_SELECTED` / `CLUSTER_CONTEXT_ATTACHED` / `LABEL_QUEUE_ENQUEUED` / `LABEL_TRACKING_STARTED` / `LABEL_WINDOW_COMPLETED` / `TAIL_LABEL_ASSIGNED` / `STRATEGY_VALIDATION_SAMPLE_CREATED`), (3) if missed, why (taxonomy: `not_in_futures_universe`, `not_in_exchange_info`, `not_usdt_perpetual`, `symbol_limit_excluded`, `candidate_pool_capacity_evicted`, `score_too_low`, `liquidity_insufficient`, `data_stale_or_degraded_or_unreliable`, `risk_rejected`, `no_completed_tail_label_yet`), (4) whether top movers were captured early enough (`first_seen_latency_seconds`, `median_first_seen_latency_seconds`), (5) whether captured movers proceeded into the label / validation pipeline (`label_tracking_rate`, `tail_label_assigned_rate`, `strategy_validation_sample_rate`), (6) whether missed movers are a system-coverage problem or a market / exchange-coverage problem, and (7) whether captured-but-rejected movers were rejected for sound conservative reasons. Allowed outputs (descriptive only): `top_mover_capture_summary`, `captured_mover_evidence`, `missed_mover_audit`, `symbol_universe_exclusion_summary`, `candidate_eviction_summary`, `risk_rejection_summary`, `first_seen_latency_summary`, `capture_recall_rate`, `missed_tail_candidate_list`, `coverage_warning`, `insufficient_coverage_reasons`. Trigger context: SAGAUSDT showed an obvious move on Binance's public 24 h gainer board; the system already captured SAGAUSDT end-to-end through `PRE_ANOMALY_DETECTED` → `ANOMALY_DETECTED` → `MARKET_REGIME_ASSESSED` → `CANDIDATE_STAGE_CLASSIFIED` → `OPPORTUNITY_SCORED` → `STRATEGY_MODE_SELECTED` → `CLUSTER_CONTEXT_ATTACHED` → `LABEL_QUEUE_ENQUEUED` → `LABEL_TRACKING_STARTED` → `TAIL_LABEL_ASSIGNED` → `STRATEGY_VALIDATION_SAMPLE_CREATED`; one coin proves nothing — the audit institutionalises "human looks at gainer board vs. did the system see it" as a coverage protocol, not as ad-hoc human screenshots. Interpretation principles (must be read verbatim): captured-but-rejected ≠ failure; missed-but-not-in-universe ≠ failure; coverage warning is only raised when the mover is in the eligible universe AND shows clear right-tail behaviour AND was missed for a system-correctable reason; a single mover (incl. SAGAUSDT) proves nothing and does NOT authorise rule relaxation; capture audit ≠ trading-profit evidence; low coverage is a `review` outcome, not a `relax` outcome; high coverage does not authorise live trading; single-coin / "妖币" reframing is forbidden. **NOT** a new strategy. **NOT** a trading module. **NOT** AI Learning. **NOT** automatic parameter optimisation. **NOT** Historical 30D+ Blind Replay / Walk-forward Validation (that gate is reserved for a Phase 12 candidate review and is explicitly out of scope here; it belongs after the major paper modules and the paper validation chain are complete, before small-money live trading). **NOT** a continued widening of system complexity. NOT authorised by Phase 11C.1C-C-B-B-B-C acceptance bypassing the standard gate; will require its own *closeout* PR (a separate docs-only PR after the operator captures A1 / A2 audit evidence) to flip the slice to `ACCEPTED`. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C forbidden item verbatim. Paper / report / evidence-only; grants no trade authority. Phase 12 remains **FORBIDDEN**. |
-| 11C.1C-C-B-B-B-D | Mover Capture Recall & Missed-Tail Coverage Audit v0 / *异动币捕捉召回与漏捕右尾覆盖审计 v0* — implementation (paper / report / evidence-only) | **IN_REVIEW** | Implementation PR (this PR) wires the deterministic, paper-only audit layer into the runtime: `app/adaptive/mover_capture_recall_audit.py` carries the data models (`TopMoverReference`, `CapturePathEvidence`, `MoverCaptureAuditRecord`, `MoverCaptureRecallAuditInput`, `MoverCaptureRecallAuditReport`), the descriptive status taxonomies (`MoverCaptureRecallAuditStatus = OK / INSUFFICIENT_DATA / DEGRADED`; `CapturePathStatus = CAPTURED / PARTIALLY_CAPTURED / MISSED / EXCLUDED / INSUFFICIENT_DATA`), the structured `MissReason` taxonomy (`not_in_futures_universe` / `symbol_not_in_exchange_info` / `not_usdt_perpetual` / `below_liquidity_threshold` / `symbol_limit_excluded` / `candidate_pool_evicted` / `insufficient_ws_data` / `stale_data` / `data_unreliable` / `no_anomaly_threshold_cross` / `risk_rejected` / `no_completed_tail_label_yet` / `unknown`), the deterministic pure functions (`build_top_mover_reference_set`, `audit_mover_capture_path`, `classify_miss_reason`, `build_mover_capture_recall_audit_report`, `export_mover_capture_recall_audit_payload`, `load_mover_capture_recall_audit_payload`), and a thin `MoverCaptureRecallAuditRuntime` orchestrator that emits two new typed events (`MOVER_CAPTURE_RECALL_AUDIT_GENERATED`, `MOVER_CAPTURE_PATH_AUDITED`) through `EventRepository`. The runner (`scripts/run_public_market_paper.py`) builds the audit input from the public radar snapshot + `EventRepository` capture-path stages + `SymbolUniverse` (`exchangeInfo`-as-truth) catalogue, calls `MoverCaptureRecallAuditRuntime.flush(...)` on shutdown, and threads the resulting `metrics_payload()` into the daily report via the new `mover_capture_audit_metrics` kwarg. The daily report (`app/paper_run/daily_report.py`) renders a new `## Phase 11C.1C-C-B-B-B-D Mover Capture Recall & Missed-Tail Coverage Audit v0` section with every brief-mandated field (`mover_capture_audit_status`, `top_mover_count`, `captured_top_mover_count`, `partially_captured_top_mover_count`, `missed_top_mover_count`, `excluded_top_mover_count`, `capture_recall_rate`, `anomaly_detected_rate`, `label_tracking_rate`, `tail_label_assigned_rate`, `strategy_validation_sample_rate`, `risk_rejected_mover_count`, `mover_capture_records`, `miss_reason_summary`, `coverage_warnings`). Empty `top_mover_count` produces an `INSUFFICIENT_DATA` report (does NOT skip). Captured-but-risk-rejected ≠ failure; missed-but-not-in-eligible-universe ≠ failure; coverage warnings only fire when the mover is eligible AND shows a clear right-tail signal AND was missed for a system-correctable reason; a single coin proves nothing and does NOT authorise rule relaxation. Tests (`tests/unit/test_phase11c_1c_c_b_b_b_d_mover_capture_recall_audit.py`, 21 cases) pin every brief-mandated behaviour: top-mover reference set contract, full / partial / missed / excluded capture audit, every miss-reason classification, top-level metrics, payload round-trip, EventRepository emit, replay, daily-report integration, no execution side effects, safety flags unchanged, Phase 12 surface forbidden. **`tests/unit/test_phase11c_1c_c_b_b_b_d_mover_capture_recall_audit.py 21/21 PASS`**, **`tests/unit/ -k phase11c_ 410/410 PASS`**, **`tests/ 2384/2384 PASS`**. 30 s `--dry-run` smoke writes the new daily-report section with `mover_capture_audit_status=INSUFFICIENT_DATA` and `top_mover_count=0` (expected — the dry-run transport does not push real ticker rows; the audit correctly degrades). Real WS smoke is **NOT** required for this PR (the audit is a deterministic coverage layer; real top mover coverage validation is reserved for the Phase 11C.1C-C-B-B-B-D closeout / operator-VPS run). Phase 8.5 export bundle continues to carry `MOVER_CAPTURE_*` events; ReplayEngine accepts them without raising; no Phase 8.5 / Phase 10A regression. Audit results NEVER trigger orders, NEVER modify position size / leverage / stop-loss / target price, NEVER modify the Risk Engine / Execution FSM / `symbol_limit` / candidate-pool capacity / anomaly thresholds / Regime weights, NEVER call private API, NEVER touch Telegram outbound / DeepSeek / live trading. Closeout (operator-VPS paper smoke + daily report excerpt + Phase 8.5 export evidence + safety-flag invariants) will be a separate PR; this PR remains `IN_REVIEW` until that closeout merges. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C forbidden item verbatim. Paper / report / evidence-only; grants no trade authority. Phase 12 remains **FORBIDDEN**. |
-| 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A acceptance, Phase 11C.1C-C-B-B-B-A acceptance, Phase 11C.1C-C-B-B-B-B acceptance, Phase 11C.1C-C-B-B-B-C acceptance, Phase 11C.1C-C-B-B-B-D kickoff via PR #60, Phase 11C.1C-C-B-B-B, or any other Phase 11C sub-phase). |
+| 11C.1C-C-B-B-B-D | Mover Capture Recall & Missed-Tail Coverage Audit v0 / *异动币捕捉召回与漏捕右尾覆盖审计 v0* (paper / report / evidence-only fourth child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #60 docs-only kickoff + PR #61 implementation + PR #62 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-D is now `ACCEPTED` (PR #60 docs-only kickoff merged into `main`; PR #61 implementation merged into `main`; this docs-only closeout PR #62 records the operator-VPS 10 min WS paper smoke evidence + daily report Mover Capture section + `MOVER_CAPTURE_*` event counts + Phase 8.5 export bundle + audit result `mover_capture_audit_status=DEGRADED` and flips the slice to `ACCEPTED`). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript (`duration_seconds=600.0`, `dry_run=false`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `risk_approved=0`, `HTTP 429=0`, `HTTP 418=0`, `ws_reconnect_count=0`, `ws_stale_count=0`, `live_trading_enabled=False`, `exchange_live_order_enabled=False`, `llm_enabled=False`, `right_tail_enabled=False`), the Mover Capture Recall & Missed-Tail Coverage Audit daily-report excerpt (`mover_capture_audit_status=DEGRADED`, `top_mover_count=20`, `captured_top_mover_count=4`, `missed_top_mover_count=16`, `capture_recall_rate=0.2000`, `data_unreliable_count=4`, `risk_rejected_mover_count=4`), the two `MOVER_CAPTURE_*` event counts (`MOVER_CAPTURE_RECALL_AUDIT_GENERATED=1`, `MOVER_CAPTURE_PATH_AUDITED=20`), the Phase 8.5 export bundle reference (`data/reports/exports/ama_rt_test_data_1779721036065_export_d.zip`, `manifest_event_count=63968`, `redaction_applied=True`, `events.jsonl` exists, `EXPORT_MOVER_CAPTURE_RECALL_CHECK=PASS`), and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-D (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-D acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `mover_capture_audit_status=DEGRADED` was an **expected and accepted** audit output for this smoke window — `DEGRADED` means the audit layer successfully surfaced coverage weakness / uncertainty. **`DEGRADED` does NOT mean runtime failure.** captured-but-risk-rejected does NOT mean discovery failure; missed-with-unknown reason is a `review` signal, not permission to loosen rules; low capture recall does NOT authorise automatic `symbol_limit` expansion / anomaly threshold changes / candidate pool capacity changes / Regime weight changes / Risk Engine changes; high capture recall would also NOT authorise live trading. Mover Capture Recall & Missed-Tail Coverage Audit v0 outputs remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
+| 11C.1C-C-B-B-B-D-A | Historical 60D Mover Coverage Backfill Audit v0 (*历史 60 天异动币覆盖回填审计 v0*; paper / report / evidence-only next child slice opened by Phase 11C.1C-C-B-B-B-D acceptance via PR #62) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-B-D is now `ACCEPTED` (PR #60 docs-only kickoff + PR #61 implementation + PR #62 docs-only closeout merged into `main`), so Phase 11C.1C-C-B-B-B-D-A is **NEXT_ALLOWED**. **Not** complete strategy blind testing. **Not** Phase 12 pre-live validation. **Not** Historical 30D+ full blind replay / complete strategy walk-forward validation (that gate remains reserved until small-money live trading prep and is **out of scope** for D-A). Discovery-layer coverage backfill audit only. **Rationale:** PR #61 proved the audit layer can run in real paper mode and export `MOVER_CAPTURE_*` evidence; however a 10 min live window may be too short and market-dependent (e.g. SAGAUSDT can be missed or classified as `unknown` in a short audit window), and waiting several quiet days may waste time if the market is calm — therefore the next slice evaluates discovery-layer coverage over the past 60 days. **D-A is allowed to answer:** which eligible movers AMA-RT detected over the past 60 days; when AMA-RT first detected them; which capture-path layer they reached; which movers were missed; why they were missed; which misses are universe-coverage issues vs. discovery-layer warnings. **D-A must NOT answer:** whether the strategy is profitable; whether live trading is allowed; whether leverage / position / stops should change; whether `symbol_limit` should auto-expand; whether anomaly thresholds should auto-change; whether candidate pool capacity should auto-change; whether Phase 12 can begin. **D-A must require:** a 60D top mover reference set; an eligible USDT-perpetual universe filter; `first_seen_time_utc` for every captured mover; `first_seen_event_type`; `first_seen_latency_seconds` where a mover reference timestamp exists; `capture_path_depth`; per-mover status (`captured` / `partially_captured` / `missed` / `excluded`); miss-reason classification; report / export / replay evidence. Phase 11C.1C-C-B-B-B-D acceptance does **NOT** authorise Phase 11C.1C-C-B-B-B-D-A kickoff bypassing the standard gate; Phase 11C.1C-C-B-B-B-D-A will require its own kickoff PR, brief, scope, boundary table, forbidden list, and acceptance evidence. The parent phase is **not** renamed: Phase 11C.1C-C-B-B-B remains *Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up*. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C / 11C.1C-C-B-B-B-D forbidden item verbatim. Paper / report / evidence-only; grants no trade authority. Phase 12 remains **FORBIDDEN**. |
+| 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A acceptance, Phase 11C.1C-C-B-B-B-A acceptance, Phase 11C.1C-C-B-B-B-B acceptance, Phase 11C.1C-C-B-B-B-C acceptance, Phase 11C.1C-C-B-B-B-D acceptance via PR #62 (PR #60 docs-only kickoff + PR #61 implementation + PR #62 docs-only closeout), Phase 11C.1C-C-B-B-B, or any other Phase 11C sub-phase). |
 
 
 ### Phase 11B-HF acceptance summary
@@ -2415,13 +2415,20 @@ changes, or Phase 12. It records only that:
     outputs not failures).
   - no trade authority was granted by any window.
 
-## Open phase: Phase 11C.1C-C-B-B-B-D (NEXT_ALLOWED / NOT_STARTED)
+## Closed phase: Phase 11C.1C-C-B-B-B-D (ACCEPTED)
 
 **Phase 11C.1C-C-B-B-B-D — Mover Capture Recall &
 Missed-Tail Coverage Audit v0 / *异动币捕捉召回与漏捕右尾
-覆盖审计 v0*.** Status: **NEXT_ALLOWED / NOT_STARTED.**
+覆盖审计 v0*.** Status: **ACCEPTED (closed 2026-05-25; PR
+#60 docs-only kickoff merged into `main`; PR #61
+implementation merged into `main`; this docs-only
+closeout PR #62 records the operator-VPS 10 min WS paper
+smoke evidence + daily report Mover Capture section +
+`MOVER_CAPTURE_*` event counts + Phase 8.5 export bundle +
+audit result `mover_capture_audit_status=DEGRADED` and
+flips the slice to `ACCEPTED`).**
 Phase 11C.1C-C-B-B-B-C (*Long-Window Cohort Stability &
-Sample Sufficiency Protocol v0*) is now **ACCEPTED** (PR
+Sample Sufficiency Protocol v0*) is **ACCEPTED** (PR
 #58 docs-only kickoff merged into `main`; closeout via PR
 #59), so Phase 11C.1C-C-B-B-B-D is **NEXT_ALLOWED**.
 
@@ -2627,6 +2634,312 @@ way Phase 11C.1C-C-B-B-B-C accepted W1 / W2 windows whose
 `completed_tail_label_count<10`. Either outcome is
 acceptable as long as the audit transcript is well-formed
 and the safety lock holds.
+
+## Phase 11C.1C-C-B-B-B-D acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)
+
+> The transcript below is the verbatim operator-VPS run
+> evidence captured for Phase 11C.1C-C-B-B-B-D and is
+> recorded by this docs-only closeout PR #62. It records
+> what the operator-VPS observed during the 10 min real
+> public WS paper smoke against PR #61 head; it does
+> **not** modify any runtime behaviour, does **not**
+> enable live trading, does **not** authorise Phase 12,
+> and does **not** authorise any rule relaxation.
+> `mover_capture_audit_status=DEGRADED` is the **expected
+> and accepted** audit output for this smoke window
+> because the audit layer successfully surfaced coverage
+> weakness / uncertainty (only 4 of 20 top movers reached
+> a captured discovery layer; 4 movers had unreliable
+> data; 4 movers were captured-but-risk-rejected; the
+> remaining were missed for reasons spread across the
+> taxonomy). **`DEGRADED` does NOT mean runtime failure.**
+> captured-but-risk-rejected does **NOT** mean discovery
+> failure (the Risk Engine remains the single
+> trade-decision gate). Missed-with-unknown reason is a
+> `review` signal, **not** permission to loosen rules. Low
+> capture recall does **NOT** authorise automatic
+> `symbol_limit` expansion / anomaly threshold changes /
+> candidate pool capacity changes / Regime weight changes
+> / Risk Engine changes; high capture recall would also
+> **NOT** authorise live trading. The Risk Engine remains
+> the single trade-decision gate.
+
+### Operator-VPS 10 min WS paper smoke
+
+```
+duration_seconds                = 600.0
+dry_run                         = false
+ws_first                        = true
+ws_real_transport               = true
+ingestion_errors                = 0
+risk_approved                   = 0
+HTTP 429                        = 0
+HTTP 418                        = 0
+ws_reconnect_count              = 0
+ws_stale_count                  = 0
+live_trading_enabled            = False
+exchange_live_order_enabled     = False
+llm_enabled                     = False
+right_tail_enabled              = False
+```
+
+### Mover Capture event counts (events.db, authoritative)
+
+```
+MOVER_CAPTURE_RECALL_AUDIT_GENERATED = 1
+MOVER_CAPTURE_PATH_AUDITED           = 20
+```
+
+### Daily report excerpt — `## Phase 11C.1C-C-B-B-B-D Mover Capture Recall & Missed-Tail Coverage Audit v0`
+
+```
+mover_capture_audit_status      = DEGRADED
+top_mover_count                 = 20
+captured_top_mover_count        = 4
+missed_top_mover_count          = 16
+capture_recall_rate             = 0.2000
+data_unreliable_count           = 4
+risk_rejected_mover_count       = 4
+```
+
+### Audit-result interpretation (must be read verbatim)
+
+  - `DEGRADED` is an **accepted audit output**, **not** a
+    runtime failure.
+  - `DEGRADED` means the audit layer **successfully
+    surfaced** coverage weakness / uncertainty.
+  - Captured-but-risk-rejected does **not** mean discovery
+    failure (the Risk Engine remains the single
+    trade-decision gate).
+  - Missed-with-`unknown` reason is a `review` signal,
+    **not** permission to loosen rules.
+  - Low capture recall does **NOT** authorise automatic
+    `symbol_limit` expansion.
+  - Low capture recall does **NOT** authorise automatic
+    anomaly threshold changes.
+  - Low capture recall does **NOT** authorise automatic
+    candidate-pool capacity changes.
+  - Low capture recall does **NOT** authorise automatic
+    Regime weight changes.
+  - Low capture recall does **NOT** authorise Risk Engine
+    changes.
+  - High capture recall would also **NOT** authorise live
+    trading.
+
+### Phase 8.5 export evidence
+
+```
+export_test_data                = OK
+export zip                      = data/reports/exports/ama_rt_test_data_1779721036065_export_d.zip
+manifest_event_count            = 63968
+redaction_applied               = True
+events.jsonl exists             = True
+export contains MOVER_CAPTURE_* events
+MOVER_CAPTURE_RECALL_AUDIT_GENERATED = 1
+MOVER_CAPTURE_PATH_AUDITED           = 20
+EXPORT_MOVER_CAPTURE_RECALL_CHECK = PASS
+```
+
+Export package files observed (under the export zip):
+
+  - `manifest.json`
+  - `summary_report.md`
+  - `events.jsonl`
+  - `opportunities.jsonl`
+  - `signal_snapshots.jsonl`
+  - `risk_decisions.jsonl`
+  - `state_transitions.jsonl`
+  - `capital_events.jsonl`
+  - `virtual_trade_plans.jsonl`
+
+### Safety boundary held end-to-end (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real account / order / position / leverage / margin endpoint = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+### Closeout interpretation (must be read verbatim)
+
+  - **Phase 11C.1C-C-B-B-B-D acceptance is acceptance of
+    the Mover Capture Recall & Missed-Tail Coverage Audit
+    v0 layer.**
+  - It does **NOT** mean strategy effectiveness is proven.
+  - It does **NOT** mean any Regime / Cluster has proven
+    right-tail advantage yet.
+  - It does **NOT** mean the discovery layer is "good
+    enough" — the audit explicitly returned `DEGRADED` and
+    surfaced a 0.2000 capture recall on this 10 min
+    window.
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise API keys, private endpoints,
+    DeepSeek trade decisions, or real Telegram outbound.
+  - It does **NOT** authorise AI Learning, automatic
+    parameter optimisation, or reinforcement learning.
+  - It does **NOT** authorise rule relaxation based on
+    SAGAUSDT or any small number of movers.
+  - It does **NOT** authorise changing the Risk Engine or
+    the Execution FSM.
+  - It does **NOT** authorise automatic `symbol_limit`
+    expansion.
+  - It does **NOT** authorise automatic anomaly threshold
+    changes.
+  - It does **NOT** authorise automatic candidate-pool
+    capacity changes.
+  - It does **NOT** authorise automatic Regime weight
+    changes.
+  - It does **NOT** authorise Phase 11C.1C-C-B-B-B-D-A
+    kickoff bypassing the standard gate.
+  - It does **NOT** authorise Phase 12.
+  - It records that:
+      - the Mover Capture Recall & Missed-Tail Coverage
+        Audit v0 layer runs end-to-end against real
+        public Binance WS data,
+      - `MOVER_CAPTURE_RECALL_AUDIT_GENERATED` and
+        `MOVER_CAPTURE_PATH_AUDITED` events are emitted
+        and exported to the Phase 8.5 export bundle,
+      - the daily report renders the Mover Capture section
+        with every brief-mandated field,
+      - `DEGRADED` is a valid coverage-audit output and
+        is accepted as such,
+      - the Risk Engine remains the single trade-decision
+        gate,
+      - the Phase 1 safety lock held end-to-end,
+      - no trade authority was granted,
+      - no rule relaxation was triggered.
+
+## Open phase: Phase 11C.1C-C-B-B-B-D-A (NEXT_ALLOWED / NOT_STARTED)
+
+**Phase 11C.1C-C-B-B-B-D-A — Historical 60D Mover Coverage
+Backfill Audit v0 / *历史 60 天异动币覆盖回填审计 v0*.**
+Status: **NEXT_ALLOWED / NOT_STARTED.** Phase
+11C.1C-C-B-B-B-D (*Mover Capture Recall & Missed-Tail
+Coverage Audit v0*) is now **ACCEPTED** (PR #60 docs-only
+kickoff + PR #61 implementation + PR #62 docs-only
+closeout merged into `main`), so Phase 11C.1C-C-B-B-B-D-A
+is **NEXT_ALLOWED**.
+
+**Not** complete strategy blind testing. **Not** Phase 12
+pre-live validation. **Not** Historical 30D+ full blind
+replay / complete strategy walk-forward validation (that
+gate remains reserved until small-money live trading prep
+and is **out of scope** for D-A). Discovery-layer coverage
+backfill audit only.
+
+### Phase 11C.1C-C-B-B-B-D-A rationale
+
+PR #61 proved the Mover Capture Recall & Missed-Tail
+Coverage Audit v0 layer can run in real paper mode and
+export `MOVER_CAPTURE_*` evidence. However:
+
+  - A 10 min live window may be too short and
+    market-dependent. Example: a real mover like SAGAUSDT
+    can be missed or classified as `unknown` in a short
+    audit window.
+  - Waiting several quiet days to accumulate more 10 min
+    windows may waste time if the market is calm.
+  - Therefore the next slice should evaluate
+    **discovery-layer coverage over the past 60 days** —
+    a structured backfill audit, not a live observation
+    window.
+
+This is **not** complete strategy blind testing. It is
+**not** Phase 12 pre-live validation. It is **only** a
+discovery-layer coverage backfill audit. Historical 30D+
+full blind replay / complete strategy walk-forward
+validation remains reserved for small-money live trading
+prep and is **not** in scope for D-A.
+
+### Phase 11C.1C-C-B-B-B-D-A is allowed to answer
+
+  - Over the past 60 days, **which eligible movers did
+    AMA-RT detect**?
+  - **When did AMA-RT first detect them**?
+  - **Which capture-path layer did they reach**?
+  - **Which movers were missed**?
+  - **Why were they missed**?
+  - **Which misses are universe-coverage issues** vs.
+    discovery-layer warnings?
+
+### Phase 11C.1C-C-B-B-B-D-A must NOT answer
+
+  - whether the strategy is profitable;
+  - whether live trading is allowed;
+  - whether leverage / position / stops should change;
+  - whether `symbol_limit` should auto-expand;
+  - whether anomaly thresholds should auto-change;
+  - whether candidate pool capacity should auto-change;
+  - whether Phase 12 can begin.
+
+### Phase 11C.1C-C-B-B-B-D-A must require
+
+  - a 60D top mover reference set;
+  - an eligible USDT-perpetual universe filter;
+  - `first_seen_time_utc` for every captured mover;
+  - `first_seen_event_type`;
+  - `first_seen_latency_seconds` where a mover reference
+    timestamp exists;
+  - `capture_path_depth`;
+  - per-mover status (`captured` / `partially_captured` /
+    `missed` / `excluded`);
+  - miss-reason classification;
+  - report / export / replay evidence.
+
+### Phase 11C.1C-C-B-B-B-D-A inherited forbidden items
+
+Phase 11C.1C-C-B-B-B-D-A inherits every Phase 1 / 11C.1B /
+11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A /
+11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B /
+11C.1C-C-B-B-B-C / 11C.1C-C-B-B-B-D forbidden item
+verbatim. Specifically (non-exhaustive):
+
+  - no live trading;
+  - no API keys / secrets;
+  - no signed endpoints;
+  - no account / order / position / leverage / margin
+    endpoints;
+  - no private WebSocket / `listenKey` / user data
+    stream;
+  - no DeepSeek trade decisions;
+  - no real Telegram outbound;
+  - no AI Learning, automatic parameter optimisation, or
+    reinforcement learning;
+  - no rule relaxation based on single-coin / "妖币"
+    cases;
+  - no automatic `symbol_limit` / anomaly threshold /
+    candidate pool capacity / Regime weight changes;
+  - no Risk Engine or Execution FSM changes;
+  - no Phase 11C.1C-C-B-B-B-D-A kickoff bypassing the
+    standard gate (D-A still requires its own kickoff PR,
+    brief, scope, boundary table, forbidden list, and
+    acceptance evidence);
+  - Phase 12 remains **FORBIDDEN**.
+
+### Phase 11C.1C-C-B-B-B-D-A acceptance gate (placeholder)
+
+The Phase 11C.1C-C-B-B-B-D-A kickoff PR (a **future**
+PR; not this one) will scope the slice. A subsequent
+implementation + closeout PR cycle will produce the
+backfill audit transcript and flip D-A to `ACCEPTED`. The
+exact gate criteria (window length, top-N gainer cutoff,
+recall thresholds, etc.) will be authored alongside the
+D-A kickoff PR. This closeout PR (PR #62) **only** opens
+the slice as `NEXT_ALLOWED / NOT_STARTED`; it does
+**not** flip D-A's state.
 
 ## Phase 11C.1C-C-B-B-A acceptance evidence (closeout)
 
