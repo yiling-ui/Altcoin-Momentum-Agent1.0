@@ -398,6 +398,63 @@ class DailyReportSnapshot:
     )
     mover_capture_audit_warnings: list[str] = field(default_factory=list)
     mover_capture_audit_report: dict[str, Any] = field(default_factory=dict)
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-A - Historical 60D Mover Coverage Backfill
+    # Audit v0.
+    #
+    # The runner passes the
+    # :class:`HistoricalMoverCoverageBackfillRuntime` ``metrics_payload()``
+    # dict through ``historical_mover_coverage_metrics``; the
+    # daily-report builder surfaces the audit sub-block below. Every
+    # value is paper / report / evidence only - the
+    # ``historical_mover_backfill_status`` is a *descriptive* label
+    # (one of ``READY`` / ``PARTIAL`` / ``DEGRADED`` /
+    # ``INSUFFICIENT_HISTORY`` / ``FAILED_REFERENCE_DATA``), and the
+    # per-record ``coverage_status`` is a *descriptive* per-row label
+    # (one of ``CAPTURED`` / ``PARTIALLY_CAPTURED`` / ``MISSED`` /
+    # ``EXCLUDED``). None of these labels authorises a real trade and
+    # **MUST NEVER** modify position size, leverage, stop-loss, target
+    # price, the Risk Engine, the Execution FSM, ``symbol_limit``,
+    # candidate-pool capacity, anomaly thresholds, Regime weights, or
+    # any other runtime knob. The Risk Engine remains the single
+    # trade-decision gate. This is **NOT** a complete strategy blind
+    # replay, **NOT** a PnL backtest, **NOT** a trading module,
+    # **NOT** AI Learning, **NOT** automatic parameter optimisation,
+    # **NOT** reinforcement learning, **NOT** the small-money
+    # live-trading pre-validation gate; Phase 12 remains FORBIDDEN.
+    historical_mover_coverage_backfill_generated_count: int = 0
+    historical_mover_coverage_record_audited_count: int = 0
+    historical_mover_backfill_status: str = ""
+    historical_reference_window_days: int = 0
+    historical_history_days_observed: int = 0
+    historical_top_mover_count: int = 0
+    historical_eligible_top_mover_count: int = 0
+    historical_captured_top_mover_count: int = 0
+    historical_partially_captured_top_mover_count: int = 0
+    historical_missed_top_mover_count: int = 0
+    historical_excluded_top_mover_count: int = 0
+    historical_capture_recall_rate: float = 0.0
+    historical_partial_capture_rate: float = 0.0
+    historical_miss_rate: float = 0.0
+    historical_anomaly_detected_rate: float = 0.0
+    historical_label_tracking_rate: float = 0.0
+    historical_tail_label_assigned_rate: float = 0.0
+    historical_strategy_validation_sample_rate: float = 0.0
+    historical_risk_rejected_mover_count: int = 0
+    historical_not_in_universe_count: int = 0
+    historical_missing_event_history_count: int = 0
+    historical_data_unreliable_count: int = 0
+    historical_median_first_seen_latency_seconds: float | None = None
+    historical_p90_first_seen_latency_seconds: float | None = None
+    historical_mover_records: list[dict[str, Any]] = field(default_factory=list)
+    historical_miss_reason_summary: dict[str, int] = field(default_factory=dict)
+    historical_coverage_warnings: list[str] = field(default_factory=list)
+    historical_lookahead_guard_warnings: list[str] = field(
+        default_factory=list
+    )
+    historical_mover_coverage_report: dict[str, Any] = field(
+        default_factory=dict
+    )
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -816,6 +873,91 @@ class DailyReportSnapshot:
             "mover_capture_audit_report": dict(
                 self.mover_capture_audit_report
             ),
+            # Phase 11C.1C-C-B-B-B-D-A Historical 60D Mover Coverage
+            # Backfill Audit v0 fields. Paper / report / evidence
+            # only.
+            "historical_mover_coverage_backfill_generated_count": int(
+                self.historical_mover_coverage_backfill_generated_count
+            ),
+            "historical_mover_coverage_record_audited_count": int(
+                self.historical_mover_coverage_record_audited_count
+            ),
+            "historical_mover_backfill_status": str(
+                self.historical_mover_backfill_status
+            ),
+            "historical_reference_window_days": int(
+                self.historical_reference_window_days
+            ),
+            "historical_history_days_observed": int(
+                self.historical_history_days_observed
+            ),
+            "historical_top_mover_count": int(self.historical_top_mover_count),
+            "historical_eligible_top_mover_count": int(
+                self.historical_eligible_top_mover_count
+            ),
+            "historical_captured_top_mover_count": int(
+                self.historical_captured_top_mover_count
+            ),
+            "historical_partially_captured_top_mover_count": int(
+                self.historical_partially_captured_top_mover_count
+            ),
+            "historical_missed_top_mover_count": int(
+                self.historical_missed_top_mover_count
+            ),
+            "historical_excluded_top_mover_count": int(
+                self.historical_excluded_top_mover_count
+            ),
+            "historical_capture_recall_rate": float(
+                self.historical_capture_recall_rate
+            ),
+            "historical_partial_capture_rate": float(
+                self.historical_partial_capture_rate
+            ),
+            "historical_miss_rate": float(self.historical_miss_rate),
+            "historical_anomaly_detected_rate": float(
+                self.historical_anomaly_detected_rate
+            ),
+            "historical_label_tracking_rate": float(
+                self.historical_label_tracking_rate
+            ),
+            "historical_tail_label_assigned_rate": float(
+                self.historical_tail_label_assigned_rate
+            ),
+            "historical_strategy_validation_sample_rate": float(
+                self.historical_strategy_validation_sample_rate
+            ),
+            "historical_risk_rejected_mover_count": int(
+                self.historical_risk_rejected_mover_count
+            ),
+            "historical_not_in_universe_count": int(
+                self.historical_not_in_universe_count
+            ),
+            "historical_missing_event_history_count": int(
+                self.historical_missing_event_history_count
+            ),
+            "historical_data_unreliable_count": int(
+                self.historical_data_unreliable_count
+            ),
+            "historical_median_first_seen_latency_seconds": (
+                self.historical_median_first_seen_latency_seconds
+            ),
+            "historical_p90_first_seen_latency_seconds": (
+                self.historical_p90_first_seen_latency_seconds
+            ),
+            "historical_mover_records": list(self.historical_mover_records),
+            "historical_miss_reason_summary": {
+                k: int(v)
+                for k, v in sorted(self.historical_miss_reason_summary.items())
+            },
+            "historical_coverage_warnings": list(
+                self.historical_coverage_warnings
+            ),
+            "historical_lookahead_guard_warnings": list(
+                self.historical_lookahead_guard_warnings
+            ),
+            "historical_mover_coverage_report": dict(
+                self.historical_mover_coverage_report
+            ),
         }
 
 
@@ -864,6 +1006,7 @@ class DailyReportBuilder:
         label_runtime_metrics: Mapping[str, Any] | None = None,
         strategy_validation_metrics: Mapping[str, Any] | None = None,
         mover_capture_audit_metrics: Mapping[str, Any] | None = None,
+        historical_mover_coverage_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -948,6 +1091,9 @@ class DailyReportBuilder:
             mover_capture_audit_metrics=dict(
                 mover_capture_audit_metrics or {}
             ),
+            historical_mover_coverage_metrics=dict(
+                historical_mover_coverage_metrics or {}
+            ),
         )
 
         if write_to_disk:
@@ -977,6 +1123,7 @@ class DailyReportBuilder:
         label_runtime_metrics: Mapping[str, Any] | None = None,
         strategy_validation_metrics: Mapping[str, Any] | None = None,
         mover_capture_audit_metrics: Mapping[str, Any] | None = None,
+        historical_mover_coverage_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -2380,6 +2527,209 @@ class DailyReportBuilder:
                 )
                 or {}
             ),
+            # ----------------------------------------------------------
+            # Phase 11C.1C-C-B-B-B-D-A - Historical 60D Mover Coverage
+            # Backfill Audit v0 sub-block read off the runner-supplied
+            # :meth:`HistoricalMoverCoverageBackfillRuntime.metrics_payload`
+            # dict. Event-log counts of the two new typed events
+            # (``HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED`` /
+            # ``HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED``) are used as
+            # the cross-check / fall-back so a stale runner counter
+            # cannot under-report a real audit event.
+            historical_mover_coverage_backfill_generated_count=int(
+                max(
+                    int(
+                        (historical_mover_coverage_metrics or {}).get(
+                            "historical_mover_coverage_backfill_generated_count",
+                            0,
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            historical_mover_coverage_record_audited_count=int(
+                max(
+                    int(
+                        (historical_mover_coverage_metrics or {}).get(
+                            "historical_mover_coverage_record_audited_count",
+                            0,
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            historical_mover_backfill_status=str(
+                (historical_mover_coverage_metrics or {}).get(
+                    "backfill_status", ""
+                )
+                or ""
+            ),
+            historical_reference_window_days=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "reference_window_days", 0
+                )
+                or 0
+            ),
+            historical_history_days_observed=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "history_days_observed", 0
+                )
+                or 0
+            ),
+            historical_top_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "top_mover_count", 0
+                )
+                or 0
+            ),
+            historical_eligible_top_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "eligible_top_mover_count", 0
+                )
+                or 0
+            ),
+            historical_captured_top_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "captured_top_mover_count", 0
+                )
+                or 0
+            ),
+            historical_partially_captured_top_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "partially_captured_top_mover_count", 0
+                )
+                or 0
+            ),
+            historical_missed_top_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "missed_top_mover_count", 0
+                )
+                or 0
+            ),
+            historical_excluded_top_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "excluded_top_mover_count", 0
+                )
+                or 0
+            ),
+            historical_capture_recall_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "capture_recall_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_partial_capture_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "partial_capture_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_miss_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "miss_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_anomaly_detected_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "anomaly_detected_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_label_tracking_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "label_tracking_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_tail_label_assigned_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "tail_label_assigned_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_strategy_validation_sample_rate=float(
+                (historical_mover_coverage_metrics or {}).get(
+                    "strategy_validation_sample_rate", 0.0
+                )
+                or 0.0
+            ),
+            historical_risk_rejected_mover_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "risk_rejected_mover_count", 0
+                )
+                or 0
+            ),
+            historical_not_in_universe_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "not_in_universe_count", 0
+                )
+                or 0
+            ),
+            historical_missing_event_history_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "missing_event_history_count", 0
+                )
+                or 0
+            ),
+            historical_data_unreliable_count=int(
+                (historical_mover_coverage_metrics or {}).get(
+                    "data_unreliable_count", 0
+                )
+                or 0
+            ),
+            historical_median_first_seen_latency_seconds=(
+                (historical_mover_coverage_metrics or {}).get(
+                    "median_first_seen_latency_seconds"
+                )
+            ),
+            historical_p90_first_seen_latency_seconds=(
+                (historical_mover_coverage_metrics or {}).get(
+                    "p90_first_seen_latency_seconds"
+                )
+            ),
+            historical_mover_records=list(
+                (historical_mover_coverage_metrics or {}).get(
+                    "records", []
+                )
+                or []
+            ),
+            historical_miss_reason_summary=dict(
+                (historical_mover_coverage_metrics or {}).get(
+                    "miss_reason_summary", {}
+                )
+                or {}
+            ),
+            historical_coverage_warnings=list(
+                (historical_mover_coverage_metrics or {}).get(
+                    "coverage_warnings", []
+                )
+                or []
+            ),
+            historical_lookahead_guard_warnings=list(
+                (historical_mover_coverage_metrics or {}).get(
+                    "lookahead_guard_warnings", []
+                )
+                or []
+            ),
+            historical_mover_coverage_report=dict(
+                (historical_mover_coverage_metrics or {}).get(
+                    "report", {}
+                )
+                or {}
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -3270,6 +3620,157 @@ class DailyReportBuilder:
         else:
             mover_capture_record_lines = "- (no records in this window)"
 
+        # ---- Phase 11C.1C-C-B-B-B-D-A Historical 60D Mover Coverage
+        # Backfill Audit v0. Paper / report / evidence only. The
+        # ``historical_mover_backfill_status`` is a *descriptive*
+        # roll-up (one of ``READY`` / ``PARTIAL`` / ``DEGRADED`` /
+        # ``INSUFFICIENT_HISTORY`` / ``FAILED_REFERENCE_DATA``); the
+        # per-record ``coverage_status`` is a *descriptive* per-row
+        # label (one of ``CAPTURED`` / ``PARTIALLY_CAPTURED`` /
+        # ``MISSED`` / ``EXCLUDED``). None of these labels authorises
+        # a real trade and **MUST NEVER** modify position size,
+        # leverage, stop-loss, target price, the Risk Engine, the
+        # Execution FSM, ``symbol_limit``, candidate-pool capacity,
+        # anomaly thresholds, Regime weights, or any other runtime
+        # knob. The Risk Engine remains the single trade-decision
+        # gate.
+        median_latency_s = snapshot.historical_median_first_seen_latency_seconds
+        p90_latency_s = snapshot.historical_p90_first_seen_latency_seconds
+        median_latency_str = (
+            f"{float(median_latency_s):.4f}"
+            if median_latency_s is not None
+            else "(n/a)"
+        )
+        p90_latency_str = (
+            f"{float(p90_latency_s):.4f}"
+            if p90_latency_s is not None
+            else "(n/a)"
+        )
+        historical_block = (
+            f"- HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED count: "
+            f"**{snapshot.historical_mover_coverage_backfill_generated_count}**\n"
+            f"- HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED count: "
+            f"**{snapshot.historical_mover_coverage_record_audited_count}**\n"
+            f"- Historical mover backfill status: "
+            f"**{snapshot.historical_mover_backfill_status or '(not evaluated)'}**\n"
+            f"- Reference window days: "
+            f"**{snapshot.historical_reference_window_days}**\n"
+            f"- History days observed: "
+            f"**{snapshot.historical_history_days_observed}**\n"
+            f"- Historical top mover count: "
+            f"**{snapshot.historical_top_mover_count}**\n"
+            f"- Historical eligible top mover count: "
+            f"**{snapshot.historical_eligible_top_mover_count}**\n"
+            f"- Historical captured top mover count: "
+            f"**{snapshot.historical_captured_top_mover_count}**\n"
+            f"- Historical partially captured top mover count: "
+            f"**{snapshot.historical_partially_captured_top_mover_count}**\n"
+            f"- Historical missed top mover count: "
+            f"**{snapshot.historical_missed_top_mover_count}**\n"
+            f"- Historical excluded top mover count: "
+            f"**{snapshot.historical_excluded_top_mover_count}**\n"
+            f"- Historical capture recall rate: "
+            f"**{snapshot.historical_capture_recall_rate:.4f}**\n"
+            f"- Historical partial capture rate: "
+            f"**{snapshot.historical_partial_capture_rate:.4f}**\n"
+            f"- Historical miss rate: "
+            f"**{snapshot.historical_miss_rate:.4f}**\n"
+            f"- Historical anomaly detected rate: "
+            f"**{snapshot.historical_anomaly_detected_rate:.4f}**\n"
+            f"- Historical label tracking rate: "
+            f"**{snapshot.historical_label_tracking_rate:.4f}**\n"
+            f"- Historical tail-label assigned rate: "
+            f"**{snapshot.historical_tail_label_assigned_rate:.4f}**\n"
+            f"- Historical strategy validation sample rate: "
+            f"**{snapshot.historical_strategy_validation_sample_rate:.4f}**\n"
+            f"- Historical risk-rejected mover count: "
+            f"**{snapshot.historical_risk_rejected_mover_count}**\n"
+            f"- Historical not-in-universe mover count: "
+            f"**{snapshot.historical_not_in_universe_count}**\n"
+            f"- Historical missing-event-history mover count: "
+            f"**{snapshot.historical_missing_event_history_count}**\n"
+            f"- Historical data-unreliable mover count: "
+            f"**{snapshot.historical_data_unreliable_count}**\n"
+            f"- Historical median first-seen latency (seconds): "
+            f"**{median_latency_str}**\n"
+            f"- Historical p90 first-seen latency (seconds): "
+            f"**{p90_latency_str}**\n"
+        )
+
+        if snapshot.historical_coverage_warnings:
+            historical_coverage_lines = "\n".join(
+                f"- `{w}`" for w in snapshot.historical_coverage_warnings
+            )
+        else:
+            historical_coverage_lines = (
+                "- (no historical coverage warnings in this window)"
+            )
+
+        if snapshot.historical_lookahead_guard_warnings:
+            historical_guard_lines = "\n".join(
+                f"- `{w}`"
+                for w in snapshot.historical_lookahead_guard_warnings
+            )
+        else:
+            historical_guard_lines = (
+                "- (no historical lookahead-guard warnings in this window)"
+            )
+
+        if snapshot.historical_miss_reason_summary:
+            historical_miss_lines = "\n".join(
+                f"- `{r}` x {c}"
+                for r, c in sorted(
+                    snapshot.historical_miss_reason_summary.items()
+                )
+            )
+        else:
+            historical_miss_lines = (
+                "- (no historical miss reasons recorded in this window)"
+            )
+
+        if snapshot.historical_mover_records:
+            limit = 20
+            parts: list[str] = []
+            for rec in snapshot.historical_mover_records[:limit]:
+                if not isinstance(rec, Mapping):
+                    continue
+                sym = str(rec.get("symbol", ""))
+                status = str(rec.get("coverage_status", ""))
+                miss = rec.get("miss_reason") or "-"
+                first_seen_ms = rec.get("first_seen_time_utc_ms")
+                first_seen = (
+                    datetime.fromtimestamp(
+                        int(first_seen_ms) / 1000.0, tz=timezone.utc
+                    ).isoformat()
+                    if first_seen_ms is not None
+                    else "(n/a)"
+                )
+                event_type = rec.get("first_seen_event_type") or "(n/a)"
+                latency = rec.get("first_seen_latency_seconds")
+                latency_str = (
+                    f"{float(latency):.2f}" if latency is not None else "(n/a)"
+                )
+                rank = rec.get("top_mover_rank")
+                rank_str = str(rank) if rank is not None else "(n/a)"
+                gain = rec.get("max_window_gain")
+                gain_str = (
+                    f"{float(gain):.4f}" if gain is not None else "(n/a)"
+                )
+                parts.append(
+                    f"- `{sym}` rank={rank_str} max_window_gain={gain_str} "
+                    f"status=**{status}** first_seen_time_utc=`{first_seen}` "
+                    f"first_seen_event_type=`{event_type}` "
+                    f"first_seen_latency_seconds={latency_str} "
+                    f"miss_reason=`{miss}`"
+                )
+            historical_record_lines = "\n".join(parts) or (
+                "- (no historical records in this window)"
+            )
+        else:
+            historical_record_lines = (
+                "- (no historical records in this window)"
+            )
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -3517,6 +4018,48 @@ class DailyReportBuilder:
             f"{mover_capture_miss_lines}\n\n"
             f"### Mover capture records (per top mover)\n"
             f"{mover_capture_record_lines}\n\n"
+            f"## Phase 11C.1C-C-B-B-B-D-A Historical 60D Mover Coverage "
+            f"Backfill Audit v0\n"
+            f"_Historical 60D Mover Coverage Backfill Audit v0 sub-blocks "
+            f"are paper / report / evidence-only. The "
+            f"`historical_mover_backfill_status` is a **descriptive** "
+            f"roll-up (one of `READY` / `PARTIAL` / `DEGRADED` / "
+            f"`INSUFFICIENT_HISTORY` / `FAILED_REFERENCE_DATA`); the "
+            f"per-record `coverage_status` is a **descriptive** per-row "
+            f"label (one of `CAPTURED` / `PARTIALLY_CAPTURED` / "
+            f"`MISSED` / `EXCLUDED`). None of these labels authorises "
+            f"a real trade and **MUST NEVER** modify position size, "
+            f"leverage, stop-loss, target price, the Risk Engine, the "
+            f"Execution FSM, `symbol_limit`, candidate-pool capacity, "
+            f"anomaly thresholds, Regime weights, or any other runtime "
+            f"knob. The Risk Engine remains the single trade-decision "
+            f"gate. `first_seen_time_utc` is the core acceptance "
+            f"field: it MUST come from the timestamp of an event that "
+            f"already existed at audit time (Lookahead Guard). "
+            f"`completed_tail_label` / `final_max_gain` / future "
+            f"return MUST NEVER drive reference selection or pollute "
+            f"the simulated live-radar score. The Historical Market "
+            f"Store serves the right-tail coverage audit only - it "
+            f"does NOT serve auto-trading and audit results MUST "
+            f"NEVER trigger real trades, modify positions, leverage, "
+            f"stops, targets, the Risk Engine, the Execution FSM, "
+            f"`symbol_limit`, candidate-pool capacity, anomaly "
+            f"thresholds, Regime weights, or any other runtime knob. "
+            f"This is **NOT** a complete strategy blind replay, "
+            f"**NOT** a PnL backtest, **NOT** a trading module, "
+            f"**NOT** AI Learning, **NOT** automatic parameter "
+            f"optimisation, **NOT** reinforcement learning, **NOT** "
+            f"the small-money live-trading pre-validation gate; "
+            f"Phase 12 remains FORBIDDEN._\n\n"
+            f"{historical_block}\n"
+            f"### Historical mover coverage warnings\n"
+            f"{historical_coverage_lines}\n\n"
+            f"### Historical mover lookahead-guard warnings\n"
+            f"{historical_guard_lines}\n\n"
+            f"### Historical mover miss reason summary\n"
+            f"{historical_miss_lines}\n\n"
+            f"### Historical mover records (per historical top mover)\n"
+            f"{historical_record_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"

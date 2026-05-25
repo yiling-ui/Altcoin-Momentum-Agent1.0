@@ -558,6 +558,76 @@ class EventType(str, Enum):
     )
     MOVER_CAPTURE_PATH_AUDITED = "MOVER_CAPTURE_PATH_AUDITED"
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-A - Historical 60D Mover Coverage Backfill
+    # Audit v0 (*历史 60 天异动币覆盖回填审计 v0*).
+    #
+    # The Historical 60D Mover Coverage Backfill Audit v0 is a
+    # paper-only / report-only / evidence-only DISCOVERY-LAYER
+    # historical coverage audit. It consumes existing surfaces
+    # (a local Historical Market Store of public Binance 24h
+    # ticker / klines / exchangeInfo snapshots, the existing
+    # ``EventRepository`` event log, the Phase 11C.1C-C-B-B-B-D
+    # ``MoverCaptureRecallAuditReport``, the
+    # ``StrategyValidationDataset``, the ``PaperAlphaGateReport``,
+    # the ``RegimeClusterEvidencePack``, the ``SymbolUniverse`` /
+    # exchangeInfo-as-truth catalogue) and produces:
+    #
+    #   - one :class:`HistoricalMoverCoverageBackfillReport` per
+    #     audit window (default: the trailing 60 days);
+    #   - one :class:`HistoricalMoverCoverageRecord` per top mover
+    #     in the historical reference set (CAPTURED /
+    #     PARTIALLY_CAPTURED / MISSED / EXCLUDED).
+    #
+    # Phase 11C.1C-C-B-B-B-D-A boundary:
+    # - Every event below is paper / report / evidence only. None
+    #   of them authorises a real trade, modifies a real position,
+    #   or flips a Phase 1 safety flag.
+    # - The ``backfill_status`` carried by every payload is a
+    #   *descriptive* roll-up - one of ``READY`` / ``PARTIAL`` /
+    #   ``DEGRADED`` / ``INSUFFICIENT_HISTORY`` /
+    #   ``FAILED_REFERENCE_DATA``. It is NEVER an input to a
+    #   trade-decision pipeline; the Risk Engine remains the
+    #   single trade-decision gate.
+    # - The audit MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution
+    #   FSM, ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - This is **NOT** a complete strategy blind replay, **NOT**
+    #   a PnL backtest, **NOT** a trading module, **NOT** AI
+    #   Learning, **NOT** automatic parameter optimisation,
+    #   **NOT** reinforcement learning, **NOT** the small-money
+    #   live-trading pre-validation gate, **NOT** Phase 12.
+    # - Lookahead Guard (carried in the payload, the docs, and
+    #   every event): completed_tail_label MUST NOT drive
+    #   reference selection, future return / final max gain MUST
+    #   NOT pollute the simulated live radar score, replay label
+    #   MUST NOT contaminate ``first_seen_time``, reflection /
+    #   report text / LLM narrative MUST NOT serve as a capture
+    #   event source, ``first_seen_time`` MUST come from the
+    #   timestamp of an event that already existed at audit time,
+    #   and the top-mover reference set MUST only be used for
+    #   post-hoc audit (it cannot rewrite past decisions).
+    # - Every payload carries ``schema_version`` so future PRs
+    #   can extend the shape; old events without the v0 sub-block
+    #   remain replayable verbatim.
+    #
+    #   HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED - the full
+    #     :class:`HistoricalMoverCoverageBackfillReport` payload
+    #     was assembled and is available for export / replay.
+    #   HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED      - one per
+    #     audited historical top mover. Carries the per-mover
+    #     capture-path evidence + the descriptive
+    #     ``coverage_status`` + the ``miss_reason`` (if any).
+    #     Paper / evidence only - cannot trigger orders or
+    #     modify the Risk Engine / Execution FSM.
+    HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED = (
+        "HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED"
+    )
+    HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED = (
+        "HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED"
+    )
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

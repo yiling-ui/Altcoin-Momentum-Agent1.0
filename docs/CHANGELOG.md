@@ -7,6 +7,134 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-A implementation - Historical 60D Mover Coverage Backfill Audit v0 (PR #64)
+
+**Type:** Implementation PR (paper / report / evidence only).
+**Runtime effect:** new audit module wired into the Phase 11C
+public-market paper runner; the runner generates a
+`HistoricalMoverCoverageBackfillReport` on shutdown and embeds
+the new section in the daily Markdown report. No live trading
+behaviour changes.
+**Phase ledger effect:** flips Phase 11C.1C-C-B-B-B-D-A from
+`NEXT_ALLOWED / NOT_STARTED` to **`IN_REVIEW`** (PR #64). A
+separate docs-only closeout PR is required after the operator
+captures real 60D backfill evidence.
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+
+> **Status: IMPLEMENTATION PR.** This PR ships the v0 engine /
+> payload / report / lookahead-guard implementation for Phase
+> 11C.1C-C-B-B-B-D-A (*Historical 60D Mover Coverage Backfill
+> Audit v0 / 历史 60 天异动币覆盖回填审计 v0*). The audit is
+> paper / report / evidence only. **No** real trade is
+> authorised; **no** position size, leverage, stop-loss, target
+> price, Risk Engine threshold, Execution FSM rule,
+> `symbol_limit`, candidate-pool capacity, anomaly threshold,
+> Regime weight, or any other runtime knob is modified by this
+> PR or by any audit result it produces. The Risk Engine
+> remains the single trade-decision gate. Phase 12 remains
+> **FORBIDDEN**.
+
+#### Implementation summary
+
+  - New module `app/adaptive/historical_mover_coverage_backfill.py`
+    with the data models, deterministic pure functions, the
+    Lookahead Guard helpers, the Historical Market Store loader,
+    and the runtime:
+      - `HistoricalMoverCoverageBackfillStatus` (`READY` /
+        `PARTIAL` / `DEGRADED` / `INSUFFICIENT_HISTORY` /
+        `FAILED_REFERENCE_DATA`).
+      - `HistoricalMoverCoverageStatus` (`CAPTURED` /
+        `PARTIALLY_CAPTURED` / `MISSED` / `EXCLUDED`).
+      - `HistoricalMoverMissReason` taxonomy (15 reasons,
+        matching the brief verbatim).
+      - `HistoricalMoverReference`,
+        `HistoricalMoverReferenceSet`,
+        `HistoricalMoverCapturePath`,
+        `HistoricalMoverCoverageRecord`,
+        `HistoricalMoverCoverageBackfillInput`,
+        `HistoricalMoverCoverageBackfillReport`.
+      - `build_historical_60d_mover_reference_set(...)` (pure
+        function).
+      - `audit_historical_mover_capture_path(...)` (pure
+        function).
+      - `classify_historical_miss_reason(...)` (pure function).
+      - `build_historical_mover_coverage_backfill_report(...)`
+        (pure function).
+      - `export_historical_mover_coverage_payload(...)` /
+        `load_historical_mover_coverage_payload(...)`.
+      - `validate_no_lookahead_fields(...)` /
+        `assert_capture_event_is_past_or_equal_reference_window(...)`
+        Lookahead Guard helpers.
+      - `load_historical_market_store(root)` reads
+        `<root>/top_movers/*.jsonl` and
+        `<root>/exchange_info/*.jsonl`.
+      - `HistoricalMoverCoverageBackfillRuntime` orchestrates
+        per-symbol event walks and emits the new event types.
+  - Two new typed events in `app/core/events.py`:
+      - `EventType.HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED`
+      - `EventType.HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`
+  - Daily report (`app/paper_run/daily_report.py`) renders a
+    new "Phase 11C.1C-C-B-B-B-D-A Historical 60D Mover
+    Coverage Backfill Audit v0" section with status, recall
+    rates, latency p50 / p90, miss-reason summary, coverage
+    warnings, lookahead-guard warnings, and per-mover sample
+    records (capped at 20 rows).
+  - Public-market paper runner
+    (`scripts/run_public_market_paper.py`) wires the runtime,
+    flushes once on shutdown, and threads the metrics into
+    the daily report. Two new CLI flags:
+    `--historical-mover-store-dir`,
+    `--historical-reference-window-days`.
+  - Phase 11B no-network audit
+    (`tests/unit/test_phase11b_no_network.py`) extended to
+    allow the two new event-type symbol references.
+  - New unit-test module
+    `tests/unit/test_phase11c_1c_c_b_b_b_d_a_historical_mover_coverage_backfill.py`
+    covering all 18 brief-mandated cases plus a Historical
+    Market Store loader contract and a top-level status
+    propagation case.
+
+#### Lookahead Guard (verbatim)
+
+  - `completed_tail_label` MUST NOT drive reference selection.
+  - future return / final max gain MUST NOT pollute the
+    simulated live-radar score.
+  - replay label MUST NOT contaminate `first_seen_time`.
+  - reflection / report text / LLM narrative MUST NEVER serve
+    as a capture event source.
+  - `first_seen_time_utc` MUST come from the timestamp of an
+    event that already existed at audit time.
+  - the top-mover reference set MUST only be used for post-hoc
+    audit; it cannot rewrite past decisions.
+
+#### Boundary
+
+  - **NOT** complete strategy blind replay; **NOT** PnL
+    backtest; **NOT** trading module; **NOT** AI Learning;
+    **NOT** automatic parameter optimisation; **NOT**
+    reinforcement learning; **NOT** the small-money
+    live-trading pre-validation gate; **NOT** Phase 12.
+  - The Historical Market Store serves the right-tail coverage
+    audit only - it does NOT serve auto-trading, and audit
+    results MUST NEVER trigger real trades, modify positions,
+    leverage, stops, targets, the Risk Engine, the Execution
+    FSM, `symbol_limit`, candidate-pool capacity, anomaly
+    thresholds, Regime weights, or any other runtime knob.
+
+#### Closeout note
+
+  - This PR ships the v0 engine / payload / report / Lookahead
+    Guard implementation. Real 60D historical data is not
+    bundled and is **not** required for this PR's acceptance.
+    A subsequent operator-driven evidence-collection run plus
+    a docs-only closeout PR will flip the slice to
+    `ACCEPTED`.
+
 ### Phase 11C.1C-C-B-B-B-D-A kickoff - Historical 60D Mover Coverage Backfill Audit v0 docs-only kickoff (PR #63)
 
 **Type:** Docs-only kickoff / scope alignment.

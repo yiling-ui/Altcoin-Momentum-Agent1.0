@@ -858,3 +858,89 @@ kickoff PR does **not** flip the slice's state.
   - Phase 11C.1C-C-B-B-B-E / further child slices — out
     of scope; will require their own kickoff PRs.
   - Phase 12 / live trading kickoff — `FORBIDDEN`.
+
+
+
+---
+
+## Phase 11C.1C-C-B-B-B-D-A v0 implementation update (PR #64)
+
+> **Status: IN_REVIEW (PR #64; flipped 2026-05-25).** This update
+> records the v0 engine / payload / report / Lookahead Guard
+> implementation that lands with PR #64. Phase 11C.1C-C-B-B-B-D-A
+> remains paper / report / evidence only. **No** real trade is
+> authorised. **No** position size, leverage, stop-loss, target
+> price, Risk Engine threshold, Execution FSM rule, `symbol_limit`,
+> candidate-pool capacity, anomaly threshold, Regime weight, or any
+> other runtime knob is modified by this PR or by any audit result
+> it produces. The Risk Engine remains the single trade-decision
+> gate. Phase 12 remains **FORBIDDEN**.
+
+### What PR #64 ships
+
+  - New module `app/adaptive/historical_mover_coverage_backfill.py`
+    with the data models, deterministic pure functions, the
+    Lookahead Guard helpers, the Historical Market Store loader,
+    and the `HistoricalMoverCoverageBackfillRuntime`.
+  - Two new typed events in `app/core/events.py`:
+    `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED` (one per audit
+    window) and `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED` (one per
+    audited mover record).
+  - Phase 11C public-market paper runner extended with two
+    discovery flags: `--historical-mover-store-dir` and
+    `--historical-reference-window-days`.
+  - Daily report extended with a new "Phase 11C.1C-C-B-B-B-D-A
+    Historical 60D Mover Coverage Backfill Audit v0" section that
+    surfaces every brief-mandated metric (`backfill_status`,
+    `top_mover_count`, `eligible_top_mover_count`,
+    `captured_top_mover_count`,
+    `partially_captured_top_mover_count`,
+    `missed_top_mover_count`, `excluded_top_mover_count`,
+    `capture_recall_rate`, `partial_capture_rate`, `miss_rate`,
+    `anomaly_detected_rate`, `label_tracking_rate`,
+    `tail_label_assigned_rate`,
+    `strategy_validation_sample_rate`,
+    `risk_rejected_mover_count`, `not_in_universe_count`,
+    `missing_event_history_count`, `data_unreliable_count`,
+    `median_first_seen_latency_seconds`,
+    `p90_first_seen_latency_seconds`,
+    `miss_reason_summary`, `coverage_warnings`,
+    `lookahead_guard_warnings`) plus per-record sample rows.
+  - New unit-test module
+    `tests/unit/test_phase11c_1c_c_b_b_b_d_a_historical_mover_coverage_backfill.py`
+    covering every brief-mandated case (18 tests + 4 supporting
+    tests).
+
+### Lookahead Guard (verbatim, enforced in code)
+
+  - `completed_tail_label` MUST NOT drive reference selection.
+  - future return / final max gain MUST NOT pollute the
+    simulated live-radar score.
+  - replay label MUST NOT contaminate `first_seen_time`.
+  - reflection / report text / LLM narrative MUST NEVER serve as
+    a capture event source.
+  - `first_seen_time_utc` MUST come from the timestamp of an
+    event that already existed at audit time.
+  - the top-mover reference set MUST only be used for post-hoc
+    audit; it cannot rewrite past decisions.
+
+The guard is enforced by
+`validate_no_lookahead_fields(...)` (rejects forbidden columns
+in any reference / capture-source payload) and
+`assert_capture_event_is_past_or_equal_reference_window(...)`
+(rejects events outside the configured window with operator-only
+grace bounds).
+
+### Closeout requirements (still owed)
+
+  - Real 60D historical data is not bundled and is **not**
+    required for this PR's acceptance.
+  - A subsequent operator-driven evidence-collection run that
+    populates `data/historical_market_store/top_movers/*.jsonl`
+    and `data/historical_market_store/exchange_info/*.jsonl`
+    plus a docs-only closeout PR is required to flip the slice
+    to `ACCEPTED`.
+  - The closeout PR must NOT relax thresholds, expand
+    `symbol_limit`, modify candidate-pool capacity, modify
+    anomaly thresholds, or modify Regime weights based on the
+    historical audit numbers.
