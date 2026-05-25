@@ -495,6 +495,25 @@ def test_phase11b_event_emission_does_not_invent_new_event_types():
         # The Risk Engine remains the single trade-decision gate.
         "MOVER_CAPTURE_RECALL_AUDIT_GENERATED",
         "MOVER_CAPTURE_PATH_AUDITED",
+        # Phase 11C.1C-C-B-B-B-D-A - Historical 60D Mover Coverage
+        # Backfill Audit v0. Emission lives in
+        # app/adaptive/historical_mover_coverage_backfill.py; the
+        # paper_run daily-report builder counts these events as a
+        # cross-check against the runtime's runner-side
+        # ``metrics_payload``. None of these events authorise a real
+        # trade; the ``backfill_status`` field is descriptive
+        # (``READY`` / ``PARTIAL`` / ``DEGRADED`` /
+        # ``INSUFFICIENT_HISTORY`` / ``FAILED_REFERENCE_DATA``) and
+        # the per-record ``coverage_status`` is descriptive
+        # (``CAPTURED`` / ``PARTIALLY_CAPTURED`` / ``MISSED`` /
+        # ``EXCLUDED``) and **MUST NEVER trigger a real trade,
+        # modify position size, leverage, stop-loss, target price,
+        # the Risk Engine, the Execution FSM, ``symbol_limit``,
+        # candidate-pool capacity, anomaly thresholds, Regime
+        # weights, or any other runtime knob**. The Risk Engine
+        # remains the single trade-decision gate.
+        "HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED",
+        "HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED",
     }
     invented = paper_run_event_types - allowed_phase_11b_references
     assert not invented, (

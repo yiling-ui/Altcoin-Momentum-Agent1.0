@@ -7,6 +7,40 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-A = IN_REVIEW (PR #64; flipped
+> 2026-05-25).** Historical 60D Mover Coverage Backfill
+> Audit v0 / *历史 60 天异动币覆盖回填审计 v0* — v0
+> engine / payload / report / Lookahead Guard
+> implementation landed by PR #64. Paper / report /
+> evidence only. **NOT** live trading. **NOT** AI
+> Learning. **NOT** automatic parameter optimisation.
+> **NOT** reinforcement learning. **NOT** rule
+> relaxation based on historical movers. **NOT**
+> automatic `symbol_limit` expansion. **NOT** automatic
+> anomaly threshold changes. **NOT** automatic
+> candidate-pool capacity changes. **NOT** automatic
+> Regime weight changes. **NOT** a Risk Engine change.
+> **NOT** an Execution FSM change. **NOT** a strategy
+> implementation. **NOT** a trading module. **NOT** a
+> Historical 30D+ / 60D *complete strategy* blind replay
+> / walk-forward validation gate (that gate is reserved
+> until small-money live trading prep and is **out of
+> scope** here). **NOT** the Phase 11C.1C-C-B-B-B-D-A
+> *closeout* (the closeout will be a separate docs-only
+> PR after the operator captures real 60D backfill audit
+> evidence). **NOT** Phase 12. The Risk Engine remains
+> the single trade-decision gate. The audit answers
+> eight explicit questions about the past 60 days of
+> eligible USDT perpetual movers — and **only** those
+> eight. `first_seen_time_utc` is the core acceptance
+> field. Lookahead Guard is enforced in code:
+> `completed_tail_label` / `final_max_gain` / future
+> return MUST NOT drive reference selection or pollute
+> the simulated live-radar score.
+>
+> *Prior status (kept for history; superseded by the
+> entry above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-A = NEXT_ALLOWED / NOT_STARTED
 > (defined in place by docs-only kickoff PR #63; this PR
 > scopes the slice; it does not flip its state).**

@@ -104,6 +104,15 @@ from app.adaptive.mover_capture_recall_audit import (  # noqa: E402
     TopMoverReference,
     build_top_mover_reference_set,
 )
+from app.adaptive.historical_mover_coverage_backfill import (  # noqa: E402
+    DEFAULT_MIN_HISTORY_DAYS,
+    DEFAULT_REFERENCE_WINDOW_DAYS,
+    DEFAULT_TOP_MOVERS_PER_DAY,
+    HistoricalMoverCoverageBackfillInput,
+    HistoricalMoverCoverageBackfillRuntime,
+    build_historical_60d_mover_reference_set,
+    load_historical_market_store,
+)
 
 from app.market_data_public import (  # noqa: E402
     AllMarketRadarBuffer,
@@ -428,6 +437,32 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Phase 11C.1B: TTL for a candidate after its last fresh "
             "WS-radar update. Default 900s (15 minutes)."
+        ),
+    )
+    p.add_argument(
+        "--historical-mover-store-dir",
+        type=str,
+        default=None,
+        dest="historical_mover_store_dir",
+        help=(
+            "Phase 11C.1C-C-B-B-B-D-A: filesystem path to the local "
+            "Historical Market Store root. The audit reads "
+            "<dir>/top_movers/*.jsonl and <dir>/exchange_info/*.jsonl. "
+            "If omitted, the audit runs against an empty reference "
+            "set and the runtime emits an INSUFFICIENT_HISTORY status. "
+            "Paper / report / evidence only - audit results MUST NEVER "
+            "trigger real trades or modify any runtime knob."
+        ),
+    )
+    p.add_argument(
+        "--historical-reference-window-days",
+        type=int,
+        default=DEFAULT_REFERENCE_WINDOW_DAYS,
+        dest="historical_reference_window_days",
+        help=(
+            "Phase 11C.1C-C-B-B-B-D-A: trailing-window length for the "
+            "Historical 60D Mover Coverage Backfill audit, in days. "
+            "Default 60."
         ),
     )
     return p
@@ -1845,6 +1880,98 @@ def main(argv: list[str] | None = None) -> int:
             f"mover_capture_audit_error:{type(exc).__name__}"
         )
 
+    # ----------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-A - Historical 60D Mover Coverage
+    # Backfill Audit v0. Paper / report / evidence only. The audit
+    # consumes a local Historical Market Store (top movers +
+    # exchangeInfo jsonl files) + the EventRepository capture-path
+    # event stream + the SymbolUniverse exchangeInfo bootstrap, and
+    # produces a descriptive
+    # :class:`HistoricalMoverCoverageBackfillReport`. Nothing the
+    # audit produces authorises a real trade, modifies any runtime
+    # knob, or flips a Phase 1 safety flag; the Risk Engine remains
+    # the single trade-decision gate. Lookahead Guard:
+    # completed_tail_label / final_max_gain / future return MUST
+    # NEVER drive reference selection or pollute the simulated
+    # live-radar score.
+    historical_mover_coverage_metrics: dict[str, Any] = {}
+    try:
+        store_dir_arg = getattr(args, "historical_mover_store_dir", None)
+        store_dir = (
+            Path(store_dir_arg)
+            if store_dir_arg
+            else settings.data_dir / "historical_market_store"
+        )
+        if store_dir.exists():
+            store = load_historical_market_store(store_dir)
+            history_days_observed = int(store.history_days_observed)
+            top_mover_rows = list(store.top_mover_rows)
+            exchange_info_symbols = store.exchange_info_symbols
+            historical_warnings: list[str] = []
+        else:
+            history_days_observed = 0
+            top_mover_rows = []
+            exchange_info_symbols = frozenset(
+                getattr(
+                    locals().get("symbol_universe", None),
+                    "symbols",
+                    set(),
+                )
+                or set()
+            )
+            historical_warnings = [
+                f"historical_market_store_missing:{store_dir}",
+            ]
+
+        ref_window_days = int(
+            getattr(
+                args,
+                "historical_reference_window_days",
+                DEFAULT_REFERENCE_WINDOW_DAYS,
+            )
+        )
+        audit_window_end_ms = int(
+            stats.finished_at_ms if stats.finished_at_ms else now_ms()
+        )
+        reference_set = build_historical_60d_mover_reference_set(
+            top_mover_rows=top_mover_rows,
+            audit_window_end_utc_ms=audit_window_end_ms,
+            reference_window_days=ref_window_days,
+            exchange_info_symbols=(
+                exchange_info_symbols
+                if exchange_info_symbols
+                else None
+            ),
+            top_movers_per_day=DEFAULT_TOP_MOVERS_PER_DAY,
+            history_days_observed=history_days_observed,
+        )
+        historical_audit_input = HistoricalMoverCoverageBackfillInput(
+            reference_set=reference_set,
+            audit_window_end_utc_ms=audit_window_end_ms,
+            reference_window_days=ref_window_days,
+            exchange_info_symbols=(
+                exchange_info_symbols if exchange_info_symbols else frozenset()
+            ),
+            history_days_observed=history_days_observed,
+            min_history_days=DEFAULT_MIN_HISTORY_DAYS,
+            coverage_warnings_in=tuple(historical_warnings),
+        )
+        historical_audit_runtime = HistoricalMoverCoverageBackfillRuntime(
+            event_repo=event_repo
+        )
+        historical_audit_runtime.flush(
+            historical_audit_input,
+            generated_at_ms=audit_window_end_ms,
+            emit_events=True,
+        )
+        historical_mover_coverage_metrics = (
+            historical_audit_runtime.metrics_payload()
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        stats.notes.append(
+            f"historical_mover_coverage_audit_error:{type(exc).__name__}"
+        )
+
     if args.write_daily_report:
         try:
             daily_dir = settings.data_dir / "reports/phase11c"
@@ -1910,6 +2037,9 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 mover_capture_audit_metrics=dict(
                     mover_capture_audit_metrics
+                ),
+                historical_mover_coverage_metrics=dict(
+                    historical_mover_coverage_metrics
                 ),
             )
             daily_report_path = (
