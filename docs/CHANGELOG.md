@@ -7,6 +7,359 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D kickoff - Mover Capture Recall & Missed-Tail Coverage Audit v0 docs-only kickoff (PR #60)
+
+**Type:** Docs-only kickoff / scope alignment.
+**Runtime effect:** **none.**
+**Phase ledger effect:** **defines** Phase
+11C.1C-C-B-B-B-D in place — name, scope, boundary, allowed
+outputs, forbidden list, key metrics, interpretation
+principles, audit cadence, audit input sources, audit
+objects, and acceptance-gate placeholder. Phase
+11C.1C-C-B-B-B-D remains `NEXT_ALLOWED / NOT_STARTED`
+after this PR (this PR scopes the slice; it does not flip
+its state). No phase's acceptance state is flipped.
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **Status: DOCS-ONLY KICKOFF / SCOPE ALIGNMENT.** This
+> PR defines Phase 11C.1C-C-B-B-B-D (*Mover Capture
+> Recall & Missed-Tail Coverage Audit v0 / 异动币捕捉召回
+> 与漏捕右尾覆盖审计 v0*) as the **fourth child slice**
+> under the Phase 11C.1C-C-B-B-B parent. The parent phase
+> is **not** renamed: Phase 11C.1C-C-B-B-B remains
+> *Strategy Validation Lab (deeper) & richer Cluster
+> Exposure Control follow-up*. **No runtime code is
+> shipped by this PR.** **No phase's acceptance state is
+> flipped.** Phase 11C.1C-C-B-B-B-D remains `NEXT_ALLOWED
+> / NOT_STARTED`; this PR scopes the slice in place.
+>
+> Paper / report / evidence only. **NOT** live trading.
+> **NOT** AI Learning. **NOT** automatic parameter
+> optimisation. **NOT** reinforcement learning. **NOT** a
+> new strategy. **NOT** a trading module. **NOT** a new
+> runtime module. **NOT** the complete Strategy
+> Validation Lab follow-up. **NOT** Phase
+> 11C.1C-C-B-B-B-D *closeout* (the closeout will be a
+> separate docs-only PR after the operator captures A1 /
+> A2 audit evidence). **NOT** a Historical 30D+ Blind
+> Replay / Walk-forward Validation gate (that gate is
+> reserved for a Phase 12 candidate review and is
+> explicitly out of scope here; it belongs after the
+> major paper modules and the paper validation chain are
+> complete, before small-money live trading). **NOT**
+> Phase 12.
+>
+> The Mover Capture Recall & Missed-Tail Coverage Audit
+> v0 is **paper-only / report-only / evidence-only** end
+> to end. It does not add a new runtime module, a new
+> event type, a new strategy, a new execution surface, a
+> new optimiser, or a new AI authority. It defines the
+> coverage audit cadence (A1 / A2 with A3+ reserved), the
+> audit input sources, the audit objects, the per-mover
+> evidence shape, the recall metrics, the missed-mover
+> reason taxonomy, the eight interpretation rules, and
+> the evidence-template shape that any future closeout PR
+> must follow. The Risk Engine remains the single
+> trade-decision gate.
+
+#### Phase 11C.1C-C-B-B-B-D scope (docs-only kickoff summary)
+
+  - Defines Phase 11C.1C-C-B-B-B-D as the *Mover Capture
+    Recall & Missed-Tail Coverage Audit v0 / 异动币捕捉
+    召回与漏捕右尾覆盖审计 v0* — the fourth child slice
+    under Phase 11C.1C-C-B-B-B.
+  - Audit answers seven questions, **and only these
+    seven**: (1) did real movers get captured by the
+    system, (2) at which discovery layer
+    (`MARKET_SNAPSHOT` / `PRE_ANOMALY_DETECTED` /
+    `ANOMALY_DETECTED` / `MARKET_REGIME_ASSESSED` /
+    `CANDIDATE_STAGE_CLASSIFIED` / `OPPORTUNITY_SCORED` /
+    `STRATEGY_MODE_SELECTED` / `CLUSTER_CONTEXT_ATTACHED`
+    / `LABEL_QUEUE_ENQUEUED` / `LABEL_TRACKING_STARTED` /
+    `LABEL_WINDOW_COMPLETED` / `TAIL_LABEL_ASSIGNED` /
+    `STRATEGY_VALIDATION_SAMPLE_CREATED`), (3) if missed,
+    why (taxonomy: `not_in_futures_universe`,
+    `not_in_exchange_info`, `not_usdt_perpetual`,
+    `symbol_limit_excluded`,
+    `candidate_pool_capacity_evicted`, `score_too_low`,
+    `liquidity_insufficient`,
+    `data_stale_or_degraded_or_unreliable`,
+    `risk_rejected`, `no_completed_tail_label_yet`), (4)
+    whether top movers were captured early enough
+    (`first_seen_latency_seconds`,
+    `median_first_seen_latency_seconds`), (5) whether
+    captured movers proceeded into the label /
+    validation pipeline (`label_tracking_rate`,
+    `tail_label_assigned_rate`,
+    `strategy_validation_sample_rate`), (6) whether
+    missed movers are a system-coverage problem or a
+    market / exchange-coverage problem, and (7) whether
+    captured-but-rejected movers were rejected for sound
+    conservative reasons (`risk_rejected_mover_count` is
+    **not** treated as a system failure).
+  - Trigger context: B-B-B-C proved long-window paper
+    data collection works end-to-end; B-B-B-D answers
+    "are the samples the right ones — does the discovery
+    layer cover real market movers?". Concrete trigger:
+    SAGAUSDT showed an obvious move on Binance's public
+    24 h gainer board; the system already captured
+    SAGAUSDT end-to-end through `PRE_ANOMALY_DETECTED` →
+    `ANOMALY_DETECTED` → `MARKET_REGIME_ASSESSED` →
+    `CANDIDATE_STAGE_CLASSIFIED` → `OPPORTUNITY_SCORED` →
+    `STRATEGY_MODE_SELECTED` → `CLUSTER_CONTEXT_ATTACHED`
+    → `LABEL_QUEUE_ENQUEUED` → `LABEL_TRACKING_STARTED` →
+    `TAIL_LABEL_ASSIGNED` →
+    `STRATEGY_VALIDATION_SAMPLE_CREATED`. One coin proves
+    nothing — the audit institutionalises "human looks at
+    gainer board vs. did the system see it" as a
+    coverage protocol, not as ad-hoc human screenshots.
+  - Allowed outputs (descriptive only):
+    `top_mover_capture_summary`, `captured_mover_evidence`,
+    `missed_mover_audit`, `symbol_universe_exclusion_summary`,
+    `candidate_eviction_summary`, `risk_rejection_summary`,
+    `first_seen_latency_summary`, `capture_recall_rate`,
+    `missed_tail_candidate_list`, `coverage_warning`,
+    `insufficient_coverage_reasons`.
+  - Allowed input sources (read-only; reuse existing
+    surfaces): Binance public 24 h ticker / public market
+    data, `EventRepository`, daily report, Phase 8.5
+    export / Phase 10A replay, `StrategyValidationDataset`,
+    `PaperAlphaGateReport`, `RegimeClusterEvidencePack`,
+    `SymbolUniverse` / `exchangeInfo`-as-truth catalogue,
+    candidate pool logs / capacity-eviction evidence
+    (where available).
+  - Audit objects: top gainers / top movers in eligible
+    USDT-perpetual universe, detected anomalies,
+    pre-anomaly candidates, label-tracked candidates,
+    validation samples, risk-rejected movers, movers
+    excluded because not in the current tradable
+    universe.
+  - Key metrics (descriptive only): `top_mover_count`,
+    `captured_top_mover_count`, `missed_top_mover_count`,
+    `capture_recall_rate`, `anomaly_detected_rate`,
+    `label_tracking_rate`, `tail_label_assigned_rate`,
+    `strategy_validation_sample_rate`,
+    `risk_rejected_mover_count`, `not_in_universe_count`,
+    `capacity_evicted_count`, `data_unreliable_count`,
+    `median_first_seen_latency_seconds`.
+  - Audit cadence (operator-driven; not auto-scheduled):
+    A1 (first end-to-end coverage audit pass), A2 (second
+    audit pass against an independent paper observation
+    window), A3+ reserved for later child slices and out
+    of scope for this PR.
+  - Interpretation principles (must be read verbatim):
+    captured-but-rejected ≠ failure;
+    missed-but-not-in-universe ≠ failure; coverage
+    warning is only raised when the mover is in the
+    eligible universe AND shows clear right-tail
+    behaviour AND was missed for a system-correctable
+    reason; a single mover proves nothing (SAGAUSDT
+    specifically does not authorise rule relaxation);
+    capture audit ≠ trading-profit evidence; low coverage
+    is a `review` outcome, not a `relax` outcome; high
+    coverage does not authorise live trading; single-coin
+    / "妖币" reframing is forbidden.
+
+#### What this PR does NOT do (must be read verbatim)
+
+  - It does **NOT** flip any phase's acceptance state.
+    Phase 11C.1C-C-B-B-B-A remains `ACCEPTED`. Phase
+    11C.1C-C-B-B-B-B remains `ACCEPTED`. Phase
+    11C.1C-C-B-B-B-C remains `ACCEPTED`. Phase
+    11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`.
+    Phase 11C.1C-C-B-B-B-D remains `NEXT_ALLOWED /
+    NOT_STARTED` (this PR scopes the slice; it does not
+    flip its state). Phase 12 remains `FORBIDDEN`.
+  - It does **NOT** rename Phase 11C.1C-C-B-B-B.
+  - It does **NOT** implement the Mover Capture Recall &
+    Missed-Tail Coverage Audit v0 — the audit is defined
+    as docs / evidence templates only, and the slice will
+    not introduce any new runtime module or new event
+    type at any point in its lifecycle.
+  - It does **NOT** auto-schedule A1 / A2 / A3+ runs.
+    The cadence is operator-driven.
+  - It does **NOT** widen, replace, or relax the existing
+    Regime & Cluster Evidence Pack v0
+    `INSUFFICIENT_SAMPLE` minimums or the Paper Alpha
+    Gate v0 `INCONCLUSIVE` minimums or the Long-Window
+    Cohort Stability & Sample Sufficiency Protocol v0
+    cadence.
+  - It does **NOT** authorise live trading, API keys,
+    private endpoints, DeepSeek trade decisions, real
+    Telegram outbound, AI Learning, automatic parameter
+    optimisation, reinforcement learning, the complete
+    Strategy Validation Lab follow-up, or Phase 12.
+  - It does **NOT** authorise any rule relaxation on the
+    basis of single-coin / "妖币" cases (SAGAUSDT or
+    otherwise).
+  - It does **NOT** stand in for a Historical 30D+ Blind
+    Replay / Walk-forward Validation gate (that gate is
+    reserved for a Phase 12 candidate review and is
+    explicitly out of scope here).
+  - It does **NOT** add any new Python module under
+    `app/`.
+  - It does **NOT** add any new event type.
+  - It does **NOT** modify any runtime behaviour.
+  - It does **NOT** modify configuration schemas,
+    defaults, or YAML.
+  - It does **NOT** add or modify tests.
+  - It does **NOT** run tests.
+  - It does **NOT** modify `app/`, `scripts/`, `tests/`,
+    `configs/`, `risk/`, `execution/`, `llm/`,
+    `telegram/`, or `exchange/`.
+
+#### Documentation changes
+
+  - **NEW:** `docs/PHASE_11C_1C_C_B_B_B_D_MOVER_CAPTURE_RECALL_AUDIT.md`
+    — Phase 11C.1C-C-B-B-B-D kickoff brief: scope,
+    parent / child boundary, AMOS positioning, audit
+    cadence (A1 / A2 with A3+ reserved), audit input
+    sources, audit objects, allowed outputs, key metrics,
+    eight interpretation principles, boundary table,
+    slice-specific forbidden items, acceptance-gate
+    placeholder, "what this kickoff PR does / does NOT
+    do" sections, and Phase 1 safety-flag invariants.
+  - **NEW:** `docs/PR60_DESCRIPTION.md` — this PR's
+    description.
+  - `docs/PROJECT_STATUS.md` (modified — docs-only):
+    replaced the B-B-B-D `NEXT_ALLOWED / NOT_STARTED —
+    placeholder; not yet defined by name or scope`
+    paragraph with a fully scoped definition; added a
+    new kickoff row in the per-phase ledger; marked the
+    prior B-B-B-D placeholder row as SUPERSEDED.
+  - `docs/PHASE_GATE.md` (modified — docs-only): replaced
+    the B-B-B-D row in the *Open / Reserved phases* table
+    with a fully scoped definition; replaced the
+    dedicated `## Open phase: Phase 11C.1C-C-B-B-B-D`
+    detail section with full scope, allowed outputs,
+    allowed input sources, inherited forbidden items, and
+    acceptance gate placeholder; updated the Phase 12
+    row to mention "Phase 11C.1C-C-B-B-B-D kickoff via
+    PR #60"; updated the *Architecture governance
+    (guidance-only; no phase change)* closing paragraph
+    to reflect the new B-B-B-D defined-by-name-and-scope
+    state.
+  - `docs/CHANGELOG.md` (this entry).
+
+#### Safety boundary (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+#### Confirmation checklist
+
+  - [x] Docs-only PR; no runtime code modified.
+  - [x] No new Python files.
+  - [x] No new event types.
+  - [x] No new tests.
+  - [x] No tests run.
+  - [x] No runtime behaviour changed.
+  - [x] No `app/` / `scripts/` / `tests/` / `configs/`
+    changes.
+  - [x] No `execution/` / `risk/` / `llm/` / `telegram/`
+    / `exchange/` changes.
+  - [x] No strategy runtime code changes.
+  - [x] No phase's acceptance state flipped — Phase
+    11C.1C-C-B-B-B-A remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B-B remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B-C remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`;
+    Phase 11C.1C-C-B-B-B-D remains `NEXT_ALLOWED /
+    NOT_STARTED` (scoped by this PR; not flipped).
+  - [x] Phase 11C.1C-C-B-B-B parent is **not** renamed;
+    it remains *Strategy Validation Lab (deeper) & richer
+    Cluster Exposure Control follow-up*.
+  - [x] Phase 11C.1C-C-B-B-B-D is recorded as the fourth
+    child slice under Phase 11C.1C-C-B-B-B = Mover
+    Capture Recall & Missed-Tail Coverage Audit v0 /
+    异动币捕捉召回与漏捕右尾覆盖审计 v0.
+  - [x] Audit cadence recorded (A1 / A2 with A3+
+    reserved; operator-driven; not auto-scheduled).
+  - [x] Audit input sources recorded (Binance public 24 h
+    ticker / public market data, `EventRepository`, daily
+    report, Phase 8.5 export / Phase 10A replay,
+    `StrategyValidationDataset`, `PaperAlphaGateReport`,
+    `RegimeClusterEvidencePack`, `SymbolUniverse` /
+    `exchangeInfo`-as-truth catalogue, candidate pool
+    logs / capacity-eviction evidence).
+  - [x] Audit objects recorded (top gainers / top movers
+    in eligible USDT-perpetual universe, detected
+    anomalies, pre-anomaly candidates, label-tracked
+    candidates, validation samples, risk-rejected movers,
+    movers excluded because not in current tradable
+    universe).
+  - [x] Allowed outputs explicitly listed
+    (`top_mover_capture_summary`,
+    `captured_mover_evidence`, `missed_mover_audit`,
+    `symbol_universe_exclusion_summary`,
+    `candidate_eviction_summary`,
+    `risk_rejection_summary`,
+    `first_seen_latency_summary`, `capture_recall_rate`,
+    `missed_tail_candidate_list`, `coverage_warning`,
+    `insufficient_coverage_reasons`) and marked
+    descriptive only.
+  - [x] Key metrics recorded
+    (`top_mover_count`, `captured_top_mover_count`,
+    `missed_top_mover_count`, `capture_recall_rate`,
+    `anomaly_detected_rate`, `label_tracking_rate`,
+    `tail_label_assigned_rate`,
+    `strategy_validation_sample_rate`,
+    `risk_rejected_mover_count`,
+    `not_in_universe_count`, `capacity_evicted_count`,
+    `data_unreliable_count`,
+    `median_first_seen_latency_seconds`).
+  - [x] Eight interpretation principles recorded verbatim
+    (captured-but-rejected ≠ failure;
+    missed-but-not-in-universe ≠ failure; coverage
+    warning only when in eligible universe AND clear
+    right-tail AND system-correctable reason; a single
+    mover incl. SAGAUSDT proves nothing; capture audit ≠
+    trading-profit evidence; low coverage = `review`,
+    not `relax`; high coverage does not authorise live
+    trading; single-coin / "妖币" reframing is
+    forbidden).
+  - [x] Slice-specific forbidden items recorded (no
+    triggering of real trades; no modifying position
+    size, leverage, stop-loss, target price, the Risk
+    Engine, or the Execution FSM; no AI / LLM trade
+    authority; no auto parameter optimisation; no auto
+    rule relaxation on low coverage or single-coin
+    cases; no auto-scheduling of A1 / A2 / A3+; no
+    promotion of any audit artefact to a real-trade
+    authority; no rewriting of Regime & Cluster Evidence
+    Pack v0 `INSUFFICIENT_SAMPLE` rule or Paper Alpha
+    Gate v0 `INCONCLUSIVE` rule; no new event types in
+    this kickoff PR or in any future Phase
+    11C.1C-C-B-B-B-D PR; no Historical 30D+ Blind
+    Replay / Walk-forward Validation under this slice;
+    cannot enter Phase 12).
+  - [x] Safety boundary held end-to-end (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`, no Binance API
+    key, no Binance API secret, no signed endpoint, no
+    account / order / position / leverage / margin
+    endpoint, no private WebSocket, no `listenKey`, no
+    DeepSeek trade decision, no real Telegram outbound).
+  - [x] Phase 12 remains `FORBIDDEN`.
+
 ### Phase 11C.1C-C-B-B-B-C accepted - Long-Window Cohort Stability & Sample Sufficiency Protocol v0 docs-only closeout (PR #59)
 
 **Type:** Docs-only closeout / acceptance flip.
