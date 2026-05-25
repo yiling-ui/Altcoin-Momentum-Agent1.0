@@ -347,6 +347,57 @@ class DailyReportSnapshot:
         default_factory=dict
     )
     regime_cluster_evidence_pack: dict[str, Any] = field(default_factory=dict)
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D - Mover Capture Recall & Missed-Tail
+    # Coverage Audit v0.
+    #
+    # The runner passes the :class:`MoverCaptureRecallAuditRuntime`
+    # ``metrics_payload()`` dict through
+    # ``mover_capture_audit_metrics``; the daily-report builder
+    # surfaces the audit sub-block below. Every value is paper /
+    # report / evidence only - the ``mover_capture_audit_status``
+    # is a *descriptive* label (one of ``OK`` /
+    # ``INSUFFICIENT_DATA`` / ``DEGRADED``), and the per-mover
+    # ``audit_status`` is a *descriptive* label (one of
+    # ``CAPTURED`` / ``PARTIALLY_CAPTURED`` / ``MISSED`` /
+    # ``EXCLUDED`` / ``INSUFFICIENT_DATA``). None of these labels
+    # authorises a real trade and **MUST NEVER** modify position
+    # size, leverage, stop-loss, target price, the Risk Engine,
+    # the Execution FSM, ``symbol_limit``, candidate-pool
+    # capacity, anomaly thresholds, Regime weights, or any other
+    # runtime knob. The Risk Engine remains the single
+    # trade-decision gate. This is **NOT** a new strategy,
+    # **NOT** a trading module, **NOT** AI Learning, **NOT**
+    # automatic parameter optimisation, **NOT** reinforcement
+    # learning, **NOT** a Historical 30D+ Blind Replay /
+    # Walk-forward Validation gate; Phase 12 remains FORBIDDEN.
+    mover_capture_recall_audit_generated_count: int = 0
+    mover_capture_path_audited_count: int = 0
+    mover_capture_audit_status: str = ""
+    top_mover_count: int = 0
+    captured_top_mover_count: int = 0
+    partially_captured_top_mover_count: int = 0
+    missed_top_mover_count: int = 0
+    excluded_top_mover_count: int = 0
+    insufficient_data_top_mover_count: int = 0
+    capture_recall_rate: float = 0.0
+    anomaly_detected_rate: float = 0.0
+    label_tracking_rate: float = 0.0
+    tail_label_assigned_rate: float = 0.0
+    strategy_validation_sample_rate: float = 0.0
+    risk_rejected_mover_count: int = 0
+    not_in_universe_count: int = 0
+    capacity_evicted_count: int = 0
+    data_unreliable_count: int = 0
+    median_first_seen_latency_seconds: float = 0.0
+    mover_capture_records: list[dict[str, Any]] = field(default_factory=list)
+    miss_reason_summary: dict[str, int] = field(default_factory=dict)
+    coverage_warnings: list[str] = field(default_factory=list)
+    mover_capture_audit_insufficient_reasons: list[str] = field(
+        default_factory=list
+    )
+    mover_capture_audit_warnings: list[str] = field(default_factory=list)
+    mover_capture_audit_report: dict[str, Any] = field(default_factory=dict)
     markdown: str = ""
 
     def to_payload(self) -> dict[str, Any]:
@@ -713,6 +764,58 @@ class DailyReportSnapshot:
             "regime_cluster_evidence_pack": dict(
                 self.regime_cluster_evidence_pack
             ),
+            # Phase 11C.1C-C-B-B-B-D Mover Capture Recall & Missed-
+            # Tail Coverage Audit v0 fields. Paper / report /
+            # evidence only.
+            "mover_capture_recall_audit_generated_count": int(
+                self.mover_capture_recall_audit_generated_count
+            ),
+            "mover_capture_path_audited_count": int(
+                self.mover_capture_path_audited_count
+            ),
+            "mover_capture_audit_status": str(
+                self.mover_capture_audit_status
+            ),
+            "top_mover_count": int(self.top_mover_count),
+            "captured_top_mover_count": int(self.captured_top_mover_count),
+            "partially_captured_top_mover_count": int(
+                self.partially_captured_top_mover_count
+            ),
+            "missed_top_mover_count": int(self.missed_top_mover_count),
+            "excluded_top_mover_count": int(self.excluded_top_mover_count),
+            "insufficient_data_top_mover_count": int(
+                self.insufficient_data_top_mover_count
+            ),
+            "capture_recall_rate": float(self.capture_recall_rate),
+            "anomaly_detected_rate": float(self.anomaly_detected_rate),
+            "label_tracking_rate": float(self.label_tracking_rate),
+            "tail_label_assigned_rate": float(
+                self.tail_label_assigned_rate
+            ),
+            "strategy_validation_sample_rate": float(
+                self.strategy_validation_sample_rate
+            ),
+            "risk_rejected_mover_count": int(self.risk_rejected_mover_count),
+            "not_in_universe_count": int(self.not_in_universe_count),
+            "capacity_evicted_count": int(self.capacity_evicted_count),
+            "data_unreliable_count": int(self.data_unreliable_count),
+            "median_first_seen_latency_seconds": float(
+                self.median_first_seen_latency_seconds
+            ),
+            "mover_capture_records": list(self.mover_capture_records),
+            "miss_reason_summary": {
+                k: int(v) for k, v in sorted(self.miss_reason_summary.items())
+            },
+            "coverage_warnings": list(self.coverage_warnings),
+            "mover_capture_audit_insufficient_reasons": list(
+                self.mover_capture_audit_insufficient_reasons
+            ),
+            "mover_capture_audit_warnings": list(
+                self.mover_capture_audit_warnings
+            ),
+            "mover_capture_audit_report": dict(
+                self.mover_capture_audit_report
+            ),
         }
 
 
@@ -760,6 +863,7 @@ class DailyReportBuilder:
         adaptive_metrics: Mapping[str, Any] | None = None,
         label_runtime_metrics: Mapping[str, Any] | None = None,
         strategy_validation_metrics: Mapping[str, Any] | None = None,
+        mover_capture_audit_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         """Build the daily report.
 
@@ -841,6 +945,9 @@ class DailyReportBuilder:
             strategy_validation_metrics=dict(
                 strategy_validation_metrics or {}
             ),
+            mover_capture_audit_metrics=dict(
+                mover_capture_audit_metrics or {}
+            ),
         )
 
         if write_to_disk:
@@ -869,6 +976,7 @@ class DailyReportBuilder:
         adaptive_metrics: Mapping[str, Any] | None = None,
         label_runtime_metrics: Mapping[str, Any] | None = None,
         strategy_validation_metrics: Mapping[str, Any] | None = None,
+        mover_capture_audit_metrics: Mapping[str, Any] | None = None,
     ) -> DailyReportSnapshot:
         date_label = datetime.fromtimestamp(
             finished_at_ms / 1000.0, tz=timezone.utc
@@ -2091,6 +2199,187 @@ class DailyReportBuilder:
                 )
                 or {}
             ),
+            # ----------------------------------------------------------
+            # Phase 11C.1C-C-B-B-B-D - Mover Capture Recall &
+            # Missed-Tail Coverage Audit v0 sub-block read off the
+            # runner-supplied :meth:`MoverCaptureRecallAuditRuntime
+            # .metrics_payload` dict. Event-log counts of the two
+            # new typed events
+            # (``MOVER_CAPTURE_RECALL_AUDIT_GENERATED`` /
+            # ``MOVER_CAPTURE_PATH_AUDITED``) are used as the
+            # cross-check / fall-back so a stale runner counter
+            # cannot under-report a real audit event.
+            mover_capture_recall_audit_generated_count=int(
+                max(
+                    int(
+                        (mover_capture_audit_metrics or {}).get(
+                            "mover_capture_recall_audit_generated_count",
+                            0,
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.MOVER_CAPTURE_RECALL_AUDIT_GENERATED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            mover_capture_path_audited_count=int(
+                max(
+                    int(
+                        (mover_capture_audit_metrics or {}).get(
+                            "mover_capture_path_audited_count", 0
+                        )
+                        or 0
+                    ),
+                    int(
+                        type_counts.get(
+                            EventType.MOVER_CAPTURE_PATH_AUDITED.value,
+                            0,
+                        )
+                    ),
+                )
+            ),
+            mover_capture_audit_status=str(
+                (mover_capture_audit_metrics or {}).get(
+                    "mover_capture_audit_status", ""
+                )
+                or ""
+            ),
+            top_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "top_mover_count", 0
+                )
+                or 0
+            ),
+            captured_top_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "captured_top_mover_count", 0
+                )
+                or 0
+            ),
+            partially_captured_top_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "partially_captured_top_mover_count", 0
+                )
+                or 0
+            ),
+            missed_top_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "missed_top_mover_count", 0
+                )
+                or 0
+            ),
+            excluded_top_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "excluded_top_mover_count", 0
+                )
+                or 0
+            ),
+            insufficient_data_top_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "insufficient_data_top_mover_count", 0
+                )
+                or 0
+            ),
+            capture_recall_rate=float(
+                (mover_capture_audit_metrics or {}).get(
+                    "capture_recall_rate", 0.0
+                )
+                or 0.0
+            ),
+            anomaly_detected_rate=float(
+                (mover_capture_audit_metrics or {}).get(
+                    "anomaly_detected_rate", 0.0
+                )
+                or 0.0
+            ),
+            label_tracking_rate=float(
+                (mover_capture_audit_metrics or {}).get(
+                    "label_tracking_rate", 0.0
+                )
+                or 0.0
+            ),
+            tail_label_assigned_rate=float(
+                (mover_capture_audit_metrics or {}).get(
+                    "tail_label_assigned_rate", 0.0
+                )
+                or 0.0
+            ),
+            strategy_validation_sample_rate=float(
+                (mover_capture_audit_metrics or {}).get(
+                    "strategy_validation_sample_rate", 0.0
+                )
+                or 0.0
+            ),
+            risk_rejected_mover_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "risk_rejected_mover_count", 0
+                )
+                or 0
+            ),
+            not_in_universe_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "not_in_universe_count", 0
+                )
+                or 0
+            ),
+            capacity_evicted_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "capacity_evicted_count", 0
+                )
+                or 0
+            ),
+            data_unreliable_count=int(
+                (mover_capture_audit_metrics or {}).get(
+                    "data_unreliable_count", 0
+                )
+                or 0
+            ),
+            median_first_seen_latency_seconds=float(
+                (mover_capture_audit_metrics or {}).get(
+                    "median_first_seen_latency_seconds", 0.0
+                )
+                or 0.0
+            ),
+            mover_capture_records=list(
+                (mover_capture_audit_metrics or {}).get(
+                    "mover_capture_records", []
+                )
+                or []
+            ),
+            miss_reason_summary=dict(
+                (mover_capture_audit_metrics or {}).get(
+                    "miss_reason_summary", {}
+                )
+                or {}
+            ),
+            coverage_warnings=list(
+                (mover_capture_audit_metrics or {}).get(
+                    "coverage_warnings", []
+                )
+                or []
+            ),
+            mover_capture_audit_insufficient_reasons=list(
+                (mover_capture_audit_metrics or {}).get(
+                    "mover_capture_audit_insufficient_reasons", []
+                )
+                or []
+            ),
+            mover_capture_audit_warnings=list(
+                (mover_capture_audit_metrics or {}).get(
+                    "mover_capture_audit_warnings", []
+                )
+                or []
+            ),
+            mover_capture_audit_report=dict(
+                (mover_capture_audit_metrics or {}).get(
+                    "mover_capture_audit_report", {}
+                )
+                or {}
+            ),
         )
         # Build Markdown last so we can embed the snapshot itself.
         markdown = self._render_markdown(
@@ -2864,6 +3153,123 @@ class DailyReportBuilder:
         regime_cluster_stage_lines = _evidence_row_lines(stage_rows)
         regime_cluster_mode_lines = _evidence_row_lines(mode_rows)
 
+        # ---- Phase 11C.1C-C-B-B-B-D Mover Capture Recall &
+        # Missed-Tail Coverage Audit v0. Paper / report / evidence
+        # only. The ``mover_capture_audit_status`` is a
+        # *descriptive* roll-up (one of ``OK`` /
+        # ``INSUFFICIENT_DATA`` / ``DEGRADED``); the per-mover
+        # ``audit_status`` is a *descriptive* per-row label (one
+        # of ``CAPTURED`` / ``PARTIALLY_CAPTURED`` / ``MISSED`` /
+        # ``EXCLUDED`` / ``INSUFFICIENT_DATA``). None of these
+        # labels authorises a real trade and **MUST NEVER**
+        # modify position size, leverage, stop-loss, target
+        # price, the Risk Engine, the Execution FSM,
+        # ``symbol_limit``, candidate-pool capacity, anomaly
+        # thresholds, Regime weights, or any other runtime knob.
+        # The Risk Engine remains the single trade-decision gate.
+        mover_capture_block = (
+            f"- MOVER_CAPTURE_RECALL_AUDIT_GENERATED count: "
+            f"**{snapshot.mover_capture_recall_audit_generated_count}**\n"
+            f"- MOVER_CAPTURE_PATH_AUDITED count: "
+            f"**{snapshot.mover_capture_path_audited_count}**\n"
+            f"- Mover capture audit status: "
+            f"**{snapshot.mover_capture_audit_status or '(not evaluated)'}**\n"
+            f"- Top mover count: **{snapshot.top_mover_count}**\n"
+            f"- Captured top mover count: "
+            f"**{snapshot.captured_top_mover_count}**\n"
+            f"- Partially captured top mover count: "
+            f"**{snapshot.partially_captured_top_mover_count}**\n"
+            f"- Missed top mover count: "
+            f"**{snapshot.missed_top_mover_count}**\n"
+            f"- Excluded top mover count: "
+            f"**{snapshot.excluded_top_mover_count}**\n"
+            f"- Insufficient-data top mover count: "
+            f"**{snapshot.insufficient_data_top_mover_count}**\n"
+            f"- Capture recall rate: "
+            f"**{snapshot.capture_recall_rate:.4f}**\n"
+            f"- Anomaly detected rate: "
+            f"**{snapshot.anomaly_detected_rate:.4f}**\n"
+            f"- Label tracking rate: "
+            f"**{snapshot.label_tracking_rate:.4f}**\n"
+            f"- Tail-label assigned rate: "
+            f"**{snapshot.tail_label_assigned_rate:.4f}**\n"
+            f"- Strategy validation sample rate: "
+            f"**{snapshot.strategy_validation_sample_rate:.4f}**\n"
+            f"- Risk-rejected mover count: "
+            f"**{snapshot.risk_rejected_mover_count}**\n"
+            f"- Not-in-universe mover count: "
+            f"**{snapshot.not_in_universe_count}**\n"
+            f"- Capacity-evicted mover count: "
+            f"**{snapshot.capacity_evicted_count}**\n"
+            f"- Data-unreliable mover count: "
+            f"**{snapshot.data_unreliable_count}**\n"
+            f"- Median first-seen latency (seconds): "
+            f"**{snapshot.median_first_seen_latency_seconds:.4f}**\n"
+        )
+
+        if snapshot.mover_capture_audit_insufficient_reasons:
+            mover_capture_insufficient_lines = "\n".join(
+                f"- `{r}`"
+                for r in snapshot.mover_capture_audit_insufficient_reasons
+            )
+        else:
+            mover_capture_insufficient_lines = (
+                "- (no insufficient-data reasons in this window)"
+            )
+
+        if snapshot.mover_capture_audit_warnings:
+            mover_capture_warning_lines = "\n".join(
+                f"- `{w}`"
+                for w in snapshot.mover_capture_audit_warnings
+            )
+        else:
+            mover_capture_warning_lines = (
+                "- (no audit warnings in this window)"
+            )
+
+        if snapshot.coverage_warnings:
+            mover_capture_coverage_lines = "\n".join(
+                f"- `{w}`" for w in snapshot.coverage_warnings
+            )
+        else:
+            mover_capture_coverage_lines = (
+                "- (no coverage warnings in this window)"
+            )
+
+        if snapshot.miss_reason_summary:
+            mover_capture_miss_lines = "\n".join(
+                f"- `{r}` x {c}"
+                for r, c in sorted(snapshot.miss_reason_summary.items())
+            )
+        else:
+            mover_capture_miss_lines = (
+                "- (no miss reasons recorded in this window)"
+            )
+
+        if snapshot.mover_capture_records:
+            mover_capture_record_lines_parts: list[str] = []
+            for rec in snapshot.mover_capture_records:
+                if not isinstance(rec, Mapping):
+                    continue
+                sym = str(rec.get("symbol", ""))
+                rank = int(rec.get("rank", 0) or 0)
+                status = str(rec.get("audit_status", ""))
+                pct = float(rec.get("price_change_pct", 0.0) or 0.0)
+                qv = float(rec.get("quote_volume_usdt", 0.0) or 0.0)
+                eligible = bool(rec.get("in_eligible_universe", True))
+                miss = list(rec.get("miss_reasons", []) or [])
+                miss_str = ",".join(str(m) for m in miss) or "-"
+                mover_capture_record_lines_parts.append(
+                    f"- `{sym}` rank={rank} status=**{status}** "
+                    f"pct={pct:.4f} quote_volume_usdt={qv:.0f} "
+                    f"eligible={eligible} miss_reasons=`{miss_str}`"
+                )
+            mover_capture_record_lines = "\n".join(
+                mover_capture_record_lines_parts
+            ) or "- (no records in this window)"
+        else:
+            mover_capture_record_lines = "- (no records in this window)"
+
         body = (
             f"# AMA-RT Phase 11B - Daily Paper Report\n\n"
             f"- **Date (UTC):** {snapshot.date}\n"
@@ -3076,6 +3482,41 @@ class DailyReportBuilder:
             f"{regime_cluster_stage_lines}\n\n"
             f"### Strategy mode outcome summary (per strategy_mode)\n"
             f"{regime_cluster_mode_lines}\n\n"
+            f"## Phase 11C.1C-C-B-B-B-D Mover Capture Recall & "
+            f"Missed-Tail Coverage Audit v0\n"
+            f"_Mover Capture Recall & Missed-Tail Coverage Audit "
+            f"v0 sub-blocks are paper / report / evidence-only. "
+            f"The `mover_capture_audit_status` is a **descriptive** "
+            f"label (one of `OK` / `INSUFFICIENT_DATA` / "
+            f"`DEGRADED`); the per-mover `audit_status` is a "
+            f"**descriptive** per-row label (one of `CAPTURED` / "
+            f"`PARTIALLY_CAPTURED` / `MISSED` / `EXCLUDED` / "
+            f"`INSUFFICIENT_DATA`). None of these labels "
+            f"authorises a real trade and **MUST NEVER** modify "
+            f"position size, leverage, stop-loss, target price, "
+            f"the Risk Engine, the Execution FSM, `symbol_limit`, "
+            f"candidate-pool capacity, anomaly thresholds, Regime "
+            f"weights, or any other runtime knob. The Risk Engine "
+            f"remains the single trade-decision gate. "
+            f"Captured-but-rejected != failure; "
+            f"missed-but-not-in-eligible-universe != failure; a "
+            f"single coin proves nothing. This is **NOT** a new "
+            f"strategy, **NOT** a trading module, **NOT** AI "
+            f"Learning, **NOT** automatic parameter optimisation, "
+            f"**NOT** reinforcement learning, **NOT** a "
+            f"Historical 30D+ Blind Replay / Walk-forward "
+            f"Validation gate; Phase 12 remains FORBIDDEN._\n\n"
+            f"{mover_capture_block}\n"
+            f"### Mover capture insufficient data reasons\n"
+            f"{mover_capture_insufficient_lines}\n\n"
+            f"### Mover capture audit warnings\n"
+            f"{mover_capture_warning_lines}\n\n"
+            f"### Mover capture coverage warnings\n"
+            f"{mover_capture_coverage_lines}\n\n"
+            f"### Mover capture miss reason summary\n"
+            f"{mover_capture_miss_lines}\n\n"
+            f"### Mover capture records (per top mover)\n"
+            f"{mover_capture_record_lines}\n\n"
             f"## Top risk-rejection reasons\n{top_reject}\n\n"
             f"## Top symbols by event volume\n{top_symbols}\n\n"
             f"## Error notes\n{error_notes}\n\n"
