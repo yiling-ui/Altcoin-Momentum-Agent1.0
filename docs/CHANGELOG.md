@@ -7,6 +7,485 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-A kickoff - Historical 60D Mover Coverage Backfill Audit v0 docs-only kickoff (PR #63)
+
+**Type:** Docs-only kickoff / scope alignment.
+**Runtime effect:** **none.**
+**Phase ledger effect:** **defines** Phase
+11C.1C-C-B-B-B-D-A in place — name, scope, boundary,
+allowed outputs, forbidden list, eight audit questions,
+60D top-mover reference set fields, per-captured-mover
+audit row fields, miss-reason taxonomy, allowed input
+sources, audit objects, audit cadence (B1 / B2 with
+B3+ reserved; operator-driven, **not** auto-scheduled),
+interpretation principles, safety boundary, and
+acceptance-gate placeholder. Phase 11C.1C-C-B-B-B-D-A
+remains `NEXT_ALLOWED / NOT_STARTED` after this PR (this
+PR scopes the slice; it does not flip its state). No
+phase's acceptance state is flipped.
+**Safety flag effect:** **none.**
+**Trade authority granted:** **none.**
+
+> **Status: DOCS-ONLY KICKOFF / SCOPE ALIGNMENT.** This
+> PR defines Phase 11C.1C-C-B-B-B-D-A (*Historical 60D
+> Mover Coverage Backfill Audit v0 / 历史 60 天异动币覆盖
+> 回填审计 v0*) as the **next allowed child slice** under
+> the Phase 11C.1C-C-B-B-B parent (on top of the
+> `ACCEPTED` Phase 11C.1C-C-B-B-B-D track). The parent
+> phase is **not** renamed: Phase 11C.1C-C-B-B-B remains
+> *Strategy Validation Lab (deeper) & richer Cluster
+> Exposure Control follow-up*. **No runtime code is
+> shipped by this PR.** **No phase's acceptance state is
+> flipped.** Phase 11C.1C-C-B-B-B-D-A remains
+> `NEXT_ALLOWED / NOT_STARTED`; this PR scopes the slice
+> in place.
+>
+> Paper / report / evidence only. **NOT** live trading.
+> **NOT** AI Learning. **NOT** automatic parameter
+> optimisation. **NOT** reinforcement learning. **NOT** a
+> new strategy. **NOT** a trading module. **NOT** a new
+> runtime module. **NOT** a new event type. **NOT** the
+> complete Strategy Validation Lab follow-up. **NOT**
+> Phase 11C.1C-C-B-B-B-D-A *implementation* (out of
+> scope; will be a separate PR cycle if needed). **NOT**
+> Phase 11C.1C-C-B-B-B-D-A *closeout* (out of scope; the
+> closeout will be a separate docs-only PR after the
+> operator captures B1 / B2 backfill audit evidence).
+> **NOT** a Historical 30D+ / 60D *complete strategy*
+> blind replay / walk-forward validation gate (that gate
+> is reserved until small-money live trading prep and is
+> **not** in scope here). **NOT** Phase 12.
+
+#### Why next slice is Phase 11C.1C-C-B-B-B-D-A (Historical 60D Mover Coverage Backfill Audit v0)
+
+  - PR #61 proves the Mover Capture Recall & Missed-Tail
+    Coverage Audit v0 layer can run in real paper mode
+    and export `MOVER_CAPTURE_*` evidence.
+  - However, a 10 min live audit window may be too short
+    and market-dependent. On a calm day the gainer board
+    may show no clear tails; on a noisy day a single coin
+    (e.g. SAGAUSDT) may dominate the signal but prove
+    nothing about general coverage.
+  - Waiting for several "good" market days to accumulate
+    enough 10 min windows wastes operator time and risks
+    selection bias on the operator's side.
+  - Therefore the next slice should evaluate
+    discovery-layer coverage **over the past 60 days** as
+    a structured **historical backfill audit**, not as
+    another series of 10 min live windows.
+  - This is **not** complete strategy blind testing.
+  - This is **not** Phase 12 pre-live validation.
+  - This is **only** a discovery-layer historical
+    coverage backfill audit.
+
+#### Phase 11C.1C-C-B-B-B-D-A scope (docs-only kickoff summary)
+
+  - Defines Phase 11C.1C-C-B-B-B-D-A as the *Historical
+    60D Mover Coverage Backfill Audit v0 / 历史 60 天异动
+    币覆盖回填审计 v0* — the next allowed child slice
+    under Phase 11C.1C-C-B-B-B (on top of the `ACCEPTED`
+    11C.1C-C-B-B-B-D track).
+  - Audit answers eight questions, **and only these
+    eight** (see "Phase 11C.1C-C-B-B-B-D-A boundary"
+    below).
+  - Defines the 60D top-mover reference set fields per
+    window / per symbol: `reference_window_start_utc`,
+    `reference_window_end_utc`, `top_mover_symbol`,
+    `top_mover_rank`, `max_window_gain`, `max_24h_gain`,
+    `reference_timestamp_utc`, `eligible_usdt_perpetual`
+    (true / false). Excluded: non-futures listings,
+    non-USDT-margined, non-perpetual,
+    not-in-`exchangeInfo`, delisted / inactive symbols.
+  - Defines the per-captured-mover audit row:
+    `top_mover_symbol`, `mover_window_start_utc`,
+    `mover_window_end_utc`, `top_mover_rank`,
+    `max_window_gain`, `max_24h_gain`,
+    `eligible_usdt_perpetual`, `system_captured`,
+    `first_seen_time_utc`, `first_seen_event_type`,
+    `first_seen_latency_seconds` where a mover reference
+    timestamp exists, `capture_path_depth`,
+    `reached_anomaly`, `reached_label_queue`,
+    `reached_tail_label`,
+    `reached_strategy_validation_sample`,
+    `risk_rejected`, `status` (`captured` /
+    `partially_captured` / `missed` / `excluded`),
+    `miss_reason`.
+  - Defines the fixed `miss_reason` taxonomy:
+    `not_in_futures_universe`,
+    `symbol_not_in_exchange_info`, `not_usdt_perpetual`,
+    `missing_historical_reference_data`,
+    `missing_event_history`, `below_liquidity_threshold`,
+    `symbol_limit_excluded`, `candidate_pool_evicted`,
+    `insufficient_ws_data`, `stale_data`,
+    `data_unreliable`, `no_anomaly_threshold_cross`,
+    `risk_rejected`, `no_completed_tail_label_yet`,
+    `unknown` (and `unknown` is a `review` signal —
+    **not** a `relax` signal).
+  - Lists the allowed outputs (descriptive templates
+    only): `historical_60d_mover_reference_set`,
+    `historical_60d_capture_path_audit`,
+    `historical_60d_miss_reason_summary`,
+    `historical_60d_first_seen_summary`,
+    `historical_60d_capture_recall_summary`,
+    `historical_60d_coverage_warning`,
+    `historical_60d_export_replay_evidence_template`.
+  - Defines the audit cadence (operator-driven; **not**
+    auto-scheduled): B1 (first end-to-end 60D historical
+    backfill audit pass), B2 (second pass against an
+    independent operator-VPS replay window), B3+
+    reserved for later child slices and out of scope
+    here.
+  - Lists the allowed input sources (read-only; reuse
+    existing surfaces): Binance public 24 h ticker /
+    public klines / public market data,
+    `EventRepository` / events.db, daily report, Phase
+    8.5 export bundle / Phase 10A replay bundle over the
+    60D window, `StrategyValidationDataset`,
+    `PaperAlphaGateReport`, `RegimeClusterEvidencePack`,
+    `MoverCaptureRecallAuditReport`, `SymbolUniverse` /
+    `exchangeInfo`-as-truth catalogue, candidate pool
+    logs / capacity-eviction evidence.
+  - Records the eight interpretation principles
+    verbatim (see "Phase 11C.1C-C-B-B-B-D-A
+    interpretation principles" below).
+
+#### Phase 11C.1C-C-B-B-B-D-A boundary (must be read verbatim)
+
+D-A is **allowed** to answer:
+
+  1. over the past 60 days, **did AMA-RT discover the
+     eligible USDT perpetual movers**?
+  2. if discovered, **when was the first detection**
+     (`first_seen_time_utc`)?
+  3. **what was the first detection event**
+     (`first_seen_event_type`)?
+  4. **how deep did the capture path go**
+     (`capture_path_depth`, `reached_anomaly`,
+     `reached_label_queue`, `reached_tail_label`,
+     `reached_strategy_validation_sample`)?
+  5. if not discovered, **why** (`miss_reason` from the
+     fixed taxonomy)?
+  6. **is each missed mover a universe-coverage issue
+     or a discovery-layer warning**?
+  7. **which captured movers were rejected by the Risk
+     Engine** (`risk_rejected = true`; conservative
+     paper outcome, **not** discovery failure)?
+  8. **which captured movers only made it partway**
+     (`status = partially_captured`)?
+
+D-A must **NOT** answer:
+
+  - whether the strategy is profitable;
+  - whether live trading is allowed;
+  - whether leverage / position / stops should change;
+  - whether `symbol_limit` should auto-expand;
+  - whether anomaly thresholds should auto-change;
+  - whether candidate pool capacity should auto-change;
+  - whether Regime weights should auto-change;
+  - whether Phase 12 can begin.
+
+#### Phase 11C.1C-C-B-B-B-D-A interpretation principles (must be read verbatim)
+
+  1. **Captured ≠ tradable.**
+  2. **Captured early ≠ strategy profitable.**
+  3. **Missed and not-in-futures-universe ≠ system
+     failure** (out of scope by design).
+  4. **Missed and in-eligible-universe IS a coverage
+     warning** (for human review only).
+  5. **`risk_rejected` ≠ discovery failure** (Risk
+     Engine remains the single trade-decision gate).
+  6. **`missed` and `unknown` are `review` signals**
+     (no automatic rule relaxation, no automatic
+     `symbol_limit` expansion, no automatic anomaly
+     threshold change, no automatic candidate-pool
+     capacity change, no automatic Regime weight
+     change).
+  7. **High `capture_recall_rate` does NOT authorise
+     live trading.**
+  8. **Low `capture_recall_rate` does NOT authorise
+     parameter changes** (no "looking at the answer
+     key" — no auto-tuning thresholds against the
+     historical reference set).
+
+#### Phase 11C.1C-C-B-B-B-D-A forbidden surface (must be read verbatim)
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise API keys.
+  - It does **NOT** authorise private endpoints.
+  - It does **NOT** authorise signed endpoints.
+  - It does **NOT** authorise `listenKey` / private
+    WebSocket.
+  - It does **NOT** authorise account / order /
+    position / leverage / margin endpoints.
+  - It does **NOT** authorise DeepSeek trade decisions.
+  - It does **NOT** authorise real Telegram outbound.
+  - It does **NOT** authorise AI Learning.
+  - It does **NOT** authorise automatic parameter
+    optimisation.
+  - It does **NOT** authorise reinforcement learning.
+  - It does **NOT** authorise rule relaxation based on
+    historical movers.
+  - It does **NOT** authorise automatic `symbol_limit`
+    expansion.
+  - It does **NOT** authorise automatic anomaly
+    threshold changes.
+  - It does **NOT** authorise automatic candidate-pool
+    capacity changes.
+  - It does **NOT** authorise automatic Regime weight
+    changes.
+  - It does **NOT** authorise changing the Risk Engine
+    or the Execution FSM.
+  - It does **NOT** authorise auto-scheduling B1 / B2 /
+    B3+ runs.
+  - It does **NOT** authorise replacing the Mover
+    Capture Recall & Missed-Tail Coverage Audit v0
+    `DEGRADED` rule with a relaxed rule.
+  - It does **NOT** authorise replacing the Regime &
+    Cluster Evidence Pack v0 `INSUFFICIENT_SAMPLE` rule
+    with a relaxed rule.
+  - It does **NOT** authorise replacing the Paper Alpha
+    Gate v0 `INCONCLUSIVE` rule with a relaxed rule.
+  - It does **NOT** authorise replacing the Long-Window
+    Cohort Stability & Sample Sufficiency Protocol v0
+    cadence with a relaxed cadence.
+  - It does **NOT** authorise treating Phase
+    11C.1C-C-B-B-B-D-A as a Historical 30D+ / 60D
+    *complete strategy* blind replay / walk-forward
+    validation.
+  - It does **NOT** authorise implementing the Phase
+    11C.1C-C-B-B-B-D-A backfill as a new runtime module
+    (the slice is intentionally docs / evidence-template
+    only end-to-end at kickoff).
+  - It does **NOT** authorise adding new Python modules
+    under `app/`.
+  - It does **NOT** authorise adding new event types.
+  - It does **NOT** authorise modifying `app/` /
+    `scripts/` / `tests/` / `configs/` / `risk/` /
+    `execution/` / `llm/` / `telegram/` / `exchange/`.
+  - It does **NOT** authorise modifying configuration
+    schemas / defaults / YAML.
+  - It does **NOT** authorise adding or modifying tests.
+  - It does **NOT** authorise running tests.
+  - It does **NOT** authorise modifying strategy runtime
+    code.
+  - It does **NOT** authorise modifying runtime
+    behaviour.
+  - It does **NOT** authorise implementing new
+    functionality.
+  - It does **NOT** authorise flipping any phase's
+    acceptance state.
+  - It does **NOT** authorise renaming Phase
+    11C.1C-C-B-B-B.
+  - It does **NOT** authorise Phase 11C.1C-C-B-B-B-D-A
+    *implementation* in this PR.
+  - It does **NOT** authorise Phase 11C.1C-C-B-B-B-D-A
+    *closeout* in this PR.
+  - It does **NOT** authorise Phase 11C.1C-C-B-B-B-D-B /
+    further child slices.
+  - It does **NOT** authorise Phase 12.
+
+#### Documentation changes
+
+  - `docs/PROJECT_STATUS.md` (modified — docs-only):
+    added a new active-phase block for Phase
+    11C.1C-C-B-B-B-D-A `NEXT_ALLOWED / NOT_STARTED`
+    above the previous active blocks; added a new
+    timeline-table row for Phase 11C.1C-C-B-B-B-D-A
+    (kickoff) referencing PR #63; marked the prior
+    "placeholder; not yet kicked off" row as
+    "placeholder; superseded by PR #63 kickoff above".
+  - `docs/PHASE_GATE.md` (modified — docs-only): added
+    a new D-A kickoff row at the top of the D-A entries
+    in the Open / Reserved table referencing PR #63;
+    marked the prior D-A row as "placeholder;
+    superseded by PR #63 kickoff above"; refreshed the
+    `## Open phase: Phase 11C.1C-C-B-B-B-D-A
+    (NEXT_ALLOWED / NOT_STARTED)` section header note
+    to reference the PR #63 scoping; replaced the
+    "acceptance gate (placeholder)" text to reflect
+    that this is now the kickoff PR; appended a new
+    full `## Phase 11C.1C-C-B-B-B-D-A kickoff (PR #63)`
+    section with kickoff scope, safety boundary, and
+    confirmation checklist.
+  - `docs/PHASE_11C_1C_C_B_B_B_D_A_HISTORICAL_60D_MOVER_COVERAGE_BACKFILL.md`
+    (NEW — docs-only): the dedicated phase doc
+    recording Phase 11C.1C-C-B-B-B-D-A's full scope,
+    eight audit questions, 60D top-mover reference set
+    fields, per-captured-mover audit row fields,
+    miss-reason taxonomy (14 + `unknown`), allowed
+    outputs, audit cadence, allowed input sources,
+    audit objects, eight interpretation principles,
+    full forbidden list, safety boundary, and
+    acceptance-gate placeholder.
+  - `docs/CHANGELOG.md` (this entry).
+  - **NEW:** `docs/PR63_DESCRIPTION.md` — this PR's
+    description.
+
+#### Safety boundary (Phase 1 lock unchanged)
+
+```
+trading_mode                    = paper
+live_trading_enabled            = False
+right_tail_enabled              = False
+llm_enabled                     = False
+exchange_live_order_enabled     = False
+telegram_outbound_enabled       = False
+binance_private_api_enabled     = False
+real Binance API key            = not loaded
+real Binance API secret         = not loaded
+real signed endpoint call       = none
+real account / order / position / leverage / margin endpoint = none
+real private WebSocket          = none
+real listenKey / user data WS   = none
+real DeepSeek trade decision    = none
+real Telegram outbound          = none
+Phase 12                        = FORBIDDEN (gate unchanged)
+```
+
+#### Confirmation checklist
+
+  - [x] Docs-only PR; no runtime code modified.
+  - [x] No `app/` / `scripts/` / `tests/` / `configs/`
+    changes.
+  - [x] No `execution/` / `risk/` / `llm/` / `telegram/`
+    / `exchange/` changes.
+  - [x] No strategy runtime code changes.
+  - [x] No new Python files.
+  - [x] No new event types.
+  - [x] No new tests.
+  - [x] No tests run.
+  - [x] No runtime behaviour changed.
+  - [x] No phase's acceptance state flipped — Phase
+    11C.1C-C-B-B-A remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B remains `NEXT_ALLOWED / NOT_STARTED`;
+    Phase 11C.1C-C-B-B-B-A remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B-B remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B-C remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B-D remains `ACCEPTED`; Phase
+    11C.1C-C-B-B-B-D-A remains `NEXT_ALLOWED /
+    NOT_STARTED` (scoped by this PR; not flipped).
+  - [x] Phase 11C.1C-C-B-B-B parent is **not** renamed;
+    it remains *Strategy Validation Lab (deeper) &
+    richer Cluster Exposure Control follow-up*.
+  - [x] Phase 11C.1C-C-B-B-B-D-A is recorded as the next
+    allowed child slice on top of the
+    Phase 11C.1C-C-B-B-B-D track = Historical 60D Mover
+    Coverage Backfill Audit v0 / *历史 60 天异动币覆盖
+    回填审计 v0*.
+  - [x] D-A rationale recorded (10 min live window short
+    / market-dependent; SAGAUSDT can be missed or
+    `unknown`; quiet days waste operator time and risk
+    selection bias; therefore D-A evaluates 60D
+    discovery-layer coverage as a structured backfill
+    audit; not complete strategy blind testing; not
+    Phase 12 pre-live validation; only discovery-layer
+    historical coverage backfill audit).
+  - [x] D-A audit cadence recorded (B1 / B2 with B3+
+    reserved; operator-driven; not auto-scheduled).
+  - [x] D-A allowed input sources recorded (Binance
+    public 24 h ticker / public klines / public market
+    data, `EventRepository` / events.db, daily report,
+    Phase 8.5 export bundle / Phase 10A replay bundle
+    over the 60D window, `StrategyValidationDataset`,
+    `PaperAlphaGateReport`, `RegimeClusterEvidencePack`,
+    `MoverCaptureRecallAuditReport`, `SymbolUniverse` /
+    `exchangeInfo`-as-truth catalogue, candidate pool
+    logs / capacity-eviction evidence).
+  - [x] D-A audit objects recorded (60D top gainers /
+    top movers / high-momentum movers in eligible USDT
+    perpetual universe, 60D detected anomalies, 60D
+    pre-anomaly candidates, 60D label-tracked
+    candidates, 60D validation samples, 60D risk-rejected
+    captured movers, 60D excluded symbols).
+  - [x] D-A 60D top-mover reference set fields recorded
+    verbatim (`reference_window_start_utc`,
+    `reference_window_end_utc`, `top_mover_symbol`,
+    `top_mover_rank`, `max_window_gain`,
+    `max_24h_gain`, `reference_timestamp_utc`,
+    `eligible_usdt_perpetual`).
+  - [x] D-A per-captured-mover audit row recorded
+    verbatim (`top_mover_symbol`,
+    `mover_window_start_utc`, `mover_window_end_utc`,
+    `top_mover_rank`, `max_window_gain`,
+    `max_24h_gain`, `eligible_usdt_perpetual`,
+    `system_captured`, `first_seen_time_utc`,
+    `first_seen_event_type`,
+    `first_seen_latency_seconds`,
+    `capture_path_depth`, `reached_anomaly`,
+    `reached_label_queue`, `reached_tail_label`,
+    `reached_strategy_validation_sample`,
+    `risk_rejected`, `status`, `miss_reason`).
+  - [x] D-A fixed `miss_reason` taxonomy recorded
+    verbatim (`not_in_futures_universe`,
+    `symbol_not_in_exchange_info`, `not_usdt_perpetual`,
+    `missing_historical_reference_data`,
+    `missing_event_history`,
+    `below_liquidity_threshold`,
+    `symbol_limit_excluded`, `candidate_pool_evicted`,
+    `insufficient_ws_data`, `stale_data`,
+    `data_unreliable`, `no_anomaly_threshold_cross`,
+    `risk_rejected`, `no_completed_tail_label_yet`,
+    `unknown`).
+  - [x] D-A allowed outputs explicitly listed
+    (`historical_60d_mover_reference_set`,
+    `historical_60d_capture_path_audit`,
+    `historical_60d_miss_reason_summary`,
+    `historical_60d_first_seen_summary`,
+    `historical_60d_capture_recall_summary`,
+    `historical_60d_coverage_warning`,
+    `historical_60d_export_replay_evidence_template`)
+    and marked descriptive only.
+  - [x] D-A interpretation principles recorded verbatim
+    (captured ≠ tradable; captured early ≠ strategy
+    profitable; missed and not-in-futures-universe ≠
+    system failure; missed and in-eligible-universe IS a
+    coverage warning; `risk_rejected` ≠ discovery
+    failure; `missed` and `unknown` are `review`
+    signals; high recall does NOT authorise live
+    trading; low recall does NOT authorise parameter
+    changes / "looking at the answer key").
+  - [x] Slice-specific forbidden items recorded verbatim
+    (no live trading; no API keys; no private endpoints;
+    no signed endpoints; no `listenKey`; no private
+    WebSocket; no DeepSeek trade decisions; no real
+    Telegram outbound; no AI Learning; no automatic
+    parameter optimisation; no reinforcement learning;
+    no rule relaxation based on historical movers; no
+    auto `symbol_limit` expansion; no auto anomaly
+    threshold changes; no auto candidate-pool capacity
+    changes; no auto Regime weight changes; no Risk
+    Engine / Execution FSM changes; no auto-scheduling
+    B1 / B2 / B3+; no replacing existing
+    `DEGRADED` / `INSUFFICIENT_SAMPLE` / `INCONCLUSIVE`
+    rules with relaxed rules; no replacing Long-Window
+    Cohort Stability & Sample Sufficiency Protocol v0
+    cadence with a relaxed cadence; no treating D-A as a
+    Historical 30D+ / 60D *complete strategy* blind
+    replay / walk-forward validation; no implementing
+    the D-A backfill as a new runtime module; no adding
+    new Python modules under `app/`; no adding new event
+    types; no modifying `app/` / `scripts/` / `tests/` /
+    `configs/`; no modifying configuration schemas /
+    defaults / YAML; no adding or modifying tests; no
+    running tests; no modifying strategy runtime code;
+    no modifying runtime behaviour; no implementing new
+    functionality; no flipping any phase's acceptance
+    state; no renaming Phase 11C.1C-C-B-B-B; no Phase
+    11C.1C-C-B-B-B-D-A *implementation* in this PR; no
+    Phase 11C.1C-C-B-B-B-D-A *closeout* in this PR; no
+    Phase 11C.1C-C-B-B-B-D-B / further child slices; no
+    Phase 12).
+  - [x] Safety boundary held end-to-end (`mode=paper`,
+    `live_trading=False`, `exchange_live_orders=False`,
+    `right_tail=False`, `llm=False`,
+    `telegram_outbound_enabled=False`,
+    `binance_private_api_enabled=False`, no Binance API
+    key, no Binance API secret, no signed endpoint, no
+    account / order / position / leverage / margin
+    endpoint, no private WebSocket, no `listenKey`, no
+    DeepSeek trade decision, no real Telegram outbound).
+  - [x] Phase 12 remains `FORBIDDEN`.
+
 ### Phase 11C.1C-C-B-B-B-D accepted - Mover Capture Recall & Missed-Tail Coverage Audit v0 docs-only closeout (PR #62)
 
 **Type:** Docs-only closeout / acceptance flip.
