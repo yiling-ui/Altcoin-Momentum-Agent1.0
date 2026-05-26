@@ -16,9 +16,22 @@ loader is **NOT** touched. The builder produces local artefacts
 under `data/historical_market_store/` that the existing
 `load_historical_market_store(...)` consumes unchanged.
 **Phase ledger effect:** adds Phase 11C.1C-C-B-B-B-D-A.1 as a
-data-preparation child task under `IN_REVIEW` Phase
-11C.1C-C-B-B-B-D-A. Phase 11C.1C-C-B-B-B-D-A itself remains
-`IN_REVIEW`. **No** previously-`ACCEPTED` phase is modified.
+data-preparation child task under Phase 11C.1C-C-B-B-B-D-A.
+Phase 11C.1C-C-B-B-B-D-A *implementation* has been merged
+(PR #64) and the operator-VPS WS paper smoke + Phase 8.5
+export evidence has been validated, but Phase
+11C.1C-C-B-B-B-D-A itself is **NOT yet `ACCEPTED`** — current
+state `NOT_ACCEPTED / HISTORICAL_REFERENCE_DATA_REQUIRED /
+CLOSEOUT_PENDING`: real 60D Historical Market Store reference
+rows have not yet been generated, so D-A cannot be flipped to
+`ACCEPTED`. PR #65 only adds the Historical 60D Mover
+Reference Store Builder v0; PR #65 does **NOT** complete the
+real 60D backfill; PR #65 does **NOT** flip D-A to
+`ACCEPTED`. Real 60D data generation against Binance public
+futures endpoints + operator evidence are required after
+PR #65 merges before a separate docs-only closeout PR can
+mark D-A `ACCEPTED`. **No** previously-`ACCEPTED` phase is
+modified.
 **Safety flag effect:** **none.** `mode=paper`,
 `live_trading=False`, `right_tail=False`, `llm=False`,
 `exchange_live_orders=False`,

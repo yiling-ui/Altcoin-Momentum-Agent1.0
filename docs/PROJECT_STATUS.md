@@ -8,8 +8,13 @@ intentionally short. The full phase-gate ledger lives in
 ## Current phase
 
 > **Phase 11C.1C-C-B-B-B-D-A.1 = IN_REVIEW (PR #65; data
-> preparation child task under `IN_REVIEW` Phase
-> 11C.1C-C-B-B-B-D-A).** Historical 60D Mover Reference Store
+> preparation child task under Phase 11C.1C-C-B-B-B-D-A,
+> whose implementation has been merged via PR #64 and whose
+> operator-VPS WS paper smoke + Phase 8.5 export evidence
+> has been validated, but which itself is **NOT yet
+> `ACCEPTED`** — current state `NOT_ACCEPTED /
+> HISTORICAL_REFERENCE_DATA_REQUIRED / CLOSEOUT_PENDING`).**
+> Historical 60D Mover Reference Store
 > Builder v0 — public-data-only builder
 > (`scripts/build_historical_mover_reference_store.py`) that
 > produces local `data/historical_market_store/` artefacts the
@@ -35,9 +40,22 @@ intentionally short. The full phase-gate ledger lives in
 > set. Every emitted JSONL row is validated against the
 > Lookahead Guard (`completed_tail_label` /
 > `final_max_gain` / `future_return` / ...) before being
-> appended. Phase 11C.1C-C-B-B-B-D-A itself remains `IN_REVIEW`
-> (PR #64); this PR does **not** flip its state. **No**
-> previously-`ACCEPTED` phase is modified. Phase 12 remains
+> appended. Phase 11C.1C-C-B-B-B-D-A *implementation* has
+> been merged (PR #64) and the operator-VPS WS paper smoke
+> + Phase 8.5 export evidence has been validated, but Phase
+> 11C.1C-C-B-B-B-D-A itself is **NOT yet `ACCEPTED`** —
+> current state `NOT_ACCEPTED /
+> HISTORICAL_REFERENCE_DATA_REQUIRED / CLOSEOUT_PENDING`:
+> real 60D Historical Market Store reference rows have not
+> yet been generated, so D-A cannot be flipped to
+> `ACCEPTED`. PR #65 only adds the Historical 60D Mover
+> Reference Store Builder v0; PR #65 does **NOT** complete
+> the real 60D backfill; PR #65 does **NOT** flip D-A to
+> `ACCEPTED`. Real 60D data generation against Binance
+> public futures endpoints + operator evidence are required
+> after PR #65 merges before a separate docs-only closeout
+> PR can mark D-A `ACCEPTED`. **No** previously-`ACCEPTED`
+> phase is modified by this PR. Phase 12 remains
 > **FORBIDDEN**.
 >
 > *Prior status (kept for history; superseded by the entry

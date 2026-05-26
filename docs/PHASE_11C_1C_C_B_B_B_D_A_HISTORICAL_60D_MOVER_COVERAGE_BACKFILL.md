@@ -57,7 +57,12 @@
 
 > **Status: DATA-PREPARATION CHILD TASK (PR #65).** Phase
 > 11C.1C-C-B-B-B-D-A.1 is the small, public-data-only data
-> preparation step under `IN_REVIEW` Phase 11C.1C-C-B-B-B-D-A.
+> preparation step under Phase 11C.1C-C-B-B-B-D-A, whose
+> *implementation* has been merged (PR #64) and whose
+> operator-VPS WS paper smoke + Phase 8.5 export evidence
+> has been validated, but which itself is **NOT yet
+> `ACCEPTED`** — current state `NOT_ACCEPTED /
+> HISTORICAL_REFERENCE_DATA_REQUIRED / CLOSEOUT_PENDING`.
 > It ships
 > `scripts/build_historical_mover_reference_store.py` — a
 > minimal builder that produces the
@@ -151,7 +156,11 @@
 >     data generation against Binance public futures
 >     endpoints is **required after merge** before
 >     Phase 11C.1C-C-B-B-B-D-A can be flipped to
->     `ACCEPTED`. The closeout PR (separate, docs-only)
+>     `ACCEPTED`. PR #65 only adds the Historical 60D Mover
+>     Reference Store Builder v0; PR #65 does **NOT**
+>     complete the real 60D backfill; PR #65 does **NOT**
+>     flip Phase 11C.1C-C-B-B-B-D-A to `ACCEPTED`. The
+>     closeout PR (separate, docs-only)
 >     must record the operator-VPS evidence (live
 >     `HISTORICAL_MOVER_COVERAGE_*` event counts, daily
 >     report excerpt, Phase 8.5 export bundle manifest
@@ -976,9 +985,15 @@ kickoff PR does **not** flip the slice's state.
 
 ## Phase 11C.1C-C-B-B-B-D-A v0 implementation update (PR #64)
 
-> **Status: IN_REVIEW (PR #64; flipped 2026-05-25).** This update
-> records the v0 engine / payload / report / Lookahead Guard
-> implementation that lands with PR #64. Phase 11C.1C-C-B-B-B-D-A
+> **Status: NOT_ACCEPTED / HISTORICAL_REFERENCE_DATA_REQUIRED /
+> CLOSEOUT_PENDING (PR #64 merged 2026-05-25; operator-VPS
+> WS paper smoke + Phase 8.5 export evidence validated;
+> awaiting real 60D Historical Market Store reference rows
+> + a separate docs-only closeout PR before Phase
+> 11C.1C-C-B-B-B-D-A can be flipped to `ACCEPTED`).** This
+> update records the v0 engine / payload / report /
+> Lookahead Guard implementation that landed with PR #64.
+> Phase 11C.1C-C-B-B-B-D-A
 > remains paper / report / evidence only. **No** real trade is
 > authorised. **No** position size, leverage, stop-loss, target
 > price, Risk Engine threshold, Execution FSM rule, `symbol_limit`,
