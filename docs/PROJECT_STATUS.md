@@ -7,6 +7,60 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-A.1 = IN_REVIEW (PR #65; data
+> preparation child task under Phase 11C.1C-C-B-B-B-D-A,
+> whose implementation has been merged via PR #64 and whose
+> operator-VPS WS paper smoke + Phase 8.5 export evidence
+> has been validated, but which itself is **NOT yet
+> `ACCEPTED`** — current state `NOT_ACCEPTED /
+> HISTORICAL_REFERENCE_DATA_REQUIRED / CLOSEOUT_PENDING`).**
+> Historical 60D Mover Reference Store
+> Builder v0 — public-data-only builder
+> (`scripts/build_historical_mover_reference_store.py`) that
+> produces local `data/historical_market_store/` artefacts the
+> existing D-A audit's
+> `app.adaptive.historical_mover_coverage_backfill.load_historical_market_store(root)`
+> consumes unchanged. Paper / report / evidence only. **NOT**
+> live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning.
+> **NOT** a strategy implementation. **NOT** a trading module.
+> **NOT** a Historical 30D+ / 60D *complete strategy* blind
+> replay / walk-forward validation gate. **NOT** the
+> small-money live-trading pre-validation gate. **NOT** the
+> Phase 11C.1C-C-B-B-B-D-A *closeout* (the closeout will be a
+> separate docs-only PR after the operator captures real 60D
+> backfill audit evidence). **NOT** Phase 12. The Risk Engine
+> remains the single trade-decision gate. The builder reuses
+> the Phase 11C public allowlist
+> (`assert_public_endpoint_allowed`), refuses every
+> credential-shaped kwarg + every signed-request query
+> parameter, and refuses to start when any of
+> `BINANCE_API_KEY` / `BINANCE_API_SECRET` / `BINANCE_KEY` /
+> `BINANCE_SECRET` / `BINANCE_TOKEN` / `BINANCE_PASSPHRASE` is
+> set. Every emitted JSONL row is validated against the
+> Lookahead Guard (`completed_tail_label` /
+> `final_max_gain` / `future_return` / ...) before being
+> appended. Phase 11C.1C-C-B-B-B-D-A *implementation* has
+> been merged (PR #64) and the operator-VPS WS paper smoke
+> + Phase 8.5 export evidence has been validated, but Phase
+> 11C.1C-C-B-B-B-D-A itself is **NOT yet `ACCEPTED`** —
+> current state `NOT_ACCEPTED /
+> HISTORICAL_REFERENCE_DATA_REQUIRED / CLOSEOUT_PENDING`:
+> real 60D Historical Market Store reference rows have not
+> yet been generated, so D-A cannot be flipped to
+> `ACCEPTED`. PR #65 only adds the Historical 60D Mover
+> Reference Store Builder v0; PR #65 does **NOT** complete
+> the real 60D backfill; PR #65 does **NOT** flip D-A to
+> `ACCEPTED`. Real 60D data generation against Binance
+> public futures endpoints + operator evidence are required
+> after PR #65 merges before a separate docs-only closeout
+> PR can mark D-A `ACCEPTED`. **No** previously-`ACCEPTED`
+> phase is modified by this PR. Phase 12 remains
+> **FORBIDDEN**.
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-A = IN_REVIEW (PR #64; flipped
 > 2026-05-25).** Historical 60D Mover Coverage Backfill
 > Audit v0 / *历史 60 天异动币覆盖回填审计 v0* — v0
