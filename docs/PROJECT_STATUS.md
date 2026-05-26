@@ -7,6 +7,42 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-A.1 = IN_REVIEW (PR #65; data
+> preparation child task under `IN_REVIEW` Phase
+> 11C.1C-C-B-B-B-D-A).** Historical 60D Mover Reference Store
+> Builder v0 — public-data-only builder
+> (`scripts/build_historical_mover_reference_store.py`) that
+> produces local `data/historical_market_store/` artefacts the
+> existing D-A audit's
+> `app.adaptive.historical_mover_coverage_backfill.load_historical_market_store(root)`
+> consumes unchanged. Paper / report / evidence only. **NOT**
+> live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning.
+> **NOT** a strategy implementation. **NOT** a trading module.
+> **NOT** a Historical 30D+ / 60D *complete strategy* blind
+> replay / walk-forward validation gate. **NOT** the
+> small-money live-trading pre-validation gate. **NOT** the
+> Phase 11C.1C-C-B-B-B-D-A *closeout* (the closeout will be a
+> separate docs-only PR after the operator captures real 60D
+> backfill audit evidence). **NOT** Phase 12. The Risk Engine
+> remains the single trade-decision gate. The builder reuses
+> the Phase 11C public allowlist
+> (`assert_public_endpoint_allowed`), refuses every
+> credential-shaped kwarg + every signed-request query
+> parameter, and refuses to start when any of
+> `BINANCE_API_KEY` / `BINANCE_API_SECRET` / `BINANCE_KEY` /
+> `BINANCE_SECRET` / `BINANCE_TOKEN` / `BINANCE_PASSPHRASE` is
+> set. Every emitted JSONL row is validated against the
+> Lookahead Guard (`completed_tail_label` /
+> `final_max_gain` / `future_return` / ...) before being
+> appended. Phase 11C.1C-C-B-B-B-D-A itself remains `IN_REVIEW`
+> (PR #64); this PR does **not** flip its state. **No**
+> previously-`ACCEPTED` phase is modified. Phase 12 remains
+> **FORBIDDEN**.
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-A = IN_REVIEW (PR #64; flipped
 > 2026-05-25).** Historical 60D Mover Coverage Backfill
 > Audit v0 / *历史 60 天异动币覆盖回填审计 v0* — v0

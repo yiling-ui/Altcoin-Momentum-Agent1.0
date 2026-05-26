@@ -7,6 +7,177 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-A.1 - Historical 60D Mover Reference Store Builder v0 (PR #65)
+
+**Type:** Data-preparation PR (paper / report / evidence only).
+**Runtime effect:** new builder script under `scripts/`. The
+public-market paper runner is **NOT** touched. The D-A audit
+loader is **NOT** touched. The builder produces local artefacts
+under `data/historical_market_store/` that the existing
+`load_historical_market_store(...)` consumes unchanged.
+**Phase ledger effect:** adds Phase 11C.1C-C-B-B-B-D-A.1 as a
+data-preparation child task under `IN_REVIEW` Phase
+11C.1C-C-B-B-B-D-A. Phase 11C.1C-C-B-B-B-D-A itself remains
+`IN_REVIEW`. **No** previously-`ACCEPTED` phase is modified.
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+
+> **Status: DATA-PREPARATION PR.** This PR ships a minimal,
+> public-data-only **Historical 60D Mover Reference Store
+> Builder v0** (`scripts/build_historical_mover_reference_store.py`).
+> The builder fetches Binance public USDT-M perpetual futures
+> `exchangeInfo` + 1 h klines + 24 h tickers, computes per-day
+> top movers over the trailing window, and writes JSONL +
+> manifest artefacts the existing D-A audit consumes through
+> `app.adaptive.historical_mover_coverage_backfill.load_historical_market_store(root)`.
+> Paper / report / evidence only. **NOT** strategy blind
+> replay. **NOT** PnL backtest. **NOT** trading module. **NOT**
+> AI Learning. **NOT** automatic parameter optimisation. **NOT**
+> reinforcement learning. **NOT** the small-money live-trading
+> pre-validation gate. **NOT** the Phase 11C.1C-C-B-B-B-D-A
+> closeout. Phase 12 remains **FORBIDDEN**. The Risk Engine
+> remains the single trade-decision gate.
+
+#### Implementation summary
+
+  - New module `scripts/build_historical_mover_reference_store.py`
+    with the public-only data source, pure transformations,
+    deterministic disk writers, an in-process `--no-network`
+    transport, and a CLI:
+      - `assert_no_credentials_in_env(env)` refuses to start
+        when any of `BINANCE_API_KEY` / `BINANCE_API_SECRET` /
+        `BINANCE_KEY` / `BINANCE_SECRET` / `BINANCE_TOKEN` /
+        `BINANCE_PASSPHRASE` is set.
+      - `BinanceFuturesPublicSource` reuses
+        `app.exchanges.binance_public.assert_public_endpoint_allowed`
+        and refuses every credential-shaped kwarg + every
+        signed-request query parameter
+        (`signature` / `timestamp` / `recvWindow` / `apiKey`).
+      - `filter_eligible_usdt_perpetual_universe(exchange_info)`,
+        `select_symbols_by_volume(...)`,
+        `klines_to_daily_top_movers(...)` are pure functions
+        used by both the CLI and the test suite.
+      - `write_exchange_info_snapshot(...)`,
+        `write_top_movers_jsonl(...)`, `write_manifest(...)`
+        are no-ops under `--dry-run` and call
+        `validate_no_lookahead_fields(...)` on every emitted
+        row.
+      - `build_no_network_source(...)` returns a deterministic
+        in-process source for the `--no-network` smoke path.
+      - `run_build(...)` is the single-entry orchestrator.
+      - `main(argv)` is the CLI entry point with the
+        brief-mandated flags.
+  - Two new schema versions:
+    `phase_11c_1c_c_b_b_b_d_a_1.historical_60d_mover_reference_store.v0`
+    (builder) and
+    `phase_11c_1c_c_b_b_b_d_a_1.historical_60d_mover_reference_store_builder.v0`
+    (builder version).
+  - On-disk layout (matches the existing D-A loader):
+    `data/historical_market_store/exchange_info/*.json` +
+    `*.jsonl`,
+    `data/historical_market_store/top_movers/*.jsonl`,
+    `data/historical_market_store/manifests/*.json`.
+  - JSONL row schema includes both the brief-mandated columns
+    (`symbol`, `mover_window_start_utc`, `mover_window_end_utc`,
+    `reference_timestamp_utc`, `top_mover_rank`,
+    `window_gain_pct`, `max_24h_gain_pct`, `open_price`,
+    `close_price`, `high_price`, `low_price`, `quote_volume`,
+    `eligible_usdt_perpetual`,
+    `source = binance_public_futures_klines_1h`,
+    `lookahead_policy = post_hoc_reference_only`,
+    `generated_at_utc`) and the loader-required columns
+    (`snapshot_date`, `reference_timestamp_utc_ms`,
+    `mover_window_start_utc_ms`, `mover_window_end_utc_ms`,
+    `max_window_gain`, `max_24h_gain`, `quote_volume_usdt`,
+    `quote_asset`, `contract_type`).
+  - Manifest records the public-only invariants
+    (`public_endpoint_only=true`, `private_api_used=false`,
+    `api_key_loaded=false`, `signed_endpoint_used=false`,
+    `binance_private_api_enabled=false`,
+    `telegram_outbound_enabled=false`,
+    `live_trading_enabled=false`,
+    `exchange_live_order_enabled=false`,
+    `right_tail_enabled=false`, `llm_enabled=false`,
+    `trading_mode="paper"`), the Lookahead Guard label
+    (`lookahead_guard=reference_set_is_post_hoc_audit_only`,
+    `lookahead_policy=post_hoc_reference_only`,
+    `lookahead_forbidden_fields=[...]`), and a verbatim
+    `boundary` block listing what the builder is **NOT**.
+  - `.gitignore` updated to exclude
+    `data/historical_market_store/` (the store is regenerated
+    locally and must not be committed).
+  - `app/adaptive/historical_mover_coverage_backfill.py` is
+    **NOT** modified. The D-A audit's miss-reason taxonomy,
+    event types, capture-path order, lookahead-guard helpers,
+    and runtime payloads are untouched.
+
+#### New tests
+
+`tests/unit/test_phase11c_1c_c_b_b_b_d_a_historical_mover_reference_store.py`
+(16 cases):
+
+  - `test_exchange_info_filters_usdt_perpetual_universe`
+  - `test_select_symbols_by_volume_ranks_eligible_universe_only`
+  - `test_select_symbols_with_no_limit_returns_alphabetical_universe`
+  - `test_top_mover_reference_store_schema`
+  - `test_window_gain_calculation_is_post_hoc_only`
+  - `test_reference_builder_does_not_load_api_keys`
+  - `test_reference_builder_does_not_use_signed_endpoints`
+  - `test_reference_set_is_post_hoc_only`
+  - `test_lookahead_guard_rejects_completed_tail_label_in_builder_output`
+  - `test_manifest_records_public_only_invariants`
+  - `test_top_movers_can_be_loaded_by_historical_coverage_backfill`
+  - `test_missing_event_history_remains_valid_miss_reason`
+  - `test_no_live_trading_flags_unchanged`
+  - `test_phase_12_remains_forbidden`
+  - `test_cli_dry_run_smoke`
+  - `test_cli_refuses_with_credentials_in_env`
+
+#### Lookahead Guard (verbatim)
+
+  - `completed_tail_label` MUST NOT drive reference selection.
+  - future return / final max gain MUST NOT pollute the
+    simulated live-radar score.
+  - replay label MUST NOT contaminate `first_seen_time`.
+  - reflection / report text / LLM narrative MUST NEVER serve
+    as a capture event source.
+  - `first_seen_time_utc` MUST come from the timestamp of an
+    event that already existed at audit time.
+  - the top-mover reference set MUST only be used for post-hoc
+    audit; it cannot rewrite past decisions.
+
+The builder enforces the guard at write time:
+`validate_no_lookahead_fields(...)` is called on every JSONL
+row before the line is appended.
+
+#### Boundary
+
+  - **NOT** complete strategy blind replay; **NOT** PnL
+    backtest; **NOT** trading module; **NOT** AI Learning;
+    **NOT** automatic parameter optimisation; **NOT**
+    reinforcement learning; **NOT** the small-money
+    live-trading pre-validation gate; **NOT** Phase 12.
+  - The builder's outputs are **post-hoc audit reference
+    only**; they MUST NEVER drive live radar score, candidate
+    promotion, the Risk Engine, the Execution FSM,
+    `symbol_limit`, candidate-pool capacity, anomaly
+    thresholds, Regime weights, or any other runtime knob.
+
+#### Closeout note
+
+  - This PR ships the **builder**. Real 60D historical data
+    generation against Binance public futures endpoints is
+    **required after merge** to flip Phase 11C.1C-C-B-B-B-D-A
+    to `ACCEPTED` via a separate docs-only closeout PR (the
+    operator must capture the live `HISTORICAL_MOVER_COVERAGE_*`
+    event counts, the daily-report excerpt, the Phase 8.5
+    export bundle manifest count, and the audit's
+    `backfill_status` over the real 60D window).
+
 ### Phase 11C.1C-C-B-B-B-D-A implementation - Historical 60D Mover Coverage Backfill Audit v0 (PR #64)
 
 **Type:** Implementation PR (paper / report / evidence only).
