@@ -1016,3 +1016,589 @@ def test_load_d_a_coverage_payload_returns_three_tuple(tmp_path: Path) -> None:
     assert payload is None
     assert audited == []
     assert isinstance(warnings, list)
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 11C.1C-C-B-B-B-D-B.1 - Historical Price Path Adapter v0
+# integration coverage
+# ---------------------------------------------------------------------------
+#
+# These tests exercise the adapter wiring inside
+# ``run_evidence_pipeline`` end-to-end. Forbidden surfaces are
+# untouched; the runner remains paper / report / evidence only;
+# Phase 12 remains FORBIDDEN.
+
+
+from app.adaptive.post_discovery_price_path_adapter import (  # noqa: E402
+    DEFAULT_KLINE_INTERVAL_USED,
+    HistoricalPricePathAdapter,
+    PricePathMissingReason,
+    PricePathResolution,
+    PricePathSource,
+)
+from app.adaptive.post_discovery_outcome_metrics import (  # noqa: E402
+    PricePoint,
+)
+
+
+_DAY_MS = 24 * 60 * 60 * 1000
+
+
+def _store_row(
+    *,
+    symbol: str,
+    day: int,
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    close_price: float,
+) -> dict[str, object]:
+    day_start_ms = _ms(day)
+    day_end_ms = day_start_ms + _DAY_MS
+    return {
+        "symbol": symbol,
+        "snapshot_date": "2026-01-01",
+        "reference_timestamp_utc_ms": day_end_ms,
+        "mover_window_start_utc_ms": day_start_ms,
+        "mover_window_end_utc_ms": day_end_ms,
+        "timeframe": "1h",
+        "open_price": open_price,
+        "close_price": close_price,
+        "high_price": high_price,
+        "low_price": low_price,
+        "window_gain_pct": (close_price - open_price) / open_price,
+        "max_window_gain": (close_price - open_price) / open_price,
+        "max_24h_gain_pct": (high_price - open_price) / open_price,
+        "max_24h_gain": (high_price - open_price) / open_price,
+        "min_window_drawdown_pct": (low_price - open_price) / open_price,
+        "quote_volume": 1_000_000.0,
+        "quote_volume_usdt": 1_000_000.0,
+        "kline_count": 24,
+        "quote_asset": "USDT",
+        "contract_type": "PERPETUAL",
+        "eligible_usdt_perpetual": True,
+        "source": "binance_public_futures_klines_1h",
+        "lookahead_policy": "post_hoc_reference_only",
+        "top_mover_rank": 1,
+    }
+
+
+def _write_historical_store(
+    tmp_path: Path, rows: list[dict[str, object]]
+) -> Path:
+    root = tmp_path / "store"
+    top_movers_dir = root / "top_movers"
+    top_movers_dir.mkdir(parents=True)
+    (top_movers_dir / "rows.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_runner_uses_historical_store_to_reduce_insufficient_price_path(
+    tmp_path: Path,
+) -> None:
+    """When ``--historical-store-dir`` is provided, the runner
+    builds a daily price path for symbols whose containing day
+    is in the store and emits an outcome label that is NOT
+    ``INSUFFICIENT_PRICE_PATH`` for them."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "EARLYUSDT", first_seen_time_ms=first_seen
+            ),
+            _strong_tail_record("RAVEUSDT", gain=0.50),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="EARLYUSDT",
+                day=3,
+                open_price=1.00,
+                high_price=1.20,
+                low_price=0.95,
+                close_price=1.10,
+            ),
+            _store_row(
+                symbol="EARLYUSDT",
+                day=4,
+                open_price=1.10,
+                high_price=1.50,
+                low_price=1.00,
+                close_price=1.40,
+            ),
+        ],
+    )
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=store,
+        price_paths_json=None,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    assert result.status == runner.EVIDENCE_GENERATED_STATUS
+    assert result.evaluated_count == 2
+
+    # The captured EARLYUSDT mover now has a real price path so
+    # its outcome is NOT INSUFFICIENT_PRICE_PATH.
+    assert (
+        result.label_summary.get(OutcomeLabel.INSUFFICIENT_PRICE_PATH, 0)
+        == 0
+    )
+    # Adapter diagnostic columns reflect 1 loaded record (EARLY)
+    # and 1 missing (RAVEUSDT - missed mover with no first_seen
+    # time).
+    assert result.kline_interval_used == DEFAULT_KLINE_INTERVAL_USED
+    assert result.price_path_records_loaded == 1
+    assert (
+        result.price_path_source_summary[
+            PricePathSource.HISTORICAL_MARKET_STORE_DAILY_TOP_MOVERS
+        ]
+        == 1
+    )
+
+
+def test_runner_emits_explicit_missing_reason_when_store_lacks_symbol(
+    tmp_path: Path,
+) -> None:
+    """When the store has rows for some symbols but not the audited
+    symbol, the runner must surface a clear missing reason instead
+    of silently emitting ``INSUFFICIENT_PRICE_PATH``."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "GHOSTUSDT", first_seen_time_ms=first_seen
+            ),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Store has rows for OTHERUSDT only.
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="OTHERUSDT",
+                day=3,
+                open_price=1.00,
+                high_price=1.50,
+                low_price=0.80,
+                close_price=1.40,
+            ),
+        ],
+    )
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=store,
+        price_paths_json=None,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    assert result.status == runner.EVIDENCE_GENERATED_STATUS
+
+    # The audited symbol was not in the store - missing reason
+    # surfaces explicitly.
+    assert (
+        result.price_path_missing_reason_summary.get(
+            PricePathMissingReason.SYMBOL_NOT_IN_HISTORICAL_STORE
+        )
+        == 1
+    )
+    # Outcome label is still INSUFFICIENT_PRICE_PATH but the
+    # missing reason is now actionable for the operator.
+    assert (
+        result.label_summary.get(OutcomeLabel.INSUFFICIENT_PRICE_PATH, 0)
+        == 1
+    )
+
+
+def test_runner_operator_paths_take_priority_over_store(
+    tmp_path: Path,
+) -> None:
+    """An operator-supplied path overrides the store-resolved path
+    so the runner reports
+    ``source = OPERATOR_SUPPLIED_PATH`` even when the store could
+    have served the symbol."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "EARLYUSDT", first_seen_time_ms=first_seen
+            ),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="EARLYUSDT",
+                day=3,
+                open_price=10.00,  # would be store first_seen_price
+                high_price=10.10,
+                low_price=9.90,
+                close_price=10.05,
+            ),
+        ],
+    )
+
+    operator_paths = {
+        "EARLYUSDT": [
+            {"timestamp_utc_ms": _ms(3, hour=3), "price": 1.01},
+            {"timestamp_utc_ms": _ms(3, hour=4), "price": 1.05},
+        ]
+    }
+    paths_path = tmp_path / "price_paths.json"
+    paths_path.write_text(json.dumps(operator_paths), encoding="utf-8")
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=store,
+        price_paths_json=paths_path,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    assert result.status == runner.EVIDENCE_GENERATED_STATUS
+    assert (
+        result.price_path_source_summary[
+            PricePathSource.OPERATOR_SUPPLIED_PATH
+        ]
+        == 1
+    )
+
+
+def test_runner_notable_symbols_carry_price_path_availability(
+    tmp_path: Path,
+) -> None:
+    """RAVEUSDT / STOUSDT must surface in
+    ``notable_symbol_price_path_summary`` with their resolution
+    source / missing reason / loaded flag, regardless of whether
+    the store has them."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "RAVEUSDT", first_seen_time_ms=first_seen
+            ),
+            _captured_early_record(
+                "STOUSDT", first_seen_time_ms=first_seen
+            ),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Store has RAVE but not STO.
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="RAVEUSDT",
+                day=3,
+                open_price=1.00,
+                high_price=1.20,
+                low_price=0.95,
+                close_price=1.10,
+            ),
+            _store_row(
+                symbol="RAVEUSDT",
+                day=4,
+                open_price=1.10,
+                high_price=1.50,
+                low_price=1.00,
+                close_price=1.40,
+            ),
+        ],
+    )
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=store,
+        price_paths_json=None,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    assert result.status == runner.EVIDENCE_GENERATED_STATUS
+
+    rave = result.notable_symbol_price_path_summary["RAVEUSDT"]
+    sto = result.notable_symbol_price_path_summary["STOUSDT"]
+    assert rave["loaded"] == "true"
+    assert rave["source"] == (
+        PricePathSource.HISTORICAL_MARKET_STORE_DAILY_TOP_MOVERS
+    )
+    assert sto["loaded"] == "false"
+    assert sto["source"] == PricePathSource.ABSENT
+    assert sto["missing_reason"] == (
+        PricePathMissingReason.SYMBOL_NOT_IN_HISTORICAL_STORE
+    )
+
+
+def test_runner_does_not_trigger_lookahead_in_first_seen_anchor(
+    tmp_path: Path,
+) -> None:
+    """Lookahead Guard: the runner's adapter must NEVER produce a
+    ``first_seen_price`` greater than the day's open by reaching
+    into post-first-seen high / low / close."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "EARLYUSDT", first_seen_time_ms=first_seen
+            ),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Day 3 has high = 5.00 and close = 4.00 - both would be
+    # lookahead leaks if the adapter used them as first_seen_price.
+    # Open is 1.00 - the only lookahead-safe choice.
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="EARLYUSDT",
+                day=3,
+                open_price=1.00,
+                high_price=5.00,
+                low_price=0.90,
+                close_price=4.00,
+            ),
+            _store_row(
+                symbol="EARLYUSDT",
+                day=4,
+                open_price=4.00,
+                high_price=4.50,
+                low_price=3.80,
+                close_price=4.20,
+            ),
+        ],
+    )
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=store,
+        price_paths_json=None,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    assert result.status == runner.EVIDENCE_GENERATED_STATUS
+
+    # Open the events file and look at the EARLYUSDT record's
+    # first_seen_price.
+    parsed = [
+        json.loads(line)
+        for line in result.output_events_path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+    evaluated = [
+        e
+        for e in parsed
+        if e["event_type"] == "POST_DISCOVERY_OUTCOME_EVALUATED"
+        and e["symbol"] == "EARLYUSDT"
+    ]
+    assert evaluated, "EARLYUSDT was not evaluated"
+    record = evaluated[0]["payload"]["record"]
+    assert record["first_seen_price"] == pytest.approx(1.00), (
+        "Lookahead leak: first_seen_price must equal day's open "
+        "(1.00), never the day's high (5.00) or close (4.00)"
+    )
+
+
+def test_runner_report_carries_price_path_diagnostic_columns(
+    tmp_path: Path,
+) -> None:
+    """The serialised report JSON must include every adapter
+    diagnostic column an operator needs to act on the data gap."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "EARLYUSDT", first_seen_time_ms=first_seen
+            ),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="EARLYUSDT",
+                day=3,
+                open_price=1.00,
+                high_price=1.20,
+                low_price=0.95,
+                close_price=1.10,
+            ),
+            _store_row(
+                symbol="EARLYUSDT",
+                day=4,
+                open_price=1.10,
+                high_price=1.50,
+                low_price=1.00,
+                close_price=1.40,
+            ),
+        ],
+    )
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=store,
+        price_paths_json=None,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    full_report = json.loads(
+        result.output_report_path.read_text(encoding="utf-8")
+    )
+    for key in (
+        "price_path_records_loaded",
+        "price_path_records_missing",
+        "price_path_source_summary",
+        "price_path_missing_reason_summary",
+        "kline_interval_used",
+        "approximate_intra_day_timestamp_count",
+        "notable_symbol_price_path_summary",
+    ):
+        assert key in full_report, f"missing diagnostic column {key!r}"
+
+
+def test_runner_no_historical_store_dir_keeps_fallback_behaviour(
+    tmp_path: Path,
+) -> None:
+    """Backwards compatibility: omitting ``--historical-store-dir``
+    must leave the existing fallback behaviour untouched (records
+    are still emitted, INSUFFICIENT_PRICE_PATH is still possible,
+    no spurious adapter warning is added)."""
+
+    first_seen = _ms(3, hour=2)
+    payload = _build_d_a_payload(
+        records=[
+            _captured_early_record(
+                "EARLYUSDT", first_seen_time_ms=first_seen
+            ),
+        ]
+    )
+    payload_path = tmp_path / "d_a_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    output_dir = tmp_path / "out"
+    result = runner.run_evidence_pipeline(
+        coverage_payload=payload_path,
+        export_dir=None,
+        events_db=None,
+        historical_store_dir=None,
+        price_paths_json=None,
+        output_dir=output_dir,
+        reference_window="60d",
+    )
+    assert result.status == runner.EVIDENCE_GENERATED_STATUS
+    # Adapter unavailable -> no per-symbol price path loaded.
+    assert result.price_path_records_loaded == 0
+    # No "historical_price_path_adapter_unavailable" warning is
+    # emitted because the operator did not opt in.
+    assert all(
+        "historical_price_path_adapter_unavailable" not in str(w)
+        for w in result.warnings
+    )
+
+
+def test_resolve_price_paths_for_records_uses_operator_priority(
+    tmp_path: Path,
+) -> None:
+    """Unit test for the resolver helper: operator paths take
+    priority over store paths even when both are available."""
+
+    store = _write_historical_store(
+        tmp_path,
+        [
+            _store_row(
+                symbol="EARLYUSDT",
+                day=3,
+                open_price=10.00,
+                high_price=11.00,
+                low_price=9.50,
+                close_price=10.50,
+            ),
+        ],
+    )
+    adapter = HistoricalPricePathAdapter(historical_store_dir=store)
+
+    records = [
+        {
+            "symbol": "EARLYUSDT",
+            "capture_path": {"first_seen_time_utc_ms": _ms(3, hour=2)},
+            "reference": {"mover_window_end_utc_ms": _ms(60)},
+        },
+    ]
+    operator_paths = {
+        "EARLYUSDT": (
+            PricePoint(timestamp_utc_ms=_ms(3, hour=3), price=1.05),
+            PricePoint(timestamp_utc_ms=_ms(3, hour=4), price=1.10),
+        ),
+    }
+    resolutions = runner.resolve_price_paths_for_records(
+        records, adapter, operator_paths=operator_paths
+    )
+    assert resolutions["EARLYUSDT"].source == (
+        PricePathSource.OPERATOR_SUPPLIED_PATH
+    )
+    assert resolutions["EARLYUSDT"].first_seen_price == pytest.approx(1.05)
+
+
+def test_resolve_price_paths_skips_records_with_no_symbol(
+    tmp_path: Path,
+) -> None:
+    """Records that cannot resolve a symbol contribute no
+    resolution; they neither leak forbidden prices nor crash the
+    runner."""
+
+    adapter = HistoricalPricePathAdapter(historical_store_dir=None)
+    records = [
+        {"symbol": None, "capture_path": {}},
+        {"reference": {"symbol": ""}, "capture_path": {"symbol": ""}},
+    ]
+    resolutions = runner.resolve_price_paths_for_records(records, adapter)
+    assert resolutions == {}

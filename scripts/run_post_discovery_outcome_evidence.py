@@ -84,7 +84,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -105,6 +105,14 @@ from app.adaptive.post_discovery_outcome_metrics import (  # noqa: E402
     PricePoint,
     assert_payload_has_no_forbidden_keys,
     build_post_discovery_outcome_report,
+)
+from app.adaptive.post_discovery_price_path_adapter import (  # noqa: E402
+    DEFAULT_KLINE_INTERVAL_USED,
+    HistoricalPricePathAdapter,
+    PricePathMissingReason,
+    PricePathResolution,
+    PricePathSource,
+    summarise_price_path_resolutions,
 )
 from app.core.events import EventType  # noqa: E402
 
@@ -170,6 +178,19 @@ class EvidenceRunResult:
     timing_summary: dict[str, int]
     notable_symbols: dict[str, str]
     warnings: tuple[str, ...] = ()
+    # Phase 11C.1C-C-B-B-B-D-B.1 - Historical Price Path Adapter v0
+    # diagnostic columns. Descriptive only - never an input to a
+    # runtime knob.
+    price_path_records_loaded: int = 0
+    price_path_records_missing: int = 0
+    price_path_source_summary: dict[str, int] = field(default_factory=dict)
+    price_path_missing_reason_summary: dict[str, int] = field(
+        default_factory=dict
+    )
+    kline_interval_used: str = DEFAULT_KLINE_INTERVAL_USED
+    notable_symbol_price_path_summary: dict[str, dict[str, str]] = field(
+        default_factory=dict
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +644,7 @@ def build_post_discovery_inputs_from_d_a_payload(
     *,
     reference_window: str,
     price_paths: Mapping[str, Sequence[PricePoint]] | None = None,
+    price_path_resolutions: Mapping[str, PricePathResolution] | None = None,
 ) -> list[PostDiscoveryOutcomeInput]:
     """Map a Phase 11C.1C-C-B-B-B-D-A coverage payload into a list
     of :class:`PostDiscoveryOutcomeInput` rows ready for the
@@ -635,12 +657,27 @@ def build_post_discovery_inputs_from_d_a_payload(
     only populated when the D-A reference carries them (the v0
     audit does not, so they default to ``None``); operator-
     supplied price paths fill the gap when present.
+
+    Phase 11C.1C-C-B-B-B-D-B.1 (Historical Price Path Adapter v0)
+    extends the contract: when a per-symbol
+    :class:`PricePathResolution` is supplied via
+    ``price_path_resolutions``, the adapter-built path / first-
+    seen-price are used UNLESS an operator path is also supplied
+    (operator paths still take priority). The function never
+    fabricates a price; if both inputs are missing for a symbol
+    the record stays without a price path and the evaluator
+    emits ``INSUFFICIENT_PRICE_PATH`` (or ``MISSED_STRONG_TAIL`` if
+    capture_status==missed and the reference shows a strong tail).
     """
 
     paths_map: dict[str, tuple[PricePoint, ...]] = {}
     if price_paths is not None:
         for sym, pts in price_paths.items():
             paths_map[str(sym)] = tuple(pts)
+    resolutions_map: dict[str, PricePathResolution] = {}
+    if price_path_resolutions is not None:
+        for sym, res in price_path_resolutions.items():
+            resolutions_map[str(sym)] = res
 
     inputs: list[PostDiscoveryOutcomeInput] = []
     raw_records = d_a_payload.get("records") or ()
@@ -679,17 +716,19 @@ def build_post_discovery_inputs_from_d_a_payload(
 
         # The D-A v0 reference does not carry first_seen_price,
         # prior_high, or reference_peak anchors. Operator-supplied
-        # price paths can refine the picture; otherwise the
-        # evaluator emits MISSED_STRONG_TAIL when warranted and
-        # INSUFFICIENT_PRICE_PATH otherwise.
+        # price paths and adapter-resolved paths refine the
+        # picture; otherwise the evaluator emits MISSED_STRONG_TAIL
+        # when warranted and INSUFFICIENT_PRICE_PATH otherwise.
         first_seen_price: float | None = None
-        path_tuple = paths_map.get(symbol, ())
-        if path_tuple:
-            # When the operator supplies a price path, take the
-            # earliest observation as a proxy for first-seen
-            # price. Records that already carry an explicit
-            # ``first_seen_price`` field via the optional
-            # operator override are preserved.
+        path_tuple: tuple[PricePoint, ...] = ()
+        operator_path = paths_map.get(symbol, ())
+        adapter_resolution = resolutions_map.get(symbol)
+
+        if operator_path:
+            # Operator-supplied path takes priority (Phase brief
+            # rule: operator data is always trusted over store-
+            # synthesised data).
+            path_tuple = operator_path
             override = capture_path.get("first_seen_price")
             if override is not None:
                 try:
@@ -697,7 +736,23 @@ def build_post_discovery_inputs_from_d_a_payload(
                 except (TypeError, ValueError):
                     first_seen_price = None
             if first_seen_price is None:
-                first_seen_price = float(path_tuple[0].price)
+                first_seen_price = float(operator_path[0].price)
+        elif (
+            adapter_resolution is not None
+            and adapter_resolution.is_loaded()
+        ):
+            # Adapter-resolved path. Both anchors come from the
+            # local Historical Market Store; the lookahead guard
+            # is enforced inside the adapter.
+            override = capture_path.get("first_seen_price")
+            if override is not None:
+                try:
+                    first_seen_price = float(override)
+                except (TypeError, ValueError):
+                    first_seen_price = None
+            if first_seen_price is None:
+                first_seen_price = adapter_resolution.first_seen_price
+            path_tuple = adapter_resolution.price_path
 
         ref_summary = HistoricalMoverReferenceSummary(
             symbol=symbol,
@@ -742,6 +797,157 @@ def build_post_discovery_inputs_from_d_a_payload(
         )
 
     return inputs
+
+
+# ---------------------------------------------------------------------------
+# Historical Price Path Adapter integration
+# ---------------------------------------------------------------------------
+
+
+def _extract_first_seen_time_from_record(
+    record: Mapping[str, Any],
+) -> int | None:
+    """Pull ``capture_path.first_seen_time_utc_ms`` out of a D-A
+    record, tolerating the flat / wrapped shapes."""
+
+    if not isinstance(record, Mapping):
+        return None
+    capture_path = record.get("capture_path")
+    if isinstance(capture_path, Mapping):
+        ts = capture_path.get("first_seen_time_utc_ms")
+        if ts is not None:
+            try:
+                return int(ts)
+            except (TypeError, ValueError):
+                return None
+    # Some flat RECORD_AUDITED payloads expose the field at the
+    # top level; tolerate that shape too.
+    ts = record.get("first_seen_time_utc_ms")
+    if ts is not None:
+        try:
+            return int(ts)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _extract_record_window_end(record: Mapping[str, Any]) -> int | None:
+    if not isinstance(record, Mapping):
+        return None
+    reference = record.get("reference")
+    if isinstance(reference, Mapping):
+        end = reference.get("mover_window_end_utc_ms")
+        if end is not None:
+            try:
+                return int(end)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _extract_symbol_from_record(record: Mapping[str, Any]) -> str | None:
+    if not isinstance(record, Mapping):
+        return None
+    sym = record.get("symbol")
+    if not sym:
+        ref = record.get("reference")
+        if isinstance(ref, Mapping):
+            sym = ref.get("symbol")
+    if not sym:
+        cap = record.get("capture_path")
+        if isinstance(cap, Mapping):
+            sym = cap.get("symbol")
+    if isinstance(sym, str) and sym:
+        return sym
+    return None
+
+
+def resolve_price_paths_for_records(
+    records: Sequence[Mapping[str, Any]],
+    adapter: HistoricalPricePathAdapter,
+    *,
+    operator_paths: Mapping[str, Sequence[PricePoint]] | None = None,
+    reference_window_end_utc_ms: int | None = None,
+) -> dict[str, PricePathResolution]:
+    """Resolve a per-symbol :class:`PricePathResolution` map for
+    ``records`` using the adapter.
+
+    Operator-supplied paths override the adapter resolution so the
+    runner reports them with ``source = OPERATOR_SUPPLIED_PATH`` /
+    ``missing_reason = NONE`` even when the local store has no
+    rows for the symbol. The adapter resolution is otherwise used
+    as-is. Records without a reachable symbol are skipped.
+    """
+
+    operator_map: dict[str, tuple[PricePoint, ...]] = {}
+    if operator_paths is not None:
+        for sym, pts in operator_paths.items():
+            tup = tuple(pts)
+            if tup:
+                operator_map[str(sym)] = tup
+
+    out: dict[str, PricePathResolution] = {}
+    for record in records:
+        symbol = _extract_symbol_from_record(record)
+        if not symbol:
+            continue
+        if symbol in out:
+            continue  # first-record-wins (deterministic)
+        first_seen_time = _extract_first_seen_time_from_record(record)
+        record_window_end = _extract_record_window_end(record)
+        upper_bound = (
+            record_window_end
+            if record_window_end is not None
+            else reference_window_end_utc_ms
+        )
+        if symbol in operator_map:
+            operator_pts = operator_map[symbol]
+            first_seen_price: float | None = None
+            if operator_pts:
+                first_seen_price = float(operator_pts[0].price)
+            out[symbol] = PricePathResolution(
+                symbol=symbol,
+                first_seen_time_utc_ms=first_seen_time,
+                first_seen_price=first_seen_price,
+                price_path=operator_pts,
+                source=PricePathSource.OPERATOR_SUPPLIED_PATH,
+                missing_reason=PricePathMissingReason.NONE,
+                kline_interval_used=adapter.kline_interval_used,
+                approximate_intra_day_timestamps=False,
+                notes=("operator_supplied",),
+            )
+            continue
+        out[symbol] = adapter.resolve(
+            symbol=symbol,
+            first_seen_time_utc_ms=first_seen_time,
+            reference_window_end_utc_ms=upper_bound,
+        )
+    return out
+
+
+def _summarise_notable_symbol_price_paths(
+    resolutions: Mapping[str, PricePathResolution],
+) -> dict[str, dict[str, str]]:
+    """Compact per-notable-symbol diagnostic surface so the
+    operator can read availability of the high-priority symbols
+    (RAVEUSDT / STOUSDT) at a glance."""
+
+    out: dict[str, dict[str, str]] = {}
+    for symbol in NOTABLE_SYMBOL_WATCHLIST:
+        resolution = resolutions.get(symbol)
+        if resolution is None:
+            out[symbol] = {
+                "source": PricePathSource.ABSENT,
+                "missing_reason": "not_in_d_a_export",
+                "loaded": "false",
+            }
+            continue
+        out[symbol] = {
+            "source": str(resolution.source),
+            "missing_reason": str(resolution.missing_reason),
+            "loaded": "true" if resolution.is_loaded() else "false",
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +1063,8 @@ def _format_markdown_summary(
     output_report_path: Path,
     output_events_path: Path,
     reference_window: str,
+    price_path_summary: Mapping[str, Any] | None = None,
+    notable_price_path_summary: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append(
@@ -890,6 +1098,55 @@ def _format_markdown_summary(
     for symbol, status_str in notable_symbols.items():
         lines.append(f"- {symbol}: {status_str}")
     lines.append("")
+    if price_path_summary is not None:
+        # Phase 11C.1C-C-B-B-B-D-B.1 - Historical Price Path
+        # Adapter v0 evidence-only summary block.
+        lines.append("## Historical Price Path Adapter v0 (D-B.1)")
+        lines.append("")
+        lines.append(
+            f"- kline_interval_used: {price_path_summary.get('kline_interval_used', '')}"
+        )
+        lines.append(
+            f"- price_path_records_loaded: "
+            f"{price_path_summary.get('price_path_records_loaded', 0)}"
+        )
+        lines.append(
+            f"- price_path_records_missing: "
+            f"{price_path_summary.get('price_path_records_missing', 0)}"
+        )
+        approx_count = price_path_summary.get(
+            "approximate_intra_day_timestamp_count", 0
+        )
+        lines.append(
+            f"- approximate_intra_day_timestamp_count: {approx_count}"
+        )
+        source_summary = (
+            price_path_summary.get("price_path_source_summary") or {}
+        )
+        lines.append("- price_path_source_summary:")
+        if source_summary:
+            for key, count in sorted(source_summary.items()):
+                lines.append(f"  - {key}: {count}")
+        else:
+            lines.append("  - (none)")
+        reason_summary = (
+            price_path_summary.get("price_path_missing_reason_summary") or {}
+        )
+        lines.append("- price_path_missing_reason_summary:")
+        if reason_summary:
+            for key, count in sorted(reason_summary.items()):
+                lines.append(f"  - {key}: {count}")
+        else:
+            lines.append("  - (none)")
+        if notable_price_path_summary:
+            lines.append("- notable_symbol_price_path_summary:")
+            for sym, info in sorted(notable_price_path_summary.items()):
+                lines.append(
+                    f"  - {sym}: source={info.get('source','')}, "
+                    f"missing_reason={info.get('missing_reason','')}, "
+                    f"loaded={info.get('loaded','')}"
+                )
+        lines.append("")
     if warnings:
         lines.append("## Warnings")
         for warning in warnings:
@@ -1029,10 +1286,42 @@ def run_evidence_pipeline(
         )
 
     price_paths = load_price_paths_json(price_paths_json)
+
+    # Phase 11C.1C-C-B-B-B-D-B.1 - construct the Historical Price
+    # Path Adapter. The adapter is paper / report / evidence only;
+    # it never opens a network socket and never reads a private
+    # API. When --historical-store-dir is missing or unreadable
+    # the adapter returns ``ABSENT`` resolutions with an explicit
+    # missing reason - the runner does NOT fabricate prices.
+    price_path_adapter = HistoricalPricePathAdapter(
+        historical_store_dir=historical_store_dir,
+    )
+    if historical_store_dir is not None and not price_path_adapter.is_available:
+        warnings.append(
+            "historical_price_path_adapter_unavailable:"
+            f"{price_path_adapter.initial_missing_reason}"
+        )
+
+    effective_records = effective_payload.get("records") or []
+    if not isinstance(effective_records, (list, tuple)):
+        effective_records = []
+    price_path_resolutions = resolve_price_paths_for_records(
+        list(effective_records),
+        price_path_adapter,
+        operator_paths=price_paths,
+    )
+    price_path_summary = summarise_price_path_resolutions(
+        price_path_resolutions.values()
+    )
+    notable_price_path_summary = _summarise_notable_symbol_price_paths(
+        price_path_resolutions
+    )
+
     inputs = build_post_discovery_inputs_from_d_a_payload(
         effective_payload,
         reference_window=reference_window,
         price_paths=price_paths,
+        price_path_resolutions=price_path_resolutions,
     )
 
     # Closeout-quality guard: when the D-A export DID carry
@@ -1125,6 +1414,28 @@ def run_evidence_pipeline(
         "warnings": list(warnings),
         "generated_at_utc": _now_utc_iso(),
         "report": report.to_dict(),
+        # Phase 11C.1C-C-B-B-B-D-B.1 - Historical Price Path
+        # Adapter v0 evidence-only diagnostic columns. Descriptive
+        # paper / report / evidence only; never feeds runtime.
+        "price_path_records_loaded": int(
+            price_path_summary["price_path_records_loaded"]
+        ),
+        "price_path_records_missing": int(
+            price_path_summary["price_path_records_missing"]
+        ),
+        "price_path_source_summary": dict(
+            price_path_summary["price_path_source_summary"]
+        ),
+        "price_path_missing_reason_summary": dict(
+            price_path_summary["price_path_missing_reason_summary"]
+        ),
+        "kline_interval_used": str(
+            price_path_summary["kline_interval_used"]
+        ),
+        "approximate_intra_day_timestamp_count": int(
+            price_path_summary["approximate_intra_day_timestamp_count"]
+        ),
+        "notable_symbol_price_path_summary": notable_price_path_summary,
     }
     assert_payload_has_no_forbidden_keys(
         full_report_payload, context="evidence_run_report"
@@ -1144,6 +1455,8 @@ def run_evidence_pipeline(
         output_report_path=output_report_path,
         output_events_path=output_events_path,
         reference_window=reference_window,
+        price_path_summary=price_path_summary,
+        notable_price_path_summary=notable_price_path_summary,
     )
     output_summary_path.write_text(summary_md, encoding="utf-8")
 
@@ -1158,6 +1471,20 @@ def run_evidence_pipeline(
         timing_summary=dict(report.detection_timing_label_summary),
         notable_symbols=notable,
         warnings=tuple(warnings),
+        price_path_records_loaded=int(
+            price_path_summary["price_path_records_loaded"]
+        ),
+        price_path_records_missing=int(
+            price_path_summary["price_path_records_missing"]
+        ),
+        price_path_source_summary=dict(
+            price_path_summary["price_path_source_summary"]
+        ),
+        price_path_missing_reason_summary=dict(
+            price_path_summary["price_path_missing_reason_summary"]
+        ),
+        kline_interval_used=str(price_path_summary["kline_interval_used"]),
+        notable_symbol_price_path_summary=notable_price_path_summary,
     )
 
 
@@ -1274,6 +1601,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "detection_timing_summary": result.timing_summary,
                 "notable_symbols": result.notable_symbols,
                 "warnings": list(result.warnings),
+                "price_path_records_loaded": (
+                    result.price_path_records_loaded
+                ),
+                "price_path_records_missing": (
+                    result.price_path_records_missing
+                ),
+                "price_path_source_summary": (
+                    result.price_path_source_summary
+                ),
+                "price_path_missing_reason_summary": (
+                    result.price_path_missing_reason_summary
+                ),
+                "kline_interval_used": result.kline_interval_used,
+                "notable_symbol_price_path_summary": (
+                    result.notable_symbol_price_path_summary
+                ),
             },
             indent=2,
             sort_keys=True,
