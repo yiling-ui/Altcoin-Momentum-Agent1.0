@@ -114,15 +114,37 @@ SOURCE_MODULE = "scripts.run_post_discovery_outcome_evidence"
 INSUFFICIENT_EVIDENCE_STATUS = "INSUFFICIENT_EVIDENCE"
 NEEDS_OPERATOR_DATA_STATUS = "NEEDS_OPERATOR_DATA"
 EVIDENCE_GENERATED_STATUS = "EVIDENCE_GENERATED"
+# Phase 11C.1C-C-B-B-B-D-B status emitted when the D-A export does
+# contain HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED events but none of
+# them can be adapted into a usable PostDiscoveryOutcomeInput by the
+# D-B input adapter. Distinct from INSUFFICIENT_EVIDENCE so an
+# operator can tell "no D-A export at all" apart from "D-A export is
+# present but the D-B adapter rejected every record" (the input-
+# adapter gap that used to silently produce evaluated_count=0). The
+# CLI returns the same non-zero exit code so a downstream caller
+# still refuses to mark the phase ACCEPTED.
+INSUFFICIENT_EVALUABLE_RECORDS_STATUS = "INSUFFICIENT_EVALUABLE_RECORDS"
+
+# Warning emitted when D-A RECORD_AUDITED events are present but the
+# D-B runner could not adapt any of them into a usable input. The
+# warning is intentionally explicit so daily-report / closeout
+# tooling does NOT treat the run as a quiet "EVIDENCE_GENERATED"
+# success.
+WARNING_D_A_RECORDS_PRESENT_BUT_NO_INPUTS = (
+    "d_a_records_present_but_no_post_discovery_inputs"
+)
 
 DEFAULT_OUTPUT_DIR = Path("data/reports/post_discovery_outcome")
 DEFAULT_REFERENCE_WINDOW = "60d"
 
-# D-A event type (string-only - we never import EventType.HISTORICAL_*
+# D-A event types (string-only - we never import EventType.HISTORICAL_*
 # at runtime to keep the runner usable when only an exported JSONL
 # is available).
 HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED = (
     "HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED"
+)
+HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED = (
+    "HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED"
 )
 
 
@@ -238,6 +260,176 @@ def _scan_export_dir_for_d_a_payload(
     return latest_payload
 
 
+def _adapt_record_audited_payload(
+    payload: Mapping[str, Any] | Any,
+    *,
+    event_symbol: Any = None,
+) -> dict[str, Any] | None:
+    """Adapter for a single
+    ``HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`` event payload.
+
+    The Phase 11C.1C-C-B-B-B-D-A emitter writes one
+    RECORD_AUDITED event per audited mover. Two on-disk shapes are
+    supported:
+
+      - **Wrapped:** ``payload['record']`` is the per-mover record
+        dict (legacy / test-fixture form).
+      - **Flat:**   ``payload`` itself is the per-mover record
+        dict (real D-A export emit, observed on the operator
+        VPS - keys include ``coverage_status``, ``reference``,
+        ``capture_path``, ``miss_reason``, ``miss_reasons``,
+        ``first_seen_*``, ``capture_path_depth``,
+        ``risk_rejected``, ``reached_*``, ...).
+
+    Symbol resolution priority:
+
+      1. ``record["symbol"]``
+      2. ``record["reference"]["symbol"]``
+      3. ``record["capture_path"]["symbol"]``
+      4. event-level ``symbol`` field (only if the others are
+         missing).
+
+    Returns ``None`` when no usable record can be derived. The
+    return value is a normalised dict that
+    :func:`build_post_discovery_inputs_from_d_a_payload` consumes
+    exactly like a Format A
+    ``HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED.payload.records``
+    entry. All known D-A record fields are preserved.
+    """
+
+    if not isinstance(payload, Mapping):
+        return None
+
+    inner = payload.get("record")
+    if isinstance(inner, Mapping) and inner:
+        record_src: Mapping[str, Any] = inner
+    else:
+        record_src = payload
+
+    symbol = record_src.get("symbol")
+    if not symbol:
+        ref = record_src.get("reference")
+        if isinstance(ref, Mapping):
+            symbol = ref.get("symbol")
+    if not symbol:
+        cap = record_src.get("capture_path")
+        if isinstance(cap, Mapping):
+            symbol = cap.get("symbol")
+    if not symbol and isinstance(event_symbol, str) and event_symbol:
+        symbol = event_symbol
+    if not symbol:
+        return None
+
+    out: dict[str, Any] = dict(record_src)
+    out["symbol"] = str(symbol)
+    return out
+
+
+def _scan_export_dir_for_d_a_record_audited_events(
+    export_dir: Path,
+) -> list[dict[str, Any]]:
+    """Walk ``export_dir`` and return every
+    ``HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`` event payload as
+    an adapted D-A record dict.
+
+    Used as the Format B fallback when the matching
+    ``HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED`` event has
+    ``payload.records`` missing / ``None``.
+    """
+
+    if not export_dir.is_dir():
+        return []
+
+    candidate_files: list[Path] = []
+    candidate_files.extend(sorted(export_dir.rglob("events.jsonl")))
+    candidate_files.extend(sorted(export_dir.rglob("*.jsonl")))
+
+    seen_paths: set[Path] = set()
+    records: list[dict[str, Any]] = []
+
+    for path in candidate_files:
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    if (
+                        obj.get("event_type")
+                        != HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED
+                    ):
+                        continue
+                    payload = obj.get("payload")
+                    record = _adapt_record_audited_payload(
+                        payload, event_symbol=obj.get("symbol")
+                    )
+                    if record is not None:
+                        records.append(record)
+        except OSError:
+            continue
+    return records
+
+
+def _load_d_a_record_audited_events_from_db(
+    events_db: Path,
+) -> list[dict[str, Any]]:
+    """Best-effort load of
+    ``HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`` event payloads
+    from a SQLite events database. Returns an empty list when the
+    DB is missing / unreadable.
+    """
+
+    if not events_db.is_file():
+        return []
+    try:
+        import sqlite3
+    except ImportError:  # pragma: no cover - sqlite3 is stdlib
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{events_db}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT symbol, payload FROM events WHERE event_type = ? "
+            "ORDER BY timestamp ASC",
+            (HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED,),
+        )
+        rows = cur.fetchall()
+    except sqlite3.Error:
+        conn.close()
+        return []
+    conn.close()
+    records: list[dict[str, Any]] = []
+    for symbol_col, raw in rows:
+        if isinstance(raw, bytes):
+            raw_text = raw.decode("utf-8", errors="replace")
+        elif isinstance(raw, str):
+            raw_text = raw
+        else:
+            continue
+        try:
+            obj = json.loads(raw_text)
+        except json.JSONDecodeError:
+            continue
+        record = _adapt_record_audited_payload(
+            obj, event_symbol=symbol_col
+        )
+        if record is not None:
+            records.append(record)
+    return records
+
+
 def _load_d_a_payload_from_events_db(
     events_db: Path,
 ) -> dict[str, Any] | None:
@@ -294,34 +486,67 @@ def load_d_a_coverage_payload(
     export_dir: Path | None = None,
     events_db: Path | None = None,
     historical_store_dir: Path | None = None,
-) -> tuple[dict[str, Any] | None, list[str]]:
-    """Resolve the D-A coverage backfill payload from the first
-    available source. Returns ``(payload, warnings)``.
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str]]:
+    """Resolve the D-A coverage backfill payload + any
+    ``HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`` fallback records
+    from the first available source.
+
+    Returns ``(payload, audited_records, warnings)``:
+
+      - ``payload`` is the most recent
+        ``HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED`` payload
+        (Format A source), or ``None`` if none was found.
+      - ``audited_records`` is the list of D-A record dicts
+        recovered from
+        ``HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`` events
+        (Format B source). Empty when no such events were
+        observed. Used by :func:`run_evidence_pipeline` as the
+        fallback when ``payload.records`` is missing / empty,
+        which is the real-world shape produced by the operator
+        VPS D-A export (300 RECORD_AUDITED events alongside a
+        BACKFILL_GENERATED whose ``records`` field is ``None``).
     """
 
     warnings: list[str] = []
+    payload: dict[str, Any] | None = None
+    audited_records: list[dict[str, Any]] = []
 
     if coverage_payload is not None:
-        payload = _read_first_json_object(coverage_payload)
-        if payload is not None and "records" in payload:
-            return payload, warnings
-        warnings.append(
-            f"coverage_payload_unreadable_or_empty:{coverage_payload}"
+        candidate = _read_first_json_object(coverage_payload)
+        if candidate is not None and "records" in candidate:
+            payload = candidate
+        else:
+            warnings.append(
+                f"coverage_payload_unreadable_or_empty:{coverage_payload}"
+            )
+
+    if payload is None and export_dir is not None:
+        candidate = _scan_export_dir_for_d_a_payload(export_dir)
+        if candidate is not None:
+            payload = candidate
+        else:
+            warnings.append(f"export_dir_no_d_a_payload:{export_dir}")
+
+    if payload is None and events_db is not None:
+        candidate = _load_d_a_payload_from_events_db(events_db)
+        if candidate is not None:
+            payload = candidate
+        else:
+            warnings.append(f"events_db_no_d_a_payload:{events_db}")
+
+    # RECORD_AUDITED fallback collection. Always attempted from
+    # every available source so the Format B path works even when
+    # the Format A payload was found but has ``records=None``.
+    if export_dir is not None:
+        audited_records.extend(
+            _scan_export_dir_for_d_a_record_audited_events(export_dir)
+        )
+    if events_db is not None:
+        audited_records.extend(
+            _load_d_a_record_audited_events_from_db(events_db)
         )
 
-    if export_dir is not None:
-        payload = _scan_export_dir_for_d_a_payload(export_dir)
-        if payload is not None:
-            return payload, warnings
-        warnings.append(f"export_dir_no_d_a_payload:{export_dir}")
-
-    if events_db is not None:
-        payload = _load_d_a_payload_from_events_db(events_db)
-        if payload is not None:
-            return payload, warnings
-        warnings.append(f"events_db_no_d_a_payload:{events_db}")
-
-    if historical_store_dir is not None:
+    if payload is None and not audited_records and historical_store_dir is not None:
         if historical_store_dir.is_dir():
             warnings.append(
                 f"historical_store_dir_present_but_no_runner_hook:"
@@ -332,7 +557,7 @@ def load_d_a_coverage_payload(
                 f"historical_store_dir_missing:{historical_store_dir}"
             )
 
-    return None, warnings
+    return payload, audited_records, warnings
 
 
 # ---------------------------------------------------------------------------
@@ -425,15 +650,25 @@ def build_post_discovery_inputs_from_d_a_payload(
     for raw in raw_records:
         if not isinstance(raw, Mapping):
             continue
-        symbol = str(raw.get("symbol") or "")
-        if not symbol:
-            continue
         capture_path = raw.get("capture_path") or {}
         reference = raw.get("reference") or {}
         if not isinstance(capture_path, Mapping):
             capture_path = {}
         if not isinstance(reference, Mapping):
             reference = {}
+        # Symbol resolution priority mirrors the D-A export shape
+        # observed on the operator VPS: the top-level ``symbol``
+        # may be missing on a flat RECORD_AUDITED-derived record,
+        # in which case ``reference.symbol`` / ``capture_path.symbol``
+        # carry the same value.
+        raw_symbol = raw.get("symbol")
+        if not raw_symbol:
+            raw_symbol = reference.get("symbol")
+        if not raw_symbol:
+            raw_symbol = capture_path.get("symbol")
+        symbol = str(raw_symbol or "")
+        if not symbol:
+            continue
 
         first_seen_time = capture_path.get("first_seen_time_utc_ms")
         first_seen_event = capture_path.get("first_seen_event_type")
@@ -703,14 +938,47 @@ def run_evidence_pipeline(
     output_report_path = output_dir / "post_discovery_outcome_report.json"
     output_summary_path = output_dir / "post_discovery_outcome_report.md"
 
-    payload, warnings = load_d_a_coverage_payload(
+    payload, audited_records, warnings = load_d_a_coverage_payload(
         coverage_payload=coverage_payload,
         export_dir=export_dir,
         events_db=events_db,
         historical_store_dir=historical_store_dir,
     )
 
-    if payload is None:
+    # Format A: BACKFILL_GENERATED.payload.records is non-empty.
+    # Format B: BACKFILL_GENERATED.payload.records is missing/None
+    #           but RECORD_AUDITED events carry one record each
+    #           (the real D-A export shape).
+    effective_payload: dict[str, Any] | None = None
+    if payload is not None:
+        payload_records = payload.get("records")
+        if (
+            isinstance(payload_records, (list, tuple))
+            and len(payload_records) > 0
+        ):
+            effective_payload = dict(payload)
+        elif audited_records:
+            # Synthesise a payload that re-uses the report-level
+            # fields from the BACKFILL_GENERATED payload (so the
+            # reference window / counters remain auditable) but
+            # populates ``records`` from the RECORD_AUDITED
+            # fallback.
+            synth = dict(payload)
+            synth["records"] = list(audited_records)
+            effective_payload = synth
+            warnings.append(
+                "d_a_backfill_records_missing_using_record_audited_fallback"
+            )
+    elif audited_records:
+        # No BACKFILL_GENERATED payload at all but we still have
+        # RECORD_AUDITED events. Build a minimal synthetic payload
+        # so downstream code paths stay uniform.
+        effective_payload = {"records": list(audited_records)}
+        warnings.append(
+            "d_a_backfill_payload_absent_using_record_audited_fallback"
+        )
+
+    if effective_payload is None:
         # Insufficient evidence path. Write an honest marker.
         marker = {
             "schema_version": POST_DISCOVERY_OUTCOME_METRICS_SCHEMA_VERSION,
@@ -762,10 +1030,69 @@ def run_evidence_pipeline(
 
     price_paths = load_price_paths_json(price_paths_json)
     inputs = build_post_discovery_inputs_from_d_a_payload(
-        payload,
+        effective_payload,
         reference_window=reference_window,
         price_paths=price_paths,
     )
+
+    # Closeout-quality guard: when the D-A export DID carry
+    # RECORD_AUDITED events but the D-B input adapter produced
+    # zero usable inputs, the run is NOT a quiet success. Flag it
+    # explicitly so daily-report / closeout tooling refuses to
+    # treat it as ACCEPTED. This is the bug surfaced by the
+    # operator-VPS evidence run (300 RECORD_AUDITED events,
+    # ``evaluated_count == 0``).
+    if not inputs and audited_records:
+        warnings.append(WARNING_D_A_RECORDS_PRESENT_BUT_NO_INPUTS)
+        marker = {
+            "schema_version": POST_DISCOVERY_OUTCOME_METRICS_SCHEMA_VERSION,
+            "source_phase": POST_DISCOVERY_OUTCOME_METRICS_SOURCE_PHASE,
+            "status": INSUFFICIENT_EVALUABLE_RECORDS_STATUS,
+            "needs_operator_data": False,
+            "reference_window": reference_window,
+            "evaluated_count": 0,
+            "report_generated_count": 0,
+            "record_audited_event_count": len(audited_records),
+            "warnings": list(warnings),
+            "generated_at_utc": _now_utc_iso(),
+            "notes": (
+                "Phase 11C.1C-C-B-B-B-D-A export carried "
+                f"{len(audited_records)} HISTORICAL_MOVER_COVERAGE_RECORD_"
+                "AUDITED events but the D-B input adapter could not "
+                "extract any usable PostDiscoveryOutcomeInput. This is "
+                "an input-adapter gap, not an EVIDENCE_GENERATED run. "
+                "The run is rejected so closeout tooling does not "
+                "silently mark the phase ACCEPTED."
+            ),
+        }
+        _write_json(output_report_path, marker)
+        _write_jsonl(output_events_path, [])
+        summary_md = _format_markdown_summary(
+            status=INSUFFICIENT_EVALUABLE_RECORDS_STATUS,
+            evaluated_count=0,
+            report_generated_count=0,
+            label_summary={},
+            timing_summary={},
+            notable_symbols={s: "ABSENT" for s in NOTABLE_SYMBOL_WATCHLIST},
+            warnings=tuple(warnings),
+            output_report_path=output_report_path,
+            output_events_path=output_events_path,
+            reference_window=reference_window,
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_summary_path.write_text(summary_md, encoding="utf-8")
+        return EvidenceRunResult(
+            status=INSUFFICIENT_EVALUABLE_RECORDS_STATUS,
+            evaluated_count=0,
+            report_generated_count=0,
+            output_report_path=output_report_path,
+            output_events_path=output_events_path,
+            output_summary_path=output_summary_path,
+            label_summary={},
+            timing_summary={},
+            notable_symbols={s: "ABSENT" for s in NOTABLE_SYMBOL_WATCHLIST},
+            warnings=tuple(warnings),
+        )
 
     evaluator = PostDiscoveryOutcomeEvaluator()
     records = [evaluator.evaluate(inp) for inp in inputs]
@@ -953,7 +1280,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
 
-    if result.status == INSUFFICIENT_EVIDENCE_STATUS:
+    if result.status in (
+        INSUFFICIENT_EVIDENCE_STATUS,
+        INSUFFICIENT_EVALUABLE_RECORDS_STATUS,
+    ):
         return 2
     return 0
 
