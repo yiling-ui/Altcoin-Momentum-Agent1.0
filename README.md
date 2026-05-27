@@ -1,62 +1,117 @@
 # AMA-RT - Altcoin Momentum Agent (Right Tail Edition)
 
-> **Phase status:** Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar (PR-B).
-> **Paper / mock execution only.** Phase 11C.1B layers a real-network
-> public-market WebSocket adapter
-> (:class:`StdlibPublicWSTransport` - RFC 6455 over the Python
-> standard library, no third-party WS package) plus a routed
-> :class:`MultiTransportPublicWSManager` (one transport per
-> ``/public/{ws,stream}`` and ``/market/{ws,stream}`` route) on
-> top of every Phase 1-11C / 11C.1A contract. The runner subscribes
-> to the FIVE public Binance USDⓈ-M Futures WebSocket streams
-> (``!ticker@arr`` / ``!miniTicker@arr`` / ``!bookTicker`` /
-> ``!markPrice@arr`` / ``!forceOrder@arr``), feeds them into the
-> all-market radar buffer, scores every symbol, drives a bounded
-> :class:`CandidatePool`, and runs the existing Phase 11C event
-> chain only on the active head. The default WS transport refuses
-> to open a real socket (``NotImplementedError``); the in-process
-> pump covers ``--dry-run``; the routed real-network manager is
-> selected when ``--ws-first`` is set without ``--dry-run``. Phase
-> 11C.1B does NOT silently fall back to REST under ``--ws-first``;
-> if the real WS pump cannot be constructed the runner exits with
-> ``rc=2``.
+> **Project identity.** AMA-RT V1.4 — *Altcoin Momentum Agent
+> (Right Tail Edition) / 妖币右尾捕获系统*. AMA-RT is **not**
+> a generic auto-trading bot. AMA-RT is an **Adaptive Market
+> Operating System** whose long-term goal is to keep running
+> stably, adapt to changing market structure, and capture the
+> fattest right tail of the altcoin market. Short-term 5x+ is
+> a **direction**, never a return promise.
 >
-> **Phase 11C.1B 5-min real public WS smoke: PASS.** ``ws_messages_received``
-> > 0, ``ws_chains_emitted`` > 0, ``rate_limit_429_count = 0``,
-> ``rate_limit_418_count = 0``, ``rate_limit_ban = False``, every
-> safety flag unchanged. Evidence:
-> ``docs/PHASE_11C_1B_DRY_RUN_EVIDENCE.md`` and the closing banner
-> emitted by the runner.
+> **Current phase:** **Phase 11C.1C-C-B-B-B-D-A — Historical
+> 60D Mover Coverage Audit v0.**
+> **Status:** **ACCEPTED / PARTIAL_QUALITY /
+> TOOLCHAIN_CLOSEOUT_ONLY.**
 >
-> **Symbol validation: exchangeInfo-as-truth, NEVER an ASCII-only
-> regex.** Binance USDⓈ-M Futures lists non-ASCII contracts (e.g.
-> ``我踏马来了USDT``, ``币安人生USDT``) - real listings with their own
-> ``/fapi/v1/exchangeInfo`` entries, WS pushes, and REST detail
-> endpoints. The runner bootstraps a
-> :class:`app.market_data_public.symbol_universe.SymbolUniverse`
-> from a one-shot ``/fapi/v1/exchangeInfo`` snapshot at startup;
-> the candidate pool consults that set on every ``offer()`` and
-> emits ``WS_SYMBOL_REJECTED`` for any WS-radar symbol that is NOT
-> in it - regardless of character class. Refusing symbols by
-> ASCII-only character class (``^[A-Z0-9_]{2,30}USDT$`` or any
-> equivalent) would silently lose discovery on every exotic
-> listing; the source-tree audit
-> ``tests/unit/test_phase11c_1b_symbol_universe.py
-> ::test_symbol_validation_uses_exchange_info_not_ascii_regex``
-> fails the next PR that re-introduces one.
+> The D-A audit toolchain has been exercised end-to-end:
 >
-> The Phase 1 safety lock (``mode=paper``,
-> ``live_trading_enabled=False``, ``right_tail_enabled=False``,
-> ``llm_enabled=False``, ``exchange_live_order_enabled=False``)
-> and every later boundary remain in force. The four
-> ``ExchangeClientBase`` write surfaces (``create_order``,
-> ``cancel_order``, ``set_leverage``, ``set_margin_mode``)
-> **continue to raise** ``SafeModeViolation``; no Phase 11C.1B
-> code path overrides them. No Binance API key, no Binance API
-> secret, no signed endpoint, no ``listenKey``, no user data
-> stream, no private WebSocket, no trading WebSocket API, no
-> ``/private`` routed surface, no DeepSeek, no Telegram outbound,
-> no Binance Square.
+>   - the 60D Historical Market Store reference data has been
+>     generated under `data/historical_market_store/`;
+>   - `app.adaptive.historical_mover_coverage_backfill` has
+>     produced D-A audit records against that reference store;
+>   - the Phase 8.5 export bundle now contains the
+>     `HISTORICAL_MOVER_COVERAGE_*` events that surface those
+>     records;
+>   - the operator's manual review of the audit output is
+>     **PARTIAL** — see "D-A manual review (operator sample)"
+>     below for the per-symbol verdict;
+>   - **`RAVEUSDT` and `STOUSDT` are recorded as severe
+>     misses.**
+>
+> **D-A acceptance is acceptance of the audit toolchain
+> only.** It means the coverage-audit pipeline can run, can
+> produce records, and can surface evidence through export /
+> replay. **D-A acceptance does NOT mean** discovery quality
+> is fully acceptable, that the strategy is profitable, that
+> direction classification is solved, or that the system is
+> ready for live trading. **Phase 12 remains FORBIDDEN.**
+>
+> **Safety boundary (unchanged across this docs-only PR):**
+> `mode=paper`, `live_trading=False`,
+> `exchange_live_orders=False`, `right_tail=False`,
+> `llm=False`, `telegram_outbound_enabled=False`,
+> `binance_private_api_enabled=False`. No Binance API key,
+> no Binance API secret, no signed endpoint, no
+> account / order / position / leverage / margin endpoint,
+> no private WebSocket, no `listenKey`, no real Telegram
+> outbound, no DeepSeek trade decision. The Risk Engine
+> remains the single trade-decision gate. The four
+> `ExchangeClientBase` write surfaces (`create_order`,
+> `cancel_order`, `set_leverage`, `set_margin_mode`)
+> continue to raise `SafeModeViolation`.
+>
+> **D-A manual review (operator sample).** The operator
+> manually compared D-A audit records against real recent
+> movers; the per-symbol verdict is recorded verbatim:
+>
+>   - `PLAYUSDT` — qualified.
+>   - `AGTUSDT` — discovered ~2 days ahead; mid-window chop is
+>     small; qualified provided the system is not shaken off
+>     by the chop.
+>   - `BEATUSDT` — qualified.
+>   - `VICUSDT` — marginally usable.
+>   - `BIOUSDT` — usable, including the subsequent rally.
+>   - `PROVEUSDT` — long-side entry was poor; if the system
+>     had classified it as exhaustion / short, the result
+>     could have been positive.
+>   - `USUSDT` — not qualified.
+>   - `RAVEUSDT` — **severely missed** (not qualified).
+>   - `STOUSDT` — **severely missed** (not qualified).
+>
+> Manual review result: **PARTIAL**.
+>
+> **What D-A acceptance does NOT authorise.** D-A acceptance
+> does **not** authorise: progressing into Phase 12; enabling
+> any Binance private API; placing live orders; enabling real
+> Telegram outbound; letting DeepSeek / any LLM decide
+> direction, position size, leverage, stop-loss, target
+> price, or execution; letting Telegram commands bypass the
+> Risk Engine; expanding `symbol_limit`; changing anomaly
+> thresholds; changing the candidate pool capacity; changing
+> Regime weights; or any automatic parameter tuning based on
+> a single sample or on the D-A reference set itself
+> ("looking at the answer key" is forbidden).
+>
+> **Roadmap (next allowed work; gated, sequential, paper-only
+> until explicitly re-gated):**
+>
+>   0. docs status unification (this PR);
+>   1. D-A docs closeout (this PR);
+>   2. Post-Discovery Outcome Metrics;
+>   3. Severe Missed Tail Triage (covers `RAVEUSDT`,
+>      `STOUSDT`, and any later additions);
+>   4. Replay / Reflection extension for 11C events;
+>   5. AI Layer Constitution docs baseline (see
+>      `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md`);
+>   6. DeepSeek Market Intelligence Sandbox (offline /
+>      sandbox only; no hot path; no Risk Engine input;
+>      no Execution FSM input; no live Telegram outbound);
+>   7. AI Reality Check / Evidence Citation Contract;
+>   8. Paper Shadow Strategy Validation;
+>   9. Risk / Execution / Capital Safety Matrix;
+>   10. Complete 30D / 60D / 90D Blind Walk-forward;
+>   11. Small-capital Live Go/No-Go (**remote, gated phase
+>       only — NOT a currently executable step; reserved
+>       behind every prior gate, every Phase 12 prerequisite,
+>       and the Spec §41 Go/No-Go checklist that has NOT
+>       been initiated**).
+>
+> The historical Phase 11C / 11C.1A / 11C.1B / 11C.1C-A /
+> 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A /
+> 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C /
+> 11C.1C-C-B-B-B-D acceptance summaries below are kept as a
+> historical record. They describe **prior** phase deliverables
+> and **must not** be read as the current phase status.
 
 ---
 
@@ -84,7 +139,10 @@ This is the implementation of the production specification in
 | Phase 11B - Cloud Paper Acceptance | #11B | merged (GO) | 30/30 dry-run + 648/648 24h@2min observations PASS |
 | Phase 11C - Real Binance Public Market Data Read-Only Paper | #11C | open (parent) | held until 11C.1A + 11C.1B + 11C.1C all close |
 | Phase 11C.1A - Binance Public REST Rate Limit Governor & 418 Protection | #11C.1A | merged | `feature/phase-11c1-rest-rate-limit-governor` |
-| Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar | #11C.1B | this branch (5-min real WS smoke PASS) | `feature/phase-11c1-ws-first-all-market-radar` |
+| Phase 11C.1B - WebSocket-First All-Market Demon Coin Radar | #11C.1B | merged (historical; superseded — current phase is **11C.1C-C-B-B-B-D-A**) | `feature/phase-11c1-ws-first-all-market-radar` |
+| Phase 11C.1C-* sub-phases (11C.1C-A through 11C.1C-C-B-B-B-D) | various | merged / accepted (historical) | see `docs/PHASE_GATE.md` |
+| **Phase 11C.1C-C-B-B-B-D-A — Historical 60D Mover Coverage Audit v0** | #11C.1C-C-B-B-B-D-A | **ACCEPTED / PARTIAL_QUALITY / TOOLCHAIN_CLOSEOUT_ONLY** (current) | see `docs/PHASE_GATE.md` and `docs/PROJECT_STATUS.md` |
+| Phase 12 — Real money / live trading | — | **FORBIDDEN** | Spec §41 Go/No-Go has not been initiated; D-A acceptance does **NOT** authorise Phase 12 |
 
 ## Phase 11C deliverable - Real Binance Public Market Data Read-Only Paper
 
