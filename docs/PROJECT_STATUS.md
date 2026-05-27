@@ -125,6 +125,54 @@ intentionally short. The full phase-gate ledger lives in
 >   - `binance_private_api_enabled = False`
 >   - **Phase 12 = FORBIDDEN**
 >
+> ### Evidence closeout (this PR)
+>
+> **Status remains IN_REVIEW / INSUFFICIENT_EVIDENCE /
+> EVIDENCE_CLOSEOUT_ONLY.** The D-B implementation PR (#67)
+> is merged into `main`. This evidence-closeout PR adds a
+> paper-only evidence runner
+> (`scripts/run_post_discovery_outcome_evidence.py`), an
+> 8-case runner unit-test module
+> (`tests/unit/test_post_discovery_outcome_evidence_runner.py`),
+> and an honest evidence run against the empty
+> `data/historical_market_store/` /
+> `data/sqlite/events.db` / `data/reports/exports/` paths in
+> this workspace. The runner correctly refused to fabricate
+> D-A records and produced:
+>
+>   - `data/reports/post_discovery_outcome/post_discovery_outcome_report.json`
+>     with `status = INSUFFICIENT_EVIDENCE`,
+>     `needs_operator_data = true`,
+>     `evaluated_count = 0`,
+>     `report_generated_count = 0`, warnings
+>     `export_dir_no_d_a_payload`,
+>     `events_db_no_d_a_payload`,
+>     `historical_store_dir_missing`, `NEEDS_OPERATOR_DATA`.
+>   - `data/reports/post_discovery_outcome/events.jsonl` -
+>     empty (zero events).
+>   - `data/reports/post_discovery_outcome/post_discovery_outcome_report.md`
+>     - markdown summary that surfaces `RAVEUSDT: ABSENT`,
+>     `STOUSDT: ABSENT`, and the safety-boundary block
+>     verbatim.
+>
+> Tests:
+>
+>   - `tests/unit/test_post_discovery_outcome_metrics.py` -
+>     20/20 pass.
+>   - `tests/unit/test_post_discovery_outcome_evidence_runner.py`
+>     - 8/8 pass.
+>   - Full `tests/unit` suite - `2450 passed`.
+>
+> D-B will be flipped to `ACCEPTED` only after a follow-up
+> operator-driven run that supplies a real Phase
+> 11C.1C-C-B-B-B-D-A historical mover coverage payload via
+> `--coverage-payload` / `--export-dir` / `--events-db`. D-B
+> does **NOT** authorise live trading. D-B does **NOT**
+> prove strategy profitability. D-B does **NOT** solve
+> direction. D-B does **NOT** authorise automatic parameter
+> tuning. D-B does **NOT** authorise DeepSeek trade
+> decisions. Phase 12 remains **FORBIDDEN**.
+>
 > *Prior status (kept for history; superseded by the entry
 > above):*
 >

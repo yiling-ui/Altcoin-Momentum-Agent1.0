@@ -278,3 +278,152 @@ The module **MUST NOT** modify:
     config / thresholds / `symbol_limit` / `candidate_pool` /
     Regime weights, the DeepSeek transport, the Telegram
     outbound transport.
+
+
+
+## Evidence closeout (PR after #67)
+
+> **Status: IN_REVIEW / INSUFFICIENT_EVIDENCE.** The D-B
+> implementation PR (#67) is merged into `main` and the v0
+> module + the two typed `EventType` values + the 20-case
+> unit-test module are present. This evidence-closeout PR adds
+> the paper-only evidence runner
+> `scripts/run_post_discovery_outcome_evidence.py`, an 8-case
+> runner unit-test module
+> `tests/unit/test_post_discovery_outcome_evidence_runner.py`,
+> and an honest `INSUFFICIENT_EVIDENCE` /
+> `NEEDS_OPERATOR_DATA` evidence run against the empty
+> `data/historical_market_store/` + `data/sqlite/events.db` +
+> `data/reports/exports/` paths in this workspace. The runner
+> refused to fabricate D-A records and wrote the marker
+> report + empty events.jsonl + markdown summary to
+> `data/reports/post_discovery_outcome/`. Therefore D-B
+> **CANNOT** be marked `ACCEPTED` in this PR. D-B will move
+> from `IN_REVIEW` to `ACCEPTED` only after a follow-up PR
+> that runs the same runner against operator-supplied real
+> Phase 11C.1C-C-B-B-B-D-A historical mover coverage records.
+
+### Evidence runner
+
+  - New paper-only script
+    `scripts/run_post_discovery_outcome_evidence.py`. The
+    runner consumes the artefacts produced by Phase
+    11C.1C-C-B-B-B-D-A and turns each audited mover into one
+    `PostDiscoveryOutcomeRecord` via
+    `PostDiscoveryOutcomeEvaluator`, then aggregates the
+    records into one `PostDiscoveryOutcomeReport`. Inputs are
+    accepted in priority order:
+      1. `--coverage-payload` - a Phase 11C.1C-C-B-B-B-D-A
+         `HistoricalMoverCoverageBackfillReport` payload
+         (`.json` or `.jsonl`).
+      2. `--export-dir` - directory of exported
+         `events.jsonl` files; the runner picks the most
+         recent
+         `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED`
+         event.
+      3. `--events-db` - read-only SQLite events DB.
+      4. `--historical-store-dir` - recorded as a warning
+         when no fresh-audit hook is reachable. The runner
+         does **NOT** trigger a fresh D-A audit by itself.
+    Optional `--price-paths-json` accepts an operator-supplied
+    JSON file mapping each symbol to a sequence of post
+    first-seen `{timestamp_utc_ms, price}` observations. When
+    omitted, the runner emits `MISSED_STRONG_TAIL` for records
+    whose D-A reference recorded a strong tail
+    (`max_window_gain >= 0.20`) and `INSUFFICIENT_PRICE_PATH`
+    for the rest. When all input sources are unreachable the
+    runner writes a marker report with status
+    `INSUFFICIENT_EVIDENCE` / `NEEDS_OPERATOR_DATA` and exits
+    with code `2` so a downstream caller cannot mistakenly
+    flip D-B to `ACCEPTED`.
+  - The runner emits two paper-only event payloads to
+    `<output-dir>/events.jsonl`:
+      - `POST_DISCOVERY_OUTCOME_EVALUATED` (one per record).
+      - `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` (one per
+        batch).
+    Plus `<output-dir>/post_discovery_outcome_report.json`
+    and `<output-dir>/post_discovery_outcome_report.md`
+    (markdown summary).
+  - Runner module-level invariants (enforced by tests):
+      - **Forbidden imports absent**: the runner does not
+        import `app.risk`, `app.execution`,
+        `app.exchanges.binance`, `app.exchanges.binance_public_ws`,
+        `app.llm`, `app.telegram`.
+      - **Forbidden keys absent**: every artefact the runner
+        writes is recursively walked by
+        `assert_payload_has_no_forbidden_keys`; no `buy` /
+        `sell` / `direction` / `order` / `position_size` /
+        `leverage` / `stop` / `stop_loss` / `target` /
+        `take_profit` / `risk_budget` / runtime-tuning patch
+        is ever written.
+      - **No fabrication**: when no D-A artefact is
+        reachable, the runner refuses to invent records and
+        marks the run `INSUFFICIENT_EVIDENCE`.
+
+### Evidence run (this workspace)
+
+`data/historical_market_store/`, `data/sqlite/events.db`, and
+`data/reports/exports/` are absent in this workspace. The
+runner correctly produced:
+
+  - `data/reports/post_discovery_outcome/post_discovery_outcome_report.json`
+    with `status = INSUFFICIENT_EVIDENCE`,
+    `needs_operator_data = true`, `evaluated_count = 0`,
+    `report_generated_count = 0`, and warnings
+    `export_dir_no_d_a_payload`, `events_db_no_d_a_payload`,
+    `historical_store_dir_missing`, `NEEDS_OPERATOR_DATA`.
+  - `data/reports/post_discovery_outcome/events.jsonl` -
+    empty (zero events).
+  - `data/reports/post_discovery_outcome/post_discovery_outcome_report.md`
+    - markdown summary that lists the safety boundary
+    verbatim (no live trading, no profitability, no
+    direction, no auto-tuning, no DeepSeek, Phase 12
+    FORBIDDEN) and surfaces `RAVEUSDT: ABSENT` /
+    `STOUSDT: ABSENT` because no D-A payload reached the
+    runner.
+
+`RAVEUSDT` and `STOUSDT` were neither evaluated nor
+classified by this run; they are recorded as `ABSENT`. The
+runner specifically supports them as
+`MISSED_STRONG_TAIL` / `NEEDS_TRIAGE` /
+`INSUFFICIENT_PRICE_PATH` candidates once a real D-A
+artefact is supplied; nothing was fabricated.
+
+### Tests
+
+  - `tests/unit/test_post_discovery_outcome_metrics.py` -
+    20 cases pass (no regression vs. PR #67 head).
+  - `tests/unit/test_post_discovery_outcome_evidence_runner.py`
+    - 8 new cases covering: insufficient-evidence path,
+    coverage-payload happy path, missed-strong-tail
+    surfacing, operator price-paths refinement, export-dir
+    fallback, forbidden-key guard on every emitted artefact,
+    forbidden-imports static check on the runner source,
+    and CLI exit code on missing inputs.
+  - Full unit-test suite: `2450 passed`.
+
+### What this evidence-closeout PR does NOT change
+
+  - **NO** change to `app/risk/`, `app/execution/`,
+    `app/exchanges/`, `app/llm/`, `app/telegram/`,
+    `app/config/`.
+  - **NO** change to runtime thresholds, `symbol_limit`,
+    `candidate_pool`, Regime weights, the DeepSeek transport,
+    or the Telegram outbound transport.
+  - **NO** new private API surface, signed endpoint,
+    `listenKey`, real Telegram outbound, or DeepSeek trade
+    decision.
+  - **NO** Severe Missed Tail Triage, Replay / Reflection
+    extension, DeepSeek integration, or Phase 12 work.
+
+### D-B status
+
+  - **Status: IN_REVIEW / INSUFFICIENT_EVIDENCE /
+    EVIDENCE_CLOSEOUT_ONLY.**
+  - D-B does **NOT** authorise live trading.
+  - D-B does **NOT** prove strategy profitability.
+  - D-B does **NOT** solve direction (long / short / entry /
+    exit / stop / target / position size / leverage).
+  - D-B does **NOT** authorise automatic parameter tuning.
+  - D-B does **NOT** authorise DeepSeek trade decisions.
+  - Phase 12 remains **FORBIDDEN**.
