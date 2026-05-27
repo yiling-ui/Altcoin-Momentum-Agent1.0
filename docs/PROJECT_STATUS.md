@@ -226,16 +226,14 @@ intentionally short. The full phase-gate ledger lives in
 >     capacity change, Regime weight change, live
 >     trading, DeepSeek trade decisions, and Phase 12.
 >     **Phase 12 remains FORBIDDEN.**
->   - **B1.2 is not started now.** *Historical Kline
->     Store Builder / Intraday Price Path Backfill* (1m /
->     5m historical kline path storage plus an intraday
->     price path adapter) is **only a future optional
->     data-quality task**, and is admissible **only if**
->     B2 triage proves that `RAVEUSDT` / `STOUSDT` or
->     other severe missed tails are blocked specifically
->     by missing intraday price path. B1.2 is **not** a
->     precondition for B2 and is **not** the next slice.
->     This PR does **not** open B1.2.
+>   - **Historical Kline Store Builder / Intraday Price
+>     Path Backfill is NOT started now.** It remains an
+>     optional future data-quality task only if B2 triage
+>     proves severe-miss attribution is blocked by missing
+>     intraday price paths, and only with explicit owner
+>     approval. It is **not** a precondition for B2 and
+>     is **not** the next slice. This PR does **not** open
+>     it.
 >   - **B1.1 does not solve intraday price path
 >     completeness.** This closeout does not claim
 >     otherwise.

@@ -243,16 +243,13 @@ Marker:
   change, Regime weight change, live trading, DeepSeek
   trade decisions, and Phase 12. **Phase 12 remains
   FORBIDDEN.**
-- **B1.2 is not started now.** *Historical Kline Store
-  Builder / Intraday Price Path Backfill* (1m / 5m
-  historical kline path storage plus an intraday price
-  path adapter) is **only a future optional data-quality
-  task**, and is admissible **only if** B2 triage proves
-  that `RAVEUSDT` / `STOUSDT` or other severe missed
-  tails are blocked specifically by missing intraday
-  price path. B1.2 is **not** a precondition for B2 and
-  is **not** the next slice. This PR does **not** open
-  B1.2.
+- **Historical Kline Store Builder / Intraday Price Path
+  Backfill is NOT started now.** It remains an optional
+  future data-quality task only if B2 triage proves
+  severe-miss attribution is blocked by missing intraday
+  price paths, and only with explicit owner approval. It
+  is **not** a precondition for B2 and is **not** the
+  next slice. This PR does **not** open it.
 - **B1.1 does not solve intraday price path
   completeness.** This PR does not claim otherwise.
 - **B1.1 does not solve direction.** This PR does not
@@ -321,13 +318,13 @@ Marker:
   **NOT** marked full data coverage accepted anywhere.
   B1.1 is **NOT** marked intraday-kline accepted anywhere.
 - **Next allowed route = B2 *Severe Missed Tail Triage
-  v0*.** Confirmed across every modified doc. **B1.2
-  *Historical Kline Store Builder / Intraday Price Path
-  Backfill* is NOT started now**; it is recorded as a
-  future optional data-quality task admissible only if
-  B2 triage proves severe misses (e.g. `RAVEUSDT` /
-  `STOUSDT`) are blocked specifically by missing
-  intraday price path.
+  v0*.** Confirmed across every modified doc.
+  **Historical Kline Store Builder / Intraday Price Path
+  Backfill is NOT started now**; it is recorded as an
+  optional future data-quality task only if B2 triage
+  proves severe-miss attribution is blocked by missing
+  intraday price paths, and only with explicit owner
+  approval.
 - **B2 scope recorded across every modified doc.**
   Confirmed: B2 *Severe Missed Tail Triage v0* will
   classify unresolved severe-miss cases (e.g. `RAVEUSDT`,
