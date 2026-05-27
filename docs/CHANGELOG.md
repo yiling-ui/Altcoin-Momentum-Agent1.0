@@ -199,6 +199,22 @@ Marker:
     record, per severe miss, whether the case is blocked
     by missing intraday price path or by some other
     factor.
+  - **B2 scope (recorded for clarity).** B2 *Severe
+    Missed Tail Triage v0* will classify unresolved
+    severe-miss cases (e.g. `RAVEUSDT`, `STOUSDT`) into
+    root-cause buckets — including but not limited to
+    `PRICE_PATH_GAP`, `DATA_UNRELIABLE`,
+    `EVENT_HISTORY_MISSING`, `UNIVERSE_GAP`,
+    `SYMBOL_LIMIT_GAP`, `CANDIDATE_POOL_EVICTED`,
+    `THRESHOLD_TOO_STRICT`, `WS_DATA_GAP`,
+    `REST_REFERENCE_GAP`, `RISK_REJECTED_BUT_MOVED`,
+    `TRUE_DISCOVERY_FAILURE`, and `UNKNOWN`. B2 is
+    triage-only.
+  - **B2 still forbids** auto-tuning, threshold change,
+    `symbol_limit` expansion, candidate-pool capacity
+    change, Regime weight change, live trading, DeepSeek
+    trade decisions, and Phase 12. **Phase 12 remains
+    FORBIDDEN.**
   - **B1.2 is not started now.** *Historical Kline Store
     Builder / Intraday Price Path Backfill* (1m / 5m
     historical kline path storage plus an intraday price
@@ -245,6 +261,21 @@ Marker:
     task admissible only if B2 triage proves severe
     misses (e.g. `RAVEUSDT` / `STOUSDT`) are blocked
     specifically by missing intraday price path.
+  - **B2 scope recorded across every modified doc.** B2
+    *Severe Missed Tail Triage v0* will classify
+    unresolved severe-miss cases (e.g. `RAVEUSDT`,
+    `STOUSDT`) into root-cause buckets — including but
+    not limited to `PRICE_PATH_GAP`, `DATA_UNRELIABLE`,
+    `EVENT_HISTORY_MISSING`, `UNIVERSE_GAP`,
+    `SYMBOL_LIMIT_GAP`, `CANDIDATE_POOL_EVICTED`,
+    `THRESHOLD_TOO_STRICT`, `WS_DATA_GAP`,
+    `REST_REFERENCE_GAP`, `RISK_REJECTED_BUT_MOVED`,
+    `TRUE_DISCOVERY_FAILURE`, and `UNKNOWN`.
+  - **B2 prohibitions recorded across every modified
+    doc.** B2 still forbids auto-tuning, threshold
+    change, `symbol_limit` expansion, candidate-pool
+    capacity change, Regime weight change, live trading,
+    DeepSeek trade decisions, and Phase 12.
   - **Phase 12 remains FORBIDDEN.**
 
 #### Safety boundary (held end-to-end)
