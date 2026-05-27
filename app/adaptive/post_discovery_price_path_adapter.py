@@ -156,6 +156,23 @@ class PricePathMissingReason:
     INVALID_FIRST_SEEN_PRICE_FROM_STORE: str = (
         "invalid_first_seen_price_from_store"
     )
+    # Phase 11C.1C-C-B-B-B-D-B.1 PR71 fix: operator-supplied path
+    # had its first point's timestamp strictly AFTER
+    # ``first_seen_time_utc_ms``, AND no other lookahead-safe
+    # anchor (capture_path.first_seen_price /
+    # adapter-resolved containing-day open) was reachable. The
+    # runner refuses to use a future point as
+    # ``first_seen_price`` and surfaces this missing reason so
+    # the operator can supply a pre-first-seen anchor.
+    OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN: str = (
+        "operator_path_starts_after_first_seen"
+    )
+    # The operator-supplied path was empty (or every point was
+    # filtered by the lookahead guard). Distinct from
+    # OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN so the operator can
+    # tell "I sent an empty list" from "I sent a path that starts
+    # in the future".
+    OPERATOR_PATH_EMPTY: str = "operator_path_empty"
 
     ALL: tuple[str, ...] = (
         NONE,
@@ -167,6 +184,8 @@ class PricePathMissingReason:
         NO_TOP_MOVER_ROW_COVERING_FIRST_SEEN_TIME,
         INSUFFICIENT_POST_FIRST_SEEN_POINTS,
         INVALID_FIRST_SEEN_PRICE_FROM_STORE,
+        OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN,
+        OPERATOR_PATH_EMPTY,
     )
 
 
@@ -703,6 +722,163 @@ def summarise_price_path_resolutions(
 
 
 # ---------------------------------------------------------------------------
+# Operator-supplied path resolver (Phase 11C.1C-C-B-B-B-D-B.1 PR71 fix)
+# ---------------------------------------------------------------------------
+
+
+def build_operator_supplied_price_path_resolution(
+    *,
+    symbol: str,
+    first_seen_time_utc_ms: int | None,
+    operator_points: Sequence[PricePoint],
+    fallback_resolution: PricePathResolution | None = None,
+    kline_interval_used: str = DEFAULT_KLINE_INTERVAL_USED,
+) -> PricePathResolution:
+    """Resolve a :class:`PricePathResolution` for one record from
+    an operator-supplied price path with the **Lookahead Guard**
+    strictly enforced.
+
+    The Lookahead Guard rules (Phase 11C.1C-C-B-B-B-D-B.1 PR71
+    fix):
+
+      * ``first_seen_price`` is taken from a lookahead-safe anchor
+        only:
+          1. The latest operator point with
+             ``timestamp_utc_ms <= first_seen_time_utc_ms``, or
+          2. ``fallback_resolution.first_seen_price`` when the
+             operator path has no pre-first-seen anchor (the
+             fallback is expected to come from the local
+             Historical Market Store containing-day open, which
+             is by construction lookahead-safe).
+        A point whose timestamp is strictly AFTER
+        ``first_seen_time_utc_ms`` is **never** used as the
+        anchor (that would be a future-leak).
+      * ``price_path`` (the post-first-seen path) only carries
+        operator points whose timestamps are strictly AFTER
+        ``first_seen_time_utc_ms``. The anchor candidate at
+        ``ts == first_seen_time`` is intentionally NOT in the
+        post-first-seen path because the path's contract is
+        "strictly after".
+      * When ``first_seen_time_utc_ms is None`` the resolver
+        returns a missing resolution with
+        :attr:`PricePathMissingReason.NO_FIRST_SEEN_TIME` -
+        without a discovery time the lookahead guard cannot be
+        applied so the operator path is rejected wholesale.
+      * When the operator path is empty / contains no usable
+        points the resolver returns
+        :attr:`PricePathMissingReason.OPERATOR_PATH_EMPTY`.
+      * When the operator path is non-empty but every point is
+        strictly AFTER ``first_seen_time_utc_ms`` AND no fallback
+        anchor is reachable, the resolver returns
+        :attr:`PricePathMissingReason.OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN`.
+        The operator path is still returned as ``price_path``
+        (it is post-first-seen and lookahead-safe AS A PATH);
+        only the anchor is missing.
+
+    The ``source`` is :attr:`PricePathSource.OPERATOR_SUPPLIED_PATH`
+    whenever the post-first-seen path comes from the operator.
+    Descriptive only - never an input to a runtime knob.
+    """
+
+    sym = str(symbol or "")
+    notes: list[str] = []
+    cleaned: list[PricePoint] = list(operator_points or ())
+
+    if not cleaned:
+        return PricePathResolution(
+            symbol=sym,
+            first_seen_time_utc_ms=first_seen_time_utc_ms,
+            first_seen_price=None,
+            price_path=(),
+            source=PricePathSource.OPERATOR_SUPPLIED_PATH,
+            missing_reason=PricePathMissingReason.OPERATOR_PATH_EMPTY,
+            kline_interval_used=str(kline_interval_used),
+            approximate_intra_day_timestamps=False,
+            notes=("operator_supplied",),
+        )
+
+    if first_seen_time_utc_ms is None:
+        return PricePathResolution(
+            symbol=sym,
+            first_seen_time_utc_ms=None,
+            first_seen_price=None,
+            price_path=(),
+            source=PricePathSource.OPERATOR_SUPPLIED_PATH,
+            missing_reason=PricePathMissingReason.NO_FIRST_SEEN_TIME,
+            kline_interval_used=str(kline_interval_used),
+            approximate_intra_day_timestamps=False,
+            notes=("operator_supplied",),
+        )
+
+    first_seen = int(first_seen_time_utc_ms)
+
+    # Anchor: latest operator point with ts <= first_seen_time.
+    # Lookahead Guard: a point with ts > first_seen MAY NOT be the
+    # anchor (it would be a future price masquerading as
+    # first_seen_price).
+    pre_first_seen_anchor: PricePoint | None = None
+    for point in cleaned:
+        if point.timestamp_utc_ms <= first_seen:
+            if (
+                pre_first_seen_anchor is None
+                or point.timestamp_utc_ms
+                > pre_first_seen_anchor.timestamp_utc_ms
+            ):
+                pre_first_seen_anchor = point
+
+    # Post-first-seen path: strictly AFTER first_seen_time.
+    post_path: tuple[PricePoint, ...] = tuple(
+        sorted(
+            (p for p in cleaned if p.timestamp_utc_ms > first_seen),
+            key=lambda p: p.timestamp_utc_ms,
+        )
+    )
+
+    first_seen_price: float | None = None
+    missing_reason: str = PricePathMissingReason.NONE
+
+    if pre_first_seen_anchor is not None:
+        first_seen_price = float(pre_first_seen_anchor.price)
+        notes.append("operator_anchor_pre_first_seen")
+    elif (
+        fallback_resolution is not None
+        and fallback_resolution.first_seen_price is not None
+    ):
+        first_seen_price = float(fallback_resolution.first_seen_price)
+        notes.append("first_seen_price_anchor_from_fallback")
+    else:
+        # Lookahead-safe anchor unreachable: operator path starts
+        # AFTER first_seen_time AND no fallback anchor available.
+        missing_reason = (
+            PricePathMissingReason.OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN
+        )
+
+    notes.append("operator_supplied")
+    if first_seen_price is None and not post_path:
+        # Path collapsed to nothing AND no anchor - mark explicit.
+        # Distinct from OPERATOR_PATH_EMPTY because the operator
+        # DID supply points, they were just all <= first_seen and
+        # we used the latest as the anchor only - or there was
+        # ambiguity.
+        if missing_reason == PricePathMissingReason.NONE:
+            missing_reason = (
+                PricePathMissingReason.INSUFFICIENT_POST_FIRST_SEEN_POINTS
+            )
+
+    return PricePathResolution(
+        symbol=sym,
+        first_seen_time_utc_ms=first_seen,
+        first_seen_price=first_seen_price,
+        price_path=post_path,
+        source=PricePathSource.OPERATOR_SUPPLIED_PATH,
+        missing_reason=missing_reason,
+        kline_interval_used=str(kline_interval_used),
+        approximate_intra_day_timestamps=False,
+        notes=tuple(notes),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
@@ -717,4 +893,5 @@ __all__ = [
     "PricePathResolution",
     "HistoricalPricePathAdapter",
     "summarise_price_path_resolutions",
+    "build_operator_supplied_price_path_resolution",
 ]

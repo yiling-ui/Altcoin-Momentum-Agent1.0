@@ -54,6 +54,7 @@ from app.adaptive.post_discovery_price_path_adapter import (  # noqa: E402
     PricePathMissingReason,
     PricePathResolution,
     PricePathSource,
+    build_operator_supplied_price_path_resolution,
     summarise_price_path_resolutions,
 )
 from app.adaptive.post_discovery_outcome_metrics import (  # noqa: E402
@@ -734,3 +735,256 @@ def test_pre_loaded_snapshot_path(tmp_path: Path) -> None:
     assert adapter.is_available
     assert adapter.has_symbol("RAVEUSDT")
     assert adapter.indexed_symbol_count == 1
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 11C.1C-C-B-B-B-D-B.1 PR71 fix: operator-supplied path Lookahead Guard
+# ---------------------------------------------------------------------------
+
+
+def test_operator_resolution_case_3_anchor_at_or_before_first_seen() -> None:
+    """**Case 3** (Lookahead-safe operator anchor):
+    operator path's first point timestamp ``<= first_seen_time``.
+
+    Expected:
+      * ``first_seen_price`` is the operator point at the anchor.
+      * ``price_path`` only carries operator points strictly AFTER
+        ``first_seen_time`` (the anchor itself is excluded from
+        the post-first-seen path).
+      * No future point becomes ``first_seen_price``.
+    """
+
+    first_seen = _ms(3, hour=2)
+    operator_points = (
+        PricePoint(timestamp_utc_ms=_ms(3, hour=1), price=1.00),  # anchor
+        PricePoint(timestamp_utc_ms=first_seen, price=1.05),       # anchor candidate (latest <=)
+        PricePoint(timestamp_utc_ms=_ms(3, hour=3), price=1.10),  # post
+        PricePoint(timestamp_utc_ms=_ms(3, hour=4), price=1.20),  # post
+    )
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=first_seen,
+        operator_points=operator_points,
+    )
+
+    assert resolution.source == PricePathSource.OPERATOR_SUPPLIED_PATH
+    assert resolution.missing_reason == PricePathMissingReason.NONE
+    # Anchor: latest operator point with ts <= first_seen_time.
+    assert resolution.first_seen_price == pytest.approx(1.05)
+    # Path: only points strictly AFTER first_seen_time. The anchor
+    # at ts == first_seen and the earlier point at ts < first_seen
+    # are NOT in the path.
+    assert all(
+        pt.timestamp_utc_ms > first_seen for pt in resolution.price_path
+    )
+    assert len(resolution.price_path) == 2
+    assert resolution.price_path[0].price == pytest.approx(1.10)
+    assert resolution.price_path[1].price == pytest.approx(1.20)
+    assert resolution.is_loaded()
+
+
+def test_operator_resolution_case_2_anchor_strictly_after_first_seen() -> None:
+    """**Case 2** (Lookahead leak forbidden):
+    operator path's first point timestamp strictly AFTER
+    ``first_seen_time``.
+
+    Expected when no fallback is provided:
+      * ``first_seen_price`` is **None** (the future point is NOT
+        used as anchor - that would be a lookahead leak).
+      * ``missing_reason`` =
+        :attr:`OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN`.
+      * ``price_path`` still carries the operator points (they ARE
+        post-first-seen and lookahead-safe AS A PATH); only the
+        anchor is missing.
+      * Resolution is NOT loaded (anchor missing).
+    """
+
+    first_seen = _ms(3, hour=2)
+    operator_points = (
+        PricePoint(timestamp_utc_ms=_ms(3, hour=3), price=1.10),
+        PricePoint(timestamp_utc_ms=_ms(3, hour=4), price=1.20),
+        PricePoint(timestamp_utc_ms=_ms(3, hour=5), price=1.50),
+    )
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=first_seen,
+        operator_points=operator_points,
+    )
+
+    assert resolution.source == PricePathSource.OPERATOR_SUPPLIED_PATH
+    assert resolution.first_seen_price is None
+    assert (
+        resolution.missing_reason
+        == PricePathMissingReason.OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN
+    )
+    # Lookahead-safe operator points still surface in price_path
+    # (every point is strictly AFTER first_seen_time).
+    assert len(resolution.price_path) == 3
+    assert all(
+        pt.timestamp_utc_ms > first_seen for pt in resolution.price_path
+    )
+    # Resolution is NOT loaded because anchor is missing.
+    assert not resolution.is_loaded()
+
+
+def test_operator_resolution_case_2_with_fallback_anchor_succeeds() -> None:
+    """**Case 2 + fallback**: operator path's first point is
+    strictly AFTER ``first_seen_time``, but a lookahead-safe
+    fallback resolution (e.g. the adapter's containing-day open)
+    is provided.
+
+    Expected:
+      * ``first_seen_price`` comes from the fallback (the future
+        operator point is still NOT used as anchor).
+      * ``missing_reason`` is :attr:`PricePathMissingReason.NONE`.
+      * Source remains :attr:`PricePathSource.OPERATOR_SUPPLIED_PATH`
+        because the post-first-seen path is operator-supplied.
+      * Notes record that the anchor came from the fallback.
+    """
+
+    first_seen = _ms(3, hour=2)
+    fallback = PricePathResolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=first_seen,
+        first_seen_price=10.00,
+        price_path=(),
+        source=(
+            PricePathSource.HISTORICAL_MARKET_STORE_DAILY_TOP_MOVERS
+        ),
+        missing_reason=PricePathMissingReason.NONE,
+        kline_interval_used=DEFAULT_KLINE_INTERVAL_USED,
+    )
+    operator_points = (
+        PricePoint(timestamp_utc_ms=_ms(3, hour=3), price=1.10),
+        PricePoint(timestamp_utc_ms=_ms(3, hour=4), price=1.20),
+    )
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=first_seen,
+        operator_points=operator_points,
+        fallback_resolution=fallback,
+    )
+
+    assert resolution.source == PricePathSource.OPERATOR_SUPPLIED_PATH
+    assert resolution.first_seen_price == pytest.approx(10.00)
+    assert resolution.missing_reason == PricePathMissingReason.NONE
+    assert resolution.is_loaded()
+    assert "first_seen_price_anchor_from_fallback" in resolution.notes
+    # Path is still operator-supplied points, all > first_seen.
+    assert len(resolution.price_path) == 2
+    assert all(
+        pt.timestamp_utc_ms > first_seen for pt in resolution.price_path
+    )
+
+
+def test_operator_resolution_no_first_seen_time_rejects_path() -> None:
+    """Without ``first_seen_time_utc_ms`` the lookahead guard
+    cannot be applied so the operator path is rejected wholesale
+    (NO_FIRST_SEEN_TIME). The resolver does NOT default the
+    anchor to the first operator point - that would be a future
+    leak."""
+
+    operator_points = (
+        PricePoint(timestamp_utc_ms=_ms(3, hour=3), price=1.10),
+        PricePoint(timestamp_utc_ms=_ms(3, hour=4), price=1.20),
+    )
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=None,
+        operator_points=operator_points,
+    )
+
+    assert resolution.source == PricePathSource.OPERATOR_SUPPLIED_PATH
+    assert resolution.first_seen_price is None
+    assert (
+        resolution.missing_reason
+        == PricePathMissingReason.NO_FIRST_SEEN_TIME
+    )
+    assert resolution.price_path == ()
+    assert not resolution.is_loaded()
+
+
+def test_operator_resolution_empty_path_emits_explicit_reason() -> None:
+    """Empty operator path -> :attr:`OPERATOR_PATH_EMPTY` reason."""
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=_ms(3, hour=2),
+        operator_points=(),
+    )
+
+    assert resolution.source == PricePathSource.OPERATOR_SUPPLIED_PATH
+    assert resolution.first_seen_price is None
+    assert (
+        resolution.missing_reason == PricePathMissingReason.OPERATOR_PATH_EMPTY
+    )
+    assert resolution.price_path == ()
+    assert not resolution.is_loaded()
+
+
+def test_operator_resolution_anchor_picks_latest_pre_first_seen_point() -> None:
+    """When multiple operator points have ``ts <= first_seen_time``,
+    the anchor is the LATEST one (closest to first_seen_time)."""
+
+    first_seen = _ms(3, hour=10)
+    operator_points = (
+        PricePoint(timestamp_utc_ms=_ms(3, hour=2), price=0.95),
+        PricePoint(timestamp_utc_ms=_ms(3, hour=8), price=1.00),  # latest pre-first-seen
+        PricePoint(timestamp_utc_ms=_ms(3, hour=5), price=0.97),
+        PricePoint(timestamp_utc_ms=_ms(3, hour=11), price=1.20),  # post
+    )
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=first_seen,
+        operator_points=operator_points,
+    )
+
+    assert resolution.first_seen_price == pytest.approx(1.00)
+    # Path is post-first-seen only, sorted by timestamp.
+    assert len(resolution.price_path) == 1
+    assert resolution.price_path[0].price == pytest.approx(1.20)
+
+
+def test_operator_resolution_never_uses_future_point_as_anchor() -> None:
+    """Lookahead Guard regression test: even if the operator
+    path's FIRST element (by list order) is a future point, the
+    resolver MUST NOT use it as ``first_seen_price``."""
+
+    first_seen = _ms(3, hour=2)
+    operator_points = (
+        # Future point (ts > first_seen) - MUST NOT be the anchor.
+        PricePoint(timestamp_utc_ms=_ms(3, hour=10), price=99.99),
+        # Pre-first-seen anchor candidate.
+        PricePoint(timestamp_utc_ms=_ms(3, hour=1), price=1.00),
+    )
+
+    resolution = build_operator_supplied_price_path_resolution(
+        symbol="EARLYUSDT",
+        first_seen_time_utc_ms=first_seen,
+        operator_points=operator_points,
+    )
+
+    # Anchor MUST be 1.00, NOT 99.99.
+    assert resolution.first_seen_price == pytest.approx(1.00)
+    assert resolution.first_seen_price != pytest.approx(99.99)
+    # The future point IS in the path (it is post-first-seen).
+    assert any(
+        pt.price == pytest.approx(99.99) for pt in resolution.price_path
+    )
+
+
+def test_pr71_operator_path_resolution_listed_in_missing_reason_taxonomy() -> None:
+    """The PR71-fix missing reasons are part of the closed
+    taxonomy."""
+
+    assert (
+        PricePathMissingReason.OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN
+        in PricePathMissingReason.ALL
+    )
+    assert PricePathMissingReason.OPERATOR_PATH_EMPTY in PricePathMissingReason.ALL

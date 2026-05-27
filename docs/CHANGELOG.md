@@ -7,6 +7,171 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-B.1 (PR #71 follow-up fix) — Historical Price Path Adapter v0 / Kline Path Adapter v0 — record-level resolution + operator-path Lookahead Guard
+
+**Type:** Bugfix on PR #71 (paper / report / evidence ONLY).
+**Runtime effect:** **none.** No `app/risk/`, `app/execution/`,
+`app/exchanges/`, `app/llm/`, `app/telegram/`, `configs/`,
+event-name, schema-version, or runtime-trading-behaviour change.
+Only `app/adaptive/post_discovery_price_path_adapter.py`,
+`scripts/run_post_discovery_outcome_evidence.py`, and the two
+matching unit-test files are touched.
+**Phase ledger effect:** keeps Phase 11C.1C-C-B-B-B-D-B.1 in
+`IN_REVIEW` — does NOT flip the slice to `ACCEPTED`. The slice
+remains `PARTIAL_QUALITY` because the adapter still emits a
+**daily-bucket** path, not a precise intraday 1m / 5m kline
+path (see "Granularity disclosure" below).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+**Phase 12:** **FORBIDDEN.**
+
+#### Two merge-blocking issues fixed (per PR71 review)
+
+1. **Record-level price-path resolution.**
+   `resolve_price_paths_for_records()` previously returned
+   `dict[str, PricePathResolution]` keyed by symbol with
+   first-record-wins semantics. A symbol that appeared more
+   than once in the 60-day audit (different
+   `first_seen_time_utc_ms` /
+   `mover_window_start_utc_ms` /
+   `mover_window_end_utc_ms`) silently shared the FIRST
+   record's resolution with every later record, polluting the
+   later record's outcome with the first record's price path.
+   The fix changes the return type to
+   `list[PricePathResolution | None]` aligned by index with the
+   input `records` sequence; each record now consumes ITS OWN
+   resolution. The matching `build_post_discovery_inputs_from_d_a_payload`
+   accepts `Sequence[PricePathResolution | None]` and looks
+   up by record index, not by symbol.
+
+2. **Operator-supplied path Lookahead Guard.**
+   Both `resolve_price_paths_for_records` and the legacy
+   `build_post_discovery_inputs_from_d_a_payload` operator
+   branch previously set
+   `first_seen_price = float(operator_path[0].price)` without
+   checking the timestamp. When `operator_path[0].timestamp_utc_ms > first_seen_time_utc_ms`
+   this turned a future price into the discovery anchor — a
+   classic lookahead leak that AMA-RT's hard-rule Lookahead
+   Guard forbids. The fix introduces
+   `build_operator_supplied_price_path_resolution()` in
+   `app/adaptive/post_discovery_price_path_adapter.py`, which
+   enforces:
+   * `first_seen_price` is **only** drawn from a point with
+     `timestamp <= first_seen_time_utc_ms` (the latest such
+     operator point), or — when no such operator point exists —
+     from a `fallback_resolution.first_seen_price` (the
+     adapter's containing-day open, lookahead-safe by
+     construction). Otherwise `first_seen_price = None` and
+     `missing_reason = OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN`.
+   * `price_path` only contains operator points with
+     `timestamp > first_seen_time_utc_ms` (strictly after).
+   * Without `first_seen_time_utc_ms` the operator path is
+     rejected wholesale (`missing_reason = NO_FIRST_SEEN_TIME`).
+
+#### Lookahead Guard reaffirmation (hard rule, NOT a suggestion)
+
+  * `first_seen_time_utc_ms` is read-only and never modified.
+  * `first_seen_price` is only the price observed AT or BEFORE
+    `first_seen_time_utc_ms` (operator anchor / capture-path
+    anchor / containing-day open).
+  * `price_path_after_first_seen` only carries points strictly
+    AFTER `first_seen_time_utc_ms`.
+  * peak / trough / MFE / MAE / remaining_upside are computed
+    only post-window for audit.
+  * future outcome NEVER feeds radar score, candidate
+    promotion, Risk Engine, Execution FSM,
+    `symbol_limit`, anomaly threshold, candidate-pool
+    capacity, or Regime weights.
+  * DeepSeek / LLM may explain evidence but cannot reverse-
+    derive trading decisions from future results.
+
+#### Granularity disclosure (NOT precise intraday kline path)
+
+The B1.1 Historical Price Path Adapter v0 still resolves a
+**daily-bucket** path from
+`data/historical_market_store/top_movers/*.jsonl` (per-day
+OHLC). The `kline_interval_used` diagnostic emits `"1d"`. For
+the containing day only the close at `day_end_ms` is emitted
+(open / high / low intra-day timestamps are unknown and may
+have been before `first_seen_time`). For subsequent days the
+high / low are stamped at `day_end_ms`, surfaced as
+`approximate_intra_day_timestamps = true`. **This is NOT a
+1m / 5m intraday kline path.** The slice remains
+`PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT` until an operator
+supplies precise intraday paths via `--price-paths-json` (with
+a pre-first-seen anchor) or a future precise-kline adapter
+lands. The adapter never fabricates intraday prices and never
+manufactures an anchor that did not exist in lookahead-safe
+territory.
+
+#### Required output diagnostic columns retained
+
+  * `kline_interval_used`
+  * `price_path_source_summary`
+  * `price_path_missing_reason_summary`
+  * `price_path_records_loaded`
+  * `price_path_records_missing`
+  * `notable_symbol_price_path_summary`
+
+When the local Historical Market Store has no rows for a
+symbol's containing day, the adapter emits a clear missing
+reason (`SYMBOL_NOT_IN_HISTORICAL_STORE`,
+`NO_TOP_MOVER_ROW_COVERING_FIRST_SEEN_TIME`,
+`HISTORICAL_STORE_DIR_MISSING`, ...). The runner does NOT
+fabricate prices; it surfaces the gap as an explicit
+operator-data requirement.
+
+#### Tests added / updated
+
+  * `tests/unit/test_post_discovery_price_path_adapter.py`:
+    8 new tests for `build_operator_supplied_price_path_resolution`
+    covering Case 2 (anchor strictly after first_seen, no
+    fallback), Case 2 with adapter fallback, Case 3 (anchor at-
+    or-before first_seen, post-first-seen path strictly after),
+    no-first_seen-time rejection, empty operator path,
+    latest-pre-first-seen-anchor selection, never-uses-future-
+    as-anchor regression guard, and the closed missing-reason
+    taxonomy guard.
+  * `tests/unit/test_post_discovery_outcome_evidence_runner.py`:
+    3 new end-to-end runner tests:
+      * `test_pr71_case_1_duplicate_symbol_distinct_windows_get_distinct_paths`
+        — verifies record-level resolution (no first-record-wins).
+      * `test_pr71_case_2_operator_path_starts_after_first_seen_no_anchor`
+        — verifies the future operator point is NEVER used as
+        `first_seen_price` and the missing reason is
+        `OPERATOR_PATH_STARTS_AFTER_FIRST_SEEN`.
+      * `test_pr71_case_3_operator_path_anchor_at_or_before_first_seen`
+        — verifies the lookahead-safe anchor is used and the
+        post-first-seen path excludes the anchor.
+  * Updated `test_resolve_price_paths_for_records_uses_operator_priority`,
+    `test_resolve_price_paths_skips_records_with_no_symbol`,
+    `test_runner_operator_price_paths_refine_outcome` to use
+    the new `list[PricePathResolution | None]` interface and
+    to provide a lookahead-safe anchor where required.
+
+#### Confirmations
+
+  * No `app/risk/` change.
+  * No `app/execution/` change (Execution FSM untouched).
+  * No `app/exchanges/` change (private API untouched, no
+    Binance live orders).
+  * No `app/llm/` change (no DeepSeek call).
+  * No `app/telegram/` change (no Telegram outbound).
+  * No `configs/` change.
+  * No event-name change.
+  * No schema-version change.
+  * No `symbol_limit` / candidate-pool capacity / anomaly
+    threshold / Regime weight change.
+  * No long / short / buy / sell / position size / leverage /
+    stop / target / execution recommendation generated.
+  * No future outcome reverse-pollutes `first_seen_time` /
+    discovery path / radar score / candidate promotion.
+  * Phase 12 remains **FORBIDDEN**.
+
 ### Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0 evidence closeout: ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT (docs-only)
 
 **Type:** Docs-only evidence closeout (paper / report / evidence
