@@ -7,6 +7,254 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-B.1 — Historical Price Path
+> Completeness / Kline Path Adapter v0 (*历史价格路径完整性
+> / K线路径适配器 v0*).**
+> **Status: ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE /
+> DAILY_BUCKET_ONLY.**
+>
+> The B1.1 layer has now produced its first **real**
+> main-branch evidence output against the Phase
+> 11C.1C-C-B-B-B-D-B post-discovery outcome runner, after
+> PR #71 implemented the Historical Price Path Adapter v0
+> and was merged into `main`. The closeout level below is
+> **explicitly NOT full data coverage accepted** and
+> **explicitly NOT intraday-kline accepted** — it records
+> that the toolchain works end-to-end against real D-A
+> export records and a local Historical Market Store, while
+> the data coverage and the kline granularity are bounded
+> by what the local daily-bucket store can supply.
+>
+> ### What this docs-only closeout records
+>
+>   - **PR #71 implemented the price path adapter** at
+>     `app/adaptive/post_discovery_price_path_adapter.py`.
+>   - **The D-B / B1.1 evidence runner can load
+>     `data/historical_market_store/` daily top mover
+>     summary** and resolve per-record price paths from it.
+>   - **Price path resolution is now record-level**
+>     (`list[PricePathResolution | None]` aligned by index
+>     with the input record list), not symbol-only and no
+>     longer first-record-wins.
+>   - **Operator-supplied price paths cannot turn a future
+>     price into the discovery anchor.**
+>     `build_operator_supplied_price_path_resolution()`
+>     rejects any candidate point with
+>     `timestamp > first_seen_time_utc_ms` for
+>     `first_seen_price`.
+>   - **The Lookahead Guard is hard-enforced at record
+>     level**: `first_seen_time` only from a D-A audited
+>     record / `EventRepository` event timestamp;
+>     `first_seen_price` only from the latest price point
+>     at-or-before `first_seen_time` (operator anchor /
+>     capture-path anchor / containing-day open); price
+>     path after `first_seen_time` only used for post-window
+>     outcome audit; peak / trough / MFE / MAE only computed
+>     after the window closes and never feed live radar
+>     score, candidate promotion, the Risk Engine, the
+>     Execution FSM, `symbol_limit`, anomaly threshold,
+>     candidate-pool capacity, or Regime weights.
+>   - **The v0 path is daily-bucket** (`kline_interval_used
+>     = 1d`); it is **not** a 1m / 5m intraday K-line path.
+>
+> ### B1.1 main evidence run output (operator VPS, real
+> main-branch rerun after PR #71)
+>
+> Output directory:
+> `data/reports/post_discovery_outcome/pr71_main_price_path_evidence`
+>
+> Run-level summary:
+>
+>   - `status = EVIDENCE_GENERATED`
+>   - `evaluated_count = 300`
+>   - `report_generated_count = 1`
+>
+> Event counts:
+>
+>   - `POST_DISCOVERY_OUTCOME_EVALUATED = 300`
+>   - `POST_DISCOVERY_OUTCOME_REPORT_GENERATED = 1`
+>
+> Price path coverage:
+>
+>   - `price_path_records_loaded = 17`
+>   - `price_path_records_missing = 283`
+>
+> Price path source summary:
+>
+>   - `absent = 283`
+>   - `historical_market_store_daily_top_movers = 17`
+>
+> Price path missing-reason summary (full breakdown):
+>
+>   - `no_first_seen_time = 110`
+>   - `no_top_mover_row_covering_first_seen_time = 133`
+>   - `insufficient_post_first_seen_points = 40`
+>
+> Kline interval used:
+>
+>   - `kline_interval_used = 1d`
+>
+> Notable symbol price path summary:
+>
+>   - `RAVEUSDT` — `loaded = false`,
+>     `loaded_record_count = 0`,
+>     `missing_reason =
+>     no_top_mover_row_covering_first_seen_time`,
+>     `record_count = 17`, `source = absent`.
+>   - `STOUSDT` — `loaded = false`,
+>     `loaded_record_count = 0`,
+>     `missing_reason =
+>     no_top_mover_row_covering_first_seen_time`,
+>     `record_count = 3`, `source = absent`.
+>
+> Warnings:
+>
+>   - `d_a_backfill_records_missing_using_record_audited_fallback`
+>     (Format B fallback engaged; expected for the real
+>     D-A export shape).
+>
+> Marker:
+>
+>   - `B1_1_PRICE_PATH_MAIN_EVIDENCE_CHECK = PASS`
+>
+> ### What this acceptance level MEANS
+>
+>   - **The B1.1 toolchain is accepted.** PR #71 ships a
+>     working price path adapter, a working record-level
+>     resolver, an operator-supplied path Lookahead Guard,
+>     and a working evidence runner. The runner consumes
+>     the real D-A export, evaluates 300 records, emits
+>     300 `POST_DISCOVERY_OUTCOME_EVALUATED` events, and
+>     emits one `POST_DISCOVERY_OUTCOME_REPORT_GENERATED`
+>     aggregating them. The diagnostics columns
+>     (`price_path_records_loaded` /
+>     `price_path_records_missing` /
+>     `price_path_source_summary` /
+>     `price_path_missing_reason_summary` /
+>     `kline_interval_used` /
+>     `notable_symbol_price_path_summary`) are emitted as
+>     designed. The marker
+>     `B1_1_PRICE_PATH_MAIN_EVIDENCE_CHECK = PASS` confirms
+>     the toolchain half of the acceptance.
+>   - **Price path resolution works at daily-bucket
+>     resolution.** `kline_interval_used = 1d`. For the
+>     containing day only the close at `day_end_ms` is
+>     emitted; for subsequent days the high / low are
+>     stamped at `day_end_ms` (intra-day timestamps are
+>     unknown). This is the **daily-bucket only** half of
+>     the acceptance.
+>   - **The current local Historical Market Store only
+>     provided price paths for 17 / 300 records.** 283 /
+>     300 records remain `absent`, broken down into
+>     `no_first_seen_time = 110`,
+>     `no_top_mover_row_covering_first_seen_time = 133`,
+>     and `insufficient_post_first_seen_points = 40`. This
+>     is the **partial data coverage** half of the
+>     acceptance.
+>   - **`RAVEUSDT` and `STOUSDT` remain unresolved** — no
+>     top mover row in the local Historical Market Store
+>     covers their `first_seen_time`. They cannot be
+>     triaged as severe missed tails by B1.1 alone yet;
+>     they require intraday price-path completeness or
+>     explicit data-gap triage before the Severe Missed
+>     Tail Triage slice can consume them.
+>
+> ### What this acceptance level does NOT MEAN
+>
+>   - **B1.1 does NOT solve intraday price path
+>     completeness.** The adapter is daily-bucket only.
+>     283 / 300 records remain missing price path under
+>     the local Historical Market Store; a 1m / 5m
+>     intraday adapter + intraday store are NOT shipped by
+>     PR #71.
+>   - **B1.1 does NOT solve direction.** No `long` /
+>     `short` / `entry` / `exit` / `stop` / `target` /
+>     `position_size` / `leverage` field is emitted; the
+>     labels and the price path are descriptive only.
+>   - **B1.1 does NOT prove strategy profitability.** No
+>     PnL was simulated; no order was submitted; no Risk
+>     Engine decision was reproduced.
+>   - **B1.1 does NOT authorise auto-tuning.** The
+>     price-path resolutions and outcome labels MUST NOT
+>     drive `symbol_limit` expansion, anomaly threshold
+>     changes, candidate-pool capacity changes, Regime
+>     weight changes, or any other runtime knob. "Looking
+>     at the answer key" against the post-hoc D-A reference
+>     set or the daily-bucket price path is forbidden.
+>   - **B1.1 does NOT authorise DeepSeek trade decisions.**
+>     DeepSeek remains read-only / sandbox-only / offline
+>     under the AI Layer Constitution; B1.1's price paths
+>     and outcome labels are **not** trade-authorisation
+>     surface for DeepSeek or any other LLM.
+>   - **Phase 12 remains FORBIDDEN.** No Phase 1 safety
+>     flag is loosened by this closeout; Spec §41 Go/No-Go
+>     has not been initiated.
+>
+> ### Next allowed route (paper-only; gated, sequential)
+>
+>   - **B1.1 (this slice) closeout** — accepted as
+>     **toolchain + partial data coverage + daily-bucket
+>     only**, NOT intraday-quality, NOT direction-quality.
+>     This is the closeout currently being recorded.
+>   - **Recommended next slice: B1.2 — *Historical Kline
+>     Store Builder / Intraday Price Path Backfill*.** B1.1
+>     proved that the daily top mover summary is
+>     insufficient. To reduce the remaining 283 / 300
+>     missing price paths, and to make `RAVEUSDT` /
+>     `STOUSDT` triage possible at all, the system needs
+>     **1m or 5m historical kline path storage** plus an
+>     **intraday price path adapter**.
+>   - **B2 *Severe Missed Tail Triage* must NOT be marked
+>     ready** without explicitly noting that `RAVEUSDT` and
+>     `STOUSDT` are still blocked by missing intraday price
+>     path. A B2 kickoff that ignores this remains
+>     forbidden.
+>   - The **next allowed route is NOT** to start DeepSeek
+>     directly, and is **NOT** to start blind walk-forward
+>     directly.
+>   - The next allowed route is **NOT** to enter Phase 12.
+>
+> ### Forbidden (under B1.1 PARTIAL_DATA_COVERAGE /
+> DAILY_BUCKET_ONLY closeout and remaining so)
+>
+>   - **Phase 12** (real money / live trading) — remains
+>     **FORBIDDEN**;
+>   - Binance private API (no API key, no API secret, no
+>     signed endpoint, no `listenKey`, no private WS);
+>   - live orders;
+>   - real Telegram outbound;
+>   - DeepSeek / LLM trade decisions (direction, position
+>     size, leverage, stop-loss, target price, execution
+>     command, runtime config patch);
+>   - automatic parameter tuning (incl. `symbol_limit`
+>     expansion, anomaly threshold change, candidate pool
+>     capacity change, Regime weight change);
+>   - blind walk-forward via B1.1 alone;
+>   - any rule relaxation based on B1.1 price paths or
+>     outcome labels;
+>   - any Telegram command that bypasses the Risk Engine.
+>
+> ### Safety boundary (held end-to-end)
+>
+>   - `mode = paper`
+>   - `live_trading = False`
+>   - `exchange_live_orders = False`
+>   - `right_tail = False`
+>   - `llm = False`
+>   - `telegram_outbound_enabled = False`
+>   - `binance_private_api_enabled = False`
+>   - no private API
+>   - no live orders
+>   - no real Telegram outbound
+>   - no DeepSeek trade decision
+>   - **Phase 12 = FORBIDDEN**
+>
+> **The Risk Engine remains the single trade-decision
+> gate.**
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-B — Post-Discovery Outcome Metrics
 > v0 (*发现后结果度量 v0*).**
 > **Status: ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
