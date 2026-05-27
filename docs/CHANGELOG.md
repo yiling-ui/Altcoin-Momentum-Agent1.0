@@ -187,22 +187,37 @@ Marker:
   - **B1.1 (this slice) closeout** — accepted as
     **toolchain + partial data coverage + daily-bucket
     only**, NOT intraday-quality, NOT direction-quality.
-  - **Recommended next slice: B1.2 — *Historical Kline
-    Store Builder / Intraday Price Path Backfill*.**
-    B1.1 proved that the daily top mover summary is
-    insufficient. To reduce the remaining 283 / 300
-    missing price paths, and to make `RAVEUSDT` /
-    `STOUSDT` triage possible at all, the system needs
-    **1m or 5m historical kline path storage** plus an
-    **intraday price path adapter**.
-  - **B2 *Severe Missed Tail Triage* must NOT be marked
-    ready** without explicitly noting that `RAVEUSDT`
-    and `STOUSDT` are still blocked by missing intraday
-    price path. A B2 kickoff that ignores this remains
-    forbidden.
+    **B1.1 closes the B1 *Post-Discovery Outcome
+    Metrics* path as `ACCEPTED_TOOLCHAIN /
+    PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY`.**
+  - **Next allowed route: B2 — *Severe Missed Tail
+    Triage v0*.** This is the next slice that may be
+    opened after this closeout PR. B2 will consume the
+    `MISSED_STRONG_TAIL` / severe-miss records
+    (including `RAVEUSDT` / `STOUSDT`) recorded by B1 /
+    B1.1 and triage them as a structured slice. B2 must
+    record, per severe miss, whether the case is blocked
+    by missing intraday price path or by some other
+    factor.
+  - **B1.2 is not started now.** *Historical Kline Store
+    Builder / Intraday Price Path Backfill* (1m / 5m
+    historical kline path storage plus an intraday price
+    path adapter) is **only a future optional
+    data-quality task**, admissible **only if** B2
+    triage proves that `RAVEUSDT` / `STOUSDT` or other
+    severe missed tails are blocked specifically by
+    missing intraday price path. B1.2 is **not** a
+    precondition for B2 and is **not** the next slice.
+    This PR does **not** open B1.2.
+  - **B1.1 does not solve intraday price path
+    completeness, does not solve direction, does not
+    prove strategy profitability, and does not authorise
+    auto-tuning.** This closeout does not claim
+    otherwise.
   - The next allowed route is **NOT** to start DeepSeek
     directly, **NOT** to start blind walk-forward
-    directly, and **NOT** to enter Phase 12.
+    directly, and **NOT** to enter Phase 12. **Phase 12
+    remains FORBIDDEN.**
 
 #### Confirmations
 
@@ -223,8 +238,13 @@ Marker:
     DAILY_BUCKET_ONLY`** across `docs/PROJECT_STATUS.md`,
     `docs/PHASE_GATE.md`, `docs/CHANGELOG.md`, and
     `docs/PR_DESCRIPTION.md`.
-  - **Next recommended route = B1.2 *Historical Kline
-    Store Builder / Intraday Price Path Backfill*.**
+  - **Next allowed route = B2 *Severe Missed Tail
+    Triage v0*.** **B1.2 *Historical Kline Store Builder
+    / Intraday Price Path Backfill* is NOT started now**;
+    it is recorded as a future optional data-quality
+    task admissible only if B2 triage proves severe
+    misses (e.g. `RAVEUSDT` / `STOUSDT`) are blocked
+    specifically by missing intraday price path.
   - **Phase 12 remains FORBIDDEN.**
 
 #### Safety boundary (held end-to-end)
