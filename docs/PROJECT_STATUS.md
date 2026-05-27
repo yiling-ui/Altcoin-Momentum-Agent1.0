@@ -7,6 +7,101 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-A — Historical 60D Mover Coverage
+> Audit v0.**
+> **Status: ACCEPTED / PARTIAL_QUALITY /
+> TOOLCHAIN_CLOSEOUT_ONLY.**
+>
+> The D-A audit toolchain has been exercised end-to-end:
+>
+>   - the 60D Historical Market Store reference data has
+>     been generated under `data/historical_market_store/`
+>     (D-A.1 *Historical 60D Mover Reference Store Builder
+>     v0* is the data-preparation child task under D-A and
+>     has completed its toolchain role);
+>   - `app.adaptive.historical_mover_coverage_backfill`
+>     produced D-A audit records against that reference
+>     store;
+>   - the Phase 8.5 export bundle now contains the
+>     `HISTORICAL_MOVER_COVERAGE_*` events that surface
+>     those records, so the audit output is replayable and
+>     externally reviewable;
+>   - the operator's manual review of the audit output is
+>     **PARTIAL** (per-symbol verdict recorded below);
+>   - **`RAVEUSDT` and `STOUSDT` are recorded as severe
+>     misses.**
+>
+> **D-A manual review (operator sample, recorded verbatim):**
+>
+>   - `PLAYUSDT` — qualified.
+>   - `AGTUSDT` — discovered ~2 days ahead; mid-window chop
+>     is small; qualified provided the system is not shaken
+>     off by the chop.
+>   - `BEATUSDT` — qualified.
+>   - `VICUSDT` — marginally usable.
+>   - `BIOUSDT` — usable, including the subsequent rally.
+>   - `PROVEUSDT` — long-side entry was poor; if the system
+>     had classified it as exhaustion / short, the result
+>     could have been positive.
+>   - `USUSDT` — not qualified.
+>   - `RAVEUSDT` — **severely missed** (not qualified).
+>   - `STOUSDT` — **severely missed** (not qualified).
+>
+> **Manual review result: PARTIAL.**
+>
+> ### D-A Interpretation / Non-Authority
+>
+> **D-A acceptance means:**
+>
+>   - the coverage-audit toolchain works end-to-end;
+>   - audit records can be generated and persisted;
+>   - export / replay evidence surface exists.
+>
+> **D-A acceptance does NOT mean:**
+>
+>   - discovery quality is fully acceptable;
+>   - strategy profitability is proven;
+>   - direction classification (long / short / exhaustion)
+>     is solved;
+>   - live trading is allowed;
+>   - parameter relaxation is allowed;
+>   - DeepSeek (or any LLM) can make trade decisions;
+>   - automatic parameter tuning is allowed (no
+>     "looking at the answer key" against the D-A
+>     reference set).
+>
+> ### Next allowed work (paper-only; gated, sequential)
+>
+>   - docs status unification closeout (this PR);
+>   - Post-Discovery Outcome Metrics;
+>   - Severe Missed Tail Triage (covers `RAVEUSDT`,
+>     `STOUSDT`, and any later additions);
+>   - Replay / Reflection extension for 11C events;
+>   - AI Layer Constitution docs baseline (see
+>     `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md`).
+>
+> ### Forbidden (under D-A acceptance and remaining so)
+>
+>   - **Phase 12** (real money / live trading) — remains
+>     **FORBIDDEN**;
+>   - Binance private API (no API key, no API secret,
+>     no signed endpoint, no `listenKey`, no private WS);
+>   - live orders;
+>   - real Telegram outbound;
+>   - DeepSeek / LLM trade decisions (direction, position
+>     size, leverage, stop-loss, target price, execution
+>     command, runtime config patch);
+>   - automatic parameter tuning (incl. `symbol_limit`
+>     expansion, anomaly threshold change, candidate pool
+>     capacity change, Regime weight change);
+>   - any Telegram command that bypasses the Risk Engine.
+>
+> **The Risk Engine remains the single trade-decision
+> gate.**
+>
+> *Prior status (kept for history; superseded by the
+> entry above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-A.1 = IN_REVIEW (PR #65; data
 > preparation child task under Phase 11C.1C-C-B-B-B-D-A,
 > whose implementation has been merged via PR #64 and whose

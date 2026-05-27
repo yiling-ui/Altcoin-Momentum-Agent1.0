@@ -7,6 +7,86 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### docs: Phase 11C.1C-C-B-B-B-D-A closeout
+
+**Type:** docs-only consistency repair PR (paper / report /
+evidence only). **Allowed files:** `README.md`,
+`docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+`docs/CHANGELOG.md`,
+`docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md`. **Runtime
+effect:** **none.** No file under `app/`, `scripts/`,
+`tests/`, `data/`, `configs/`, `pyproject.toml`, or
+`requirements.txt` is touched. **Strategy effect:**
+**none.** **Config effect:** **none.** **Trade authority
+granted:** **none.**
+
+#### Summary
+
+  - Phase 11C.1C-C-B-B-B-D-A (Historical 60D Mover Coverage
+    Audit v0) is marked **ACCEPTED / PARTIAL_QUALITY /
+    TOOLCHAIN_CLOSEOUT_ONLY** across `README.md`,
+    `docs/PROJECT_STATUS.md`, and `docs/PHASE_GATE.md`.
+  - 60D Historical Market Store reference data has been
+    generated under `data/historical_market_store/` (D-A.1
+    is the data-preparation child task and has completed
+    its toolchain role).
+  - `app.adaptive.historical_mover_coverage_backfill`
+    produced D-A audit records against that reference
+    store.
+  - The Phase 8.5 export bundle now contains the
+    `HISTORICAL_MOVER_COVERAGE_*` events that surface
+    those records (audit output is replayable and
+    externally reviewable).
+  - Operator manual review result = **PARTIAL** with the
+    following per-symbol verdict (recorded verbatim under
+    `docs/PROJECT_STATUS.md` and `docs/PHASE_GATE.md`):
+    `PLAYUSDT` qualified; `AGTUSDT` qualified provided
+    the system is not shaken off by mid-window chop;
+    `BEATUSDT` qualified; `VICUSDT` marginally usable;
+    `BIOUSDT` usable; `PROVEUSDT` poor as a long, possibly
+    workable as exhaustion / short; `USUSDT` not
+    qualified.
+  - **`RAVEUSDT` and `STOUSDT` are recorded as severe
+    misses.** Severe misses trigger **later triage only**
+    (Severe Missed Tail Triage); they do **not** authorise
+    any automatic threshold change, `symbol_limit`
+    expansion, candidate-pool capacity change, Regime
+    weight change, or any other parameter tuning.
+  - `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` is added
+    as the AI-layer constitution docs baseline. It records
+    the four root constraints (Responsibility Isolation,
+    Stateless Inference, Hard Rule Anchoring, Feedback
+    Isolation), the allowed DeepSeek first-version output
+    types, the forbidden DeepSeek output fields, and the
+    sandbox / offline boundary for any future DeepSeek
+    integration.
+  - **No runtime changes.**
+  - **No config changes.**
+  - **No strategy changes.**
+  - **No Phase 12.** Phase 12 (real money / live trading)
+    remains **FORBIDDEN** under the Phase 1 safety lock;
+    Spec §41 Go/No-Go has not been initiated.
+  - **No live trading authority** granted by D-A
+    acceptance.
+  - **No automatic parameter tuning** authorised by D-A
+    acceptance.
+  - **No DeepSeek trade authority** granted — DeepSeek
+    remains read-only / sandbox-only / offline; it must
+    not place orders, change position size, change
+    leverage, change stop-loss, change target price,
+    issue execution commands, or patch runtime config.
+  - **No real Telegram outbound** authorised.
+  - **No private Binance API** authorised — no API key,
+    no API secret, no signed endpoint, no `listenKey`,
+    no private WS.
+
+The Risk Engine remains the single trade-decision gate.
+Safety flags unchanged: `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`.
+
 ### Phase 11C.1C-C-B-B-B-D-A.1 - Historical 60D Mover Reference Store Builder v0 (PR #65)
 
 **Type:** Data-preparation PR (paper / report / evidence only).
