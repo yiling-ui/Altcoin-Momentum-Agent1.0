@@ -7,6 +7,127 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-B — Post-Discovery Outcome Metrics
+> v0 (*发现后结果度量 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until evidence closeout).**
+>
+> Phase 11C.1C-C-B-B-B-D-A only describes the *discovery* layer
+> ("did we see this mover, when, how deep"). Phase
+> 11C.1C-C-B-B-B-D-B answers the *next* question: once the
+> system first saw a mover, **how much room remained to be
+> captured?** Was the first sighting **early**, **late**,
+> **choppy**, **fake breakout**, **late reversal**, or **missed
+> strong tail**?
+>
+> This slice turns the manual K-line cross-check the operator
+> was doing into a structured, exportable, replayable,
+> auditable set of **outcome metrics + closed labels**. Paper
+> / report / evidence only.
+>
+> **NOT** live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning.
+> **NOT** rule relaxation based on outcome labels. **NOT**
+> automatic `symbol_limit` expansion. **NOT** automatic
+> anomaly threshold changes. **NOT** automatic candidate-pool
+> capacity changes. **NOT** automatic Regime weight changes.
+> **NOT** a Risk Engine change. **NOT** an Execution FSM
+> change. **NOT** a strategy implementation. **NOT** a
+> trading module. **NOT** a direction call (long / short /
+> entry / exit / stop / target / position size / leverage).
+> **NOT** Severe Missed Tail Triage (later slice). **NOT**
+> Replay / Reflection extension (later slice). **NOT** the
+> DeepSeek integration. **NOT** Phase 12. The Risk Engine
+> remains the single trade-decision gate.
+>
+> ### What this PR ships
+>
+>   - New module
+>     `app/adaptive/post_discovery_outcome_metrics.py`
+>     (paper / pure / deterministic):
+>       - `PostDiscoveryOutcomeInput`,
+>         `PostDiscoveryOutcomeRecord`,
+>         `PostDiscoveryOutcomeReport`,
+>         `PostDiscoveryOutcomeEvaluator`,
+>         `PostDiscoveryOutcomeEvaluatorConfig`,
+>         `PricePoint`, `HistoricalMoverReferenceSummary`.
+>       - `DetectionTimingLabel` enum (`EARLY` /
+>         `EARLY_BUT_CHOPPY` / `MID_MOVE` / `LATE` /
+>         `TOO_LATE` / `MISSED` / `INSUFFICIENT_DATA`).
+>       - `OutcomeLabel` enum (`EARLY_CONTINUATION` /
+>         `EARLY_BUT_CHOPPY` / `LATE_TOP_CHASE` /
+>         `LATE_REVERSAL` / `MISSED_STRONG_TAIL` /
+>         `FAKE_BREAKOUT` / `DUMPED` / `EXHAUSTION_CANDIDATE`
+>         / `NO_CLEAR_EDGE` / `INSUFFICIENT_PRICE_PATH`).
+>       - `assert_payload_has_no_forbidden_keys` recursive
+>         guard against any trade-authority / runtime-tuning
+>         field landing in a payload.
+>   - Two new typed events in `app/core/events.py` (paper /
+>     report / evidence only):
+>       - `EventType.POST_DISCOVERY_OUTCOME_EVALUATED`
+>       - `EventType.POST_DISCOVERY_OUTCOME_REPORT_GENERATED`
+>   - New unit-test module
+>     `tests/unit/test_post_discovery_outcome_metrics.py` (20
+>     cases) covering every brief-mandated acceptance test
+>     (early continuation, early but choppy, late top chase,
+>     late reversal, missed strong tail, fake breakout,
+>     insufficient price path, forbidden fields absent, no
+>     parameter tuning, no Risk / Execution / LLM / Telegram
+>     imports).
+>   - New phase doc
+>     `docs/PHASE_11C_1C_C_B_B_B_D_B_POST_DISCOVERY_OUTCOME_METRICS.md`.
+>
+> ### What this PR does NOT ship
+>
+>   - No change to `app/risk/`, `app/execution/`,
+>     `app/exchanges/`, `app/llm/`, `app/telegram/`.
+>   - No change to live trading flag, runtime config,
+>     thresholds, `symbol_limit`, `candidate_pool`, Regime
+>     weights, the DeepSeek transport, or the Telegram
+>     outbound transport.
+>   - No new private API surface, no signed endpoint, no
+>     `listenKey`, no real Telegram outbound, no DeepSeek
+>     trade decision.
+>   - No automatic parameter tuning. No "looking at the
+>     answer key" against the post-hoc reference set.
+>   - No new strategy. No new trading module. No new
+>     direction classification. No new sizing rule.
+>   - No Severe Missed Tail Triage slice (a later slice will
+>     consume the `RAVEUSDT` / `STOUSDT` severe misses
+>     recorded under D-A).
+>   - No Replay / Reflection extension for the new events
+>     (a later slice will fold them into Replay / Reflection).
+>
+> ### Forbidden surface (verbatim)
+>
+>   - `app/risk/**`, `app/execution/**`, `app/exchanges/**`,
+>     `app/llm/**`, `app/telegram/**`.
+>   - Binance private API (no API key, no API secret, no
+>     signed endpoint, no `listenKey`, no private WS).
+>   - Live orders.
+>   - Real Telegram outbound.
+>   - DeepSeek / LLM trade decisions (direction, position
+>     size, leverage, stop-loss, target price, execution
+>     command, runtime config patch).
+>   - Automatic parameter tuning (incl. `symbol_limit`
+>     expansion, anomaly threshold change, candidate pool
+>     capacity change, Regime weight change).
+>   - Phase 12 (real money / live trading).
+>
+> ### Safety boundary (held end-to-end)
+>
+>   - `mode = paper`
+>   - `live_trading = False`
+>   - `exchange_live_orders = False`
+>   - `right_tail = False`
+>   - `llm = False`
+>   - `telegram_outbound_enabled = False`
+>   - `binance_private_api_enabled = False`
+>   - **Phase 12 = FORBIDDEN**
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-A — Historical 60D Mover Coverage
 > Audit v0.**
 > **Status: ACCEPTED / PARTIAL_QUALITY /

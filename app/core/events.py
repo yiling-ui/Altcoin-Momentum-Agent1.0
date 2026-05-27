@@ -628,6 +628,68 @@ class EventType(str, Enum):
         "HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED"
     )
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0
+    # (*发现后结果度量 v0*).
+    #
+    # The Post-Discovery Outcome Metrics v0 layer turns the Phase
+    # 11C.1C-C-B-B-B-D-A historical mover coverage records from
+    # "where did we see this mover?" into "how much room remained
+    # to be captured after we first saw it?". For every audited
+    # mover the runtime computes:
+    #
+    #   - first_seen anchor (timestamp + event type + price);
+    #   - prior-high anchor + distance_to_prior_high_pct;
+    #   - post-seen high / low extrema along the observed price
+    #     path;
+    #   - remaining_upside_to_peak_pct,
+    #     post_seen_drawdown_pct, mfe_pct, mae_pct,
+    #     time_to_peak_seconds;
+    #   - a closed detection_timing_label
+    #     (EARLY / EARLY_BUT_CHOPPY / MID_MOVE / LATE / TOO_LATE
+    #     / MISSED / INSUFFICIENT_DATA);
+    #   - a closed outcome_label (EARLY_CONTINUATION /
+    #     EARLY_BUT_CHOPPY / LATE_TOP_CHASE / LATE_REVERSAL /
+    #     MISSED_STRONG_TAIL / FAKE_BREAKOUT / DUMPED /
+    #     EXHAUSTION_CANDIDATE / NO_CLEAR_EDGE /
+    #     INSUFFICIENT_PRICE_PATH).
+    #
+    # Phase 11C.1C-C-B-B-B-D-B boundary:
+    # - Every event below is paper / report / evidence only. None
+    #   of them authorises a real trade, modifies a real position,
+    #   or flips a Phase 1 safety flag.
+    # - The detection_timing_label / outcome_label carried by
+    #   every payload are *descriptive* labels - they are NEVER an
+    #   input to a trade-decision pipeline; the Risk Engine remains
+    #   the single trade-decision gate.
+    # - The metrics MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution
+    #   FSM, ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - The payload MUST NOT include any of:
+    #   buy / sell / long / short / direction / entry / exit /
+    #   position_size / leverage / stop / stop_loss / target /
+    #   take_profit / risk_budget / order / execution_command /
+    #   runtime_config_patch / symbol_limit_patch /
+    #   threshold_patch / candidate_pool_patch /
+    #   regime_weight_patch.
+    # - Every payload carries ``schema_version`` so future PRs
+    #   can extend the shape; old events without the v0 sub-block
+    #   remain replayable verbatim.
+    #
+    #   POST_DISCOVERY_OUTCOME_EVALUATED         - one
+    #     :class:`PostDiscoveryOutcomeRecord` was emitted for one
+    #     audited mover. Carries the descriptive labels + metrics
+    #     + ``evidence_refs``.
+    #   POST_DISCOVERY_OUTCOME_REPORT_GENERATED  - one
+    #     :class:`PostDiscoveryOutcomeReport` was assembled across
+    #     many records. Carries the aggregate counts +
+    #     descriptive medians.
+    POST_DISCOVERY_OUTCOME_EVALUATED = "POST_DISCOVERY_OUTCOME_EVALUATED"
+    POST_DISCOVERY_OUTCOME_REPORT_GENERATED = (
+        "POST_DISCOVERY_OUTCOME_REPORT_GENERATED"
+    )
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(
