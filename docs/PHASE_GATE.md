@@ -40,6 +40,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1C-C-B-B-B-C | Long-Window Cohort Stability & Sample Sufficiency Protocol v0 (*长窗口 Cohort 稳定性与样本充足协议 v0*; docs / evidence-template-only third child slice under Phase 11C.1C-C-B-B-B) | 2026-05-25 | PR #58 docs-only kickoff merged into `main`; this docs-only closeout PR #59 records the operator-VPS W1 / W1+ 2 h, W2 4 h, and W3 24 h upper-bound early-stop paper WS evidence and flips the slice to `ACCEPTED`. **W1 / W1+ 2 h paper WS run PASSED**: `duration_seconds=7200.0`, `uptime≈7238s`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `HTTP 429=0`, `HTTP 418=0`, `risk_approved=0`, live trading disabled; 2 h event counts `PAPER_ALPHA_COHORT_EVALUATED=18`, `PAPER_ALPHA_GATE_EVALUATED=3`, `PAPER_ALPHA_REPORT_GENERATED=3`, `PAPER_ALPHA_RULE_EVALUATED=27`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=10`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=2`; daily report contains both the Paper Alpha Gate section and the Regime & Cluster Cohort Evidence Pack section; `regime_cluster_sample_count=189`, `regime_cluster_completed_tail_label_count=0`, status remained `INSUFFICIENT_SAMPLE` / `INCONCLUSIVE` because `completed_tail_label_count=0<10` (accepted as valid low-completed-label evidence, not runtime failure); 2 h export `data/reports/exports/ama_rt_test_data_1779693570447_export_d.zip`, `manifest_event_count=23001`, `redaction_applied=True`, `EXPORT_LONG_WINDOW_W1_2H_CHECK=PASS`. **W2 4 h paper WS run PASSED**: configured `duration_seconds=14400.0`, actual runtime ≈ `14417s`, `iterations=237`, `chains_emitted=704`, `ws_chains_emitted=704`, `ws_real_transport=True`, `ws_reconnect_count=0`, `ws_staleness_ms_max=0`, `ws_stale_count=0`, `ingestion_errors=0`, `public_endpoint_calls=4226`, `ws_messages_received=1324423`, `radar_candidates_seen=152221`, `candidate_pool_size_max=20`, `liquidation_events_seen=4076`, `rate_limit_429_count=0`, `rate_limit_418_count=0`, `rate_limit_ban=False`, `risk_approved=0`, `risk_rejected=704`; 4 h event counts `PAPER_ALPHA_COHORT_EVALUATED=24`, `PAPER_ALPHA_GATE_EVALUATED=4`, `PAPER_ALPHA_REPORT_GENERATED=4`, `PAPER_ALPHA_RULE_EVALUATED=36`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=15`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=3`; daily report `paper_alpha_gate_status=INCONCLUSIVE`, `paper_alpha_gate_sample_count=164`, reason `completed_tail_label_count_below_min=2<10`; `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE`, `regime_cluster_sample_count=164`, `regime_cluster_completed_tail_label_count=2`, reason `completed_tail_label_count_below_min=2<10` — progress from 0 to 2 completed labels, still below the 10-label threshold, therefore `INCONCLUSIVE` / `INSUFFICIENT_SAMPLE` remained the correct result (does NOT indicate runtime failure; does NOT authorise rule relaxation); 4 h export `data/reports/exports/ama_rt_test_data_1779708773055_export_8.zip`, `manifest_event_count=61546`, `redaction_applied=True`, `EXPORT_LONG_WINDOW_W2_4H_CHECK=PASS`. **W3 24 h upper-bound run PASSED with watcher early-stop**: `total_elapsed_seconds=900`, `final_tail_labels_since_start=20`, `SAMPLE_SUFFICIENCY_REACHED=final_tail_labels=20>=10`, 24 h full runtime NOT NEEDED — proves the B-B-B-C sample sufficiency protocol can save runtime while preserving evidence; W3 safety summary held end-to-end (`mode=paper`, `live_trading=False`, `right_tail=False`, `llm=False`, `exchange_live_orders=False`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`, `risk_approved=0`, `ingestion_errors=0`, `rate_limit_429_count=0`, `rate_limit_418_count=0`, `ws_real_transport=True`); watcher logs `data/logs/pr58_w3_24h_ws_2026-05-25T11:56:10Z.log`, `data/logs/pr58_w3_24h_watch_2026-05-25T11:56:10Z.log`. **W3 export PASSED**: latest export zip after W3 early-stop `data/reports/exports/ama_rt_test_data_1779712866542_export_6.zip`, generated 2026-05-25 12:41 UTC, `manifest_event_count=62761`, `redaction_applied=True`, `events.jsonl` exists, `EXPORT_LONG_WINDOW_W3_EARLY_STOP_CHECK=PASS`; W3 export-range event counts `TAIL_LABEL_ASSIGNED=495`, `LABEL_WINDOW_COMPLETED=495`, `STRATEGY_VALIDATION_SAMPLE_CREATED=397`, `REGIME_CLUSTER_EVIDENCE_PACK_GENERATED=4`, `REGIME_CLUSTER_COHORT_SUMMARY_GENERATED=20`, `PAPER_ALPHA_GATE_EVALUATED=5`, `PAPER_ALPHA_RULE_EVALUATED=45`, `PAPER_ALPHA_COHORT_EVALUATED=30`, `PAPER_ALPHA_REPORT_GENERATED=5` (clarification: `final_tail_labels_since_start=20` is the watcher early-stop condition for the 900 s live window; `TAIL_LABEL_ASSIGNED=495` is the 24 h export-range event count — both valid, different scopes). **B-B-B-C acceptance is acceptance of the long-window data collection and sample-sufficiency protocol.** It does **NOT** mean any Regime / Cluster has proven right-tail advantage yet, does **NOT** mean strategy effectiveness is proven, does **NOT** authorise live trading, does **NOT** authorise rule relaxation based on low samples, does **NOT** authorise automatic parameter optimisation, does **NOT** authorise AI Learning, does **NOT** authorise changing the Risk Engine or the Execution FSM, does **NOT** authorise Phase 12. It records: 2 h run works; 4 h run works; completed labels begin to appear over longer windows; 24 h upper-bound early-stop works; completed-tail-label sufficiency threshold can be reached early; export / replay evidence preserves the results; low-sample states remain conservative; no trade authority granted. Long-window protocol outputs (`long_window_run_plan`, `sample_sufficiency_checklist`, `cohort_stability_checklist`, `operator_vps_evidence_template`, `export_replay_evidence_template`, `closeout_acceptance_template`) remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes; the Risk Engine remains the single trade-decision gate. Safety flags unchanged across W1 / W1+ 2 h, W2 4 h, and W3 24 h upper-bound early-stop runs. See "Closed phase: Phase 11C.1C-C-B-B-B-C (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-C acceptance evidence (operator-VPS W1 / W1+ 2 h, W2 4 h, W3 24 h upper-bound early-stop paper WS evidence PASSED)" below. |
 | 11C.1C-C-B-B-B-D | Mover Capture Recall & Missed-Tail Coverage Audit v0 (*异动币捕捉召回与漏捕右尾覆盖审计 v0*; paper / report / evidence-only fourth child slice under Phase 11C.1C-C-B-B-B) | 2026-05-25 | PR #60 docs-only kickoff merged into `main`; PR #61 implementation merged into `main`; this docs-only closeout PR #62 records the operator-VPS 10 min WS paper smoke evidence + daily report Mover Capture section + `MOVER_CAPTURE_*` event counts + Phase 8.5 export bundle + audit result `mover_capture_audit_status=DEGRADED` and flips the slice to `ACCEPTED`. **Operator-VPS 10 min WS paper smoke PASSED**: `duration_seconds=600.0`, `dry_run=false`, `ws_first=true`, `ws_real_transport=true`, `ingestion_errors=0`, `risk_approved=0`, `HTTP 429=0`, `HTTP 418=0`, `ws_reconnect_count=0`, `ws_stale_count=0`, `live_trading_enabled=False`, `exchange_live_order_enabled=False`, `llm_enabled=False`, `right_tail_enabled=False`. **Mover Capture event counts**: `MOVER_CAPTURE_RECALL_AUDIT_GENERATED=1`, `MOVER_CAPTURE_PATH_AUDITED=20`. **Daily report** contains `## Phase 11C.1C-C-B-B-B-D Mover Capture Recall & Missed-Tail Coverage Audit v0` section. **Audit result**: `mover_capture_audit_status=DEGRADED`, `top_mover_count=20`, `captured_top_mover_count=4`, `missed_top_mover_count=16`, `capture_recall_rate=0.2000`, `data_unreliable_count=4`, `risk_rejected_mover_count=4`. `DEGRADED` is the **expected and accepted** audit output for this smoke window because the audit layer successfully surfaced coverage weakness / uncertainty — `DEGRADED` is **NOT** a runtime failure; captured-but-risk-rejected does **NOT** mean discovery failure; missed-with-unknown reason is a `review` signal, **not** permission to loosen rules; low capture recall does **NOT** authorise automatic `symbol_limit` expansion / anomaly threshold changes / candidate pool capacity changes / Regime weight changes / Risk Engine changes; high capture recall would also **NOT** authorise live trading. **Phase 8.5 export bundle**: `data/reports/exports/ama_rt_test_data_1779721036065_export_d.zip`, `manifest_event_count=63968`, `redaction_applied=True`, `events.jsonl` exists, export contains `MOVER_CAPTURE_*` events, `MOVER_CAPTURE_RECALL_AUDIT_GENERATED=1`, `MOVER_CAPTURE_PATH_AUDITED=20`, `EXPORT_MOVER_CAPTURE_RECALL_CHECK=PASS`; export package files observed: `manifest.json`, `summary_report.md`, `events.jsonl`, `opportunities.jsonl`, `signal_snapshots.jsonl`, `risk_decisions.jsonl`, `state_transitions.jsonl`, `capital_events.jsonl`, `virtual_trade_plans.jsonl`. Mover Capture Recall & Missed-Tail Coverage Audit v0 outputs (`top_mover_capture_summary` / `captured_mover_evidence` / `missed_mover_audit` / `symbol_universe_exclusion_summary` / `candidate_eviction_summary` / `risk_rejection_summary` / `first_seen_latency_summary` / `capture_recall_rate` / `missed_tail_candidate_list` / `coverage_warning` / `insufficient_coverage_reasons`) remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes; the Risk Engine remains the single trade-decision gate. Safety flags unchanged across the operator-VPS run. See "Closed phase: Phase 11C.1C-C-B-B-B-D (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-D acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. |
 | 11C.1C-C-B-B-B-D-B | Post-Discovery Outcome Metrics v0 (*发现后结果度量 v0*; paper / report / evidence-only fifth child slice under Phase 11C.1C-C-B-B-B) | 2026-05-27 | PR #67 implementation merged into `main`; PR #68 evidence-runner-only PR merged into `main` (empty-workspace `INSUFFICIENT_EVIDENCE` marker); PR #69 merged into `main` and fixed the D-B evidence runner input adapter gap so the runner consumes the **real** D-A export shape (`HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED` events whose payload **is** the per-mover record, not wrapped in `record`); the real VPS D-A export evidence was rerun on `main`; this docs-only closeout PR records the resulting B1 evidence run and flips the slice to **`ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT`** (explicitly **NOT** full quality accepted). **D-A export input check (real VPS rerun on `main`) PASSED**: `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED=2`, `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED=300`, `D_A_EXPORT_INPUT_CHECK=PASS`. **B1 evidence run output** (`data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence`): `status=EVIDENCE_GENERATED`, `reference_window=60d`, `evaluated_count=300`, `report_generated_count=1`, `output_report=data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/post_discovery_outcome_report.json`, `output_events=data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/events.jsonl`. **Outcome label summary**: `INSUFFICIENT_PRICE_PATH=195/300`, `MISSED_STRONG_TAIL=105/300`. **Detection timing summary**: `INSUFFICIENT_DATA=195/300`, `MISSED=105/300`. **Notable symbols (still unresolved by D-B alone)**: `RAVEUSDT=INSUFFICIENT_PRICE_PATH / INSUFFICIENT_DATA`, `STOUSDT=INSUFFICIENT_PRICE_PATH / INSUFFICIENT_DATA`. **Warnings**: `d_a_backfill_records_missing_using_record_audited_fallback` (Format B fallback engaged; expected for the real D-A export shape). **What this acceptance level means**: PR #69 fixed the D-B runner input adapter gap; D-B can now consume real D-A export records; 300 D-A records were evaluated; one `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` was produced; the output is **evidence-generated, but NOT direction-quality accepted**; 195/300 records are `INSUFFICIENT_PRICE_PATH` (the D-A export does not yet carry post-first-seen K-line price paths for those movers); 105/300 records are `MISSED_STRONG_TAIL` (the system never had a first-seen anchor at all); `RAVEUSDT` and `STOUSDT` remain unresolved because they are `INSUFFICIENT_PRICE_PATH / INSUFFICIENT_DATA`; the toolchain works end-to-end against real D-A export records, but the outcome quality is bounded by missing post-first-seen price-path data. **What this acceptance level does NOT mean**: D-B does **NOT** solve direction (long / short / entry / exit / stop / target / position size / leverage); D-B does **NOT** prove strategy profitability (no PnL was simulated, no order was submitted, no Risk Engine decision was reproduced); D-B does **NOT** authorise auto-tuning (no `symbol_limit` expansion, anomaly threshold change, candidate-pool capacity change, Regime weight change, or any other runtime knob — "looking at the answer key" against the post-hoc D-A reference set is forbidden); D-B does **NOT** authorise DeepSeek trade decisions (DeepSeek remains read-only / sandbox-only / offline under the AI Layer Constitution); Phase 12 remains **FORBIDDEN**. **Next allowed route**: B1 closeout accepted as toolchain + partial quality only; then **either** B1.1 *Historical Price Path Completeness / Kline Path Adapter* (recommended; needed because 195/300 records lack sufficient post-first-seen price path and `RAVEUSDT` / `STOUSDT` remain unresolved on price-path / data-gap grounds) **or** B2 *Severe Missed Tail Triage* (admissible only with the explicit note that `RAVEUSDT` and `STOUSDT` currently require price-path / data-gap triage before they can be classified as severe missed tails by D-B alone). **The next allowed route is NOT** to start DeepSeek directly, and is **NOT** to start blind walk-forward directly. **Safety boundary held end-to-end**: `mode=paper`, `live_trading=False`, `exchange_live_orders=False`, `right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`, no private API, no live orders, no real Telegram outbound, no DeepSeek trade decision, **Phase 12 = FORBIDDEN**. The Risk Engine remains the single trade-decision gate. This closeout PR is **docs-only**: no file under `app/`, `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`, `exchanges/`, `llm/`, `telegram/` is touched; no event name is changed; no schema version is changed; no test was run; no paper run, export, replay, or historical builder was invoked; no real API was contacted. See "Closed phase: Phase 11C.1C-C-B-B-B-D-B (ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT)" block below. |
+| 11C.1C-C-B-B-B-D-B.1 | Historical Price Path Completeness / Kline Path Adapter v0 (*历史价格路径完整性 / K线路径适配器 v0*; paper / report / evidence-only small follow-up patch under Phase 11C.1C-C-B-B-B-D-B; **NOT** an indefinite extension of B1) | 2026-05-27 | PR #71 implementation merged into `main` (record-level price-path resolution, operator-supplied-path Lookahead Guard, daily-bucket adapter from `data/historical_market_store/top_movers/*.jsonl`); the real D-B evidence runner was rerun on `main` from the operator VPS against the new adapter; this docs-only closeout PR records the resulting B1.1 main-evidence run and flips the slice to **`ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY`** (explicitly **NOT** "intraday 1m / 5m kline path solved"). **B1.1 main-evidence check PASSED**: `B1_1_PRICE_PATH_MAIN_EVIDENCE_CHECK=PASS`. **B1.1 evidence run output** (`data/reports/post_discovery_outcome/pr71_main_price_path_evidence`): `status=EVIDENCE_GENERATED`, `evaluated_count=300`, `report_generated_count=1`, `event_counts.POST_DISCOVERY_OUTCOME_EVALUATED=300`, `event_counts.POST_DISCOVERY_OUTCOME_REPORT_GENERATED=1`, `kline_interval_used=1d`. **Price path resolution coverage**: `price_path_records_loaded=17`, `price_path_records_missing=283`. **Price path source summary**: `historical_market_store_daily_top_movers=17`, `absent=283`. **Price path missing-reason summary**: `no_top_mover_row_covering_first_seen_time=133`, `no_first_seen_time=110`, `insufficient_post_first_seen_points=40`. **Notable symbol price-path summary**: `RAVEUSDT` — `loaded=false`, `loaded_record_count=0`, `record_count=17`, `source=absent`, `missing_reason=no_top_mover_row_covering_first_seen_time`; `STOUSDT` — `loaded=false`, `loaded_record_count=0`, `record_count=3`, `source=absent`, `missing_reason=no_top_mover_row_covering_first_seen_time`. **Warnings**: `d_a_backfill_records_missing_using_record_audited_fallback` (Format B fallback engaged; expected for the real D-A export shape; carried over from the B1 closeout and unchanged in B1.1). **What this acceptance level means**: B1.1 toolchain passed; PR #71 evidence runner can evaluate 300 records; 300 `POST_DISCOVERY_OUTCOME_EVALUATED` events were emitted; 1 `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` event was emitted; the price-path adapter is currently **daily-bucket only** (`kline_interval_used=1d`, **not** an intraday 1m / 5m kline path adapter); the local Historical Market Store currently supplies a price path for **17 / 300** records (283 / 300 remain `absent`); `RAVEUSDT` and `STOUSDT` remain unresolved because the local daily-bucket store does not yet contain a top-mover row whose day window covers the record's `first_seen_time_utc_ms`; record-level resolution and the operator-path Lookahead Guard are now enforced (no point with `timestamp > first_seen_time_utc_ms` may serve as `first_seen_price`). **What this acceptance level does NOT mean**: B1.1 does **NOT** mean the intraday 1m / 5m kline path is solved (it is daily-bucket only); B1.1 does **NOT** solve direction (no `long` / `short` / `entry` / `exit` / `stop` / `target` / `position_size` / `leverage` field is emitted); B1.1 does **NOT** prove strategy profitability (no PnL was simulated, no order was submitted, no Risk Engine decision was reproduced); B1.1 does **NOT** authorise auto-tuning (no `symbol_limit` expansion, anomaly threshold change, candidate-pool capacity change, Regime weight change, or any other runtime knob); B1.1 does **NOT** authorise DeepSeek trade decisions (DeepSeek remains read-only / sandbox-only / offline under the AI Layer Constitution); Phase 12 remains **FORBIDDEN**. **Next allowed route: B2 — Severe Missed Tail Triage v0.** B1 is a focused branch off the mainline and is **not** to be extended indefinitely; B1.1 is the small patch on B1, and B1.1 closeout returns the project to the main route. B2 will perform root-cause triage on unresolved severe-miss cases such as `RAVEUSDT` and `STOUSDT`, attributing each into a closed bucket (`PRICE_PATH_GAP` / `DATA_UNRELIABLE` / `EVENT_HISTORY_MISSING` / `UNIVERSE_GAP` / `SYMBOL_LIMIT_GAP` / `CANDIDATE_POOL_EVICTED` / `THRESHOLD_TOO_STRICT` / `WS_DATA_GAP` / `REST_REFERENCE_GAP` / `RISK_REJECTED_BUT_MOVED` / `TRUE_DISCOVERY_FAILURE` / `UNKNOWN`). B2 remains forbidden from authorising auto-tuning, threshold change, `symbol_limit` expansion, candidate-pool capacity change, Regime weight change, live trading, DeepSeek trade decision, or Phase 12. A *Historical Kline Store Builder / Intraday Price Path Backfill* (sometimes referred to as "B1.2") is **NOT** started now; it is recorded as an **optional future data-quality task only**, available only if B2 triage proves severe-miss attribution is blocked by missing intraday price paths, and only with explicit owner approval — it is **not** the recommended next slice, **not** a precondition for B2, and **does not** block B2. **Safety boundary held end-to-end**: `mode=paper`, `live_trading=False`, `exchange_live_orders=False`, `right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`, `binance_private_api_enabled=False`, no private API, no live orders, no real Telegram outbound, no DeepSeek trade decision, **Phase 12 = FORBIDDEN**. The Risk Engine remains the single trade-decision gate. This closeout PR is **docs-only**: no file under `app/`, `scripts/`, `tests/`, `configs/`, `risk/`, `execution/`, `exchanges/`, `llm/`, `telegram/`, or database schema is touched; no event name is changed; no schema version is changed; no test was run; no paper run, export, replay, or historical builder was invoked by this PR; no real API was contacted by this PR. See "Closed phase: Phase 11C.1C-C-B-B-B-D-B.1 (ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY)" block below. |
 
 
 ## Open / Reserved phases
@@ -55,6 +56,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | 11C.1C-C-B-B-B-D-A (placeholder; superseded by D-A closeout above) | Historical 60D Mover Coverage Backfill Audit v0 (*历史 60 天异动币覆盖回填审计 v0*; paper / report / evidence-only next child slice opened by Phase 11C.1C-C-B-B-B-D acceptance via PR #62) | **ACCEPTED via D-A closeout (above) — entry kept as audit trail** | Superseded by the D-A `ACCEPTED / PARTIAL_QUALITY / TOOLCHAIN_CLOSEOUT_ONLY` row above. Original placeholder text retained below for audit trail.<br>Phase 11C.1C-C-B-B-B-D is now `ACCEPTED` (PR #60 docs-only kickoff + PR #61 implementation + PR #62 docs-only closeout merged into `main`), so Phase 11C.1C-C-B-B-B-D-A is **NEXT_ALLOWED**. **Not** complete strategy blind testing. **Not** Phase 12 pre-live validation. **Not** Historical 30D+ full blind replay / complete strategy walk-forward validation (that gate remains reserved until small-money live trading prep and is **out of scope** for D-A). Discovery-layer coverage backfill audit only. The parent phase is **not** renamed: Phase 11C.1C-C-B-B-B remains *Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up*. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C / 11C.1C-C-B-B-B-D forbidden item verbatim. Paper / report / evidence-only; grants no trade authority. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-D-A.1 | Historical 60D Mover Reference Store Builder v0 (*历史 60 天异动币参考数据存储构建器 v0*; paper / report / evidence-only data-preparation child task under Phase 11C.1C-C-B-B-B-D-A; v0 builder via PR #65) | **ACCEPTED as the data-preparation child task for D-A; toolchain role complete** | Data-preparation child task under Phase 11C.1C-C-B-B-B-D-A. The builder has produced the 60D Historical Market Store reference data that the existing `app.adaptive.historical_mover_coverage_backfill.load_historical_market_store(root)` consumes, and that reference data has fed the D-A audit whose records / export evidence is what authorises the D-A `TOOLCHAIN_CLOSEOUT_ONLY` acceptance above. PR #65 retains every Phase 11C public allowlist guarantee (`assert_public_endpoint_allowed`; refuses every credential-shaped kwarg + every signed-request query parameter; refuses to start when any `BINANCE_API_KEY` / `BINANCE_API_SECRET` / `BINANCE_KEY` / `BINANCE_SECRET` / `BINANCE_TOKEN` / `BINANCE_PASSPHRASE` is set; `validate_no_lookahead_fields(...)` on every emitted JSONL row). The reference set remains **post-hoc audit reference only** and MUST NEVER drive live radar score, candidate promotion, the Risk Engine, the Execution FSM, `symbol_limit`, candidate-pool capacity, anomaly thresholds, Regime weights, or any other runtime knob. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-D-B | Post-Discovery Outcome Metrics v0 (*发现后结果度量 v0*; paper / report / evidence-only fifth child slice under Phase 11C.1C-C-B-B-B; ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT via PR #67 implementation + PR #68 evidence-runner + PR #69 input-adapter fix + this docs-only closeout PR) | **ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT — see Closed phases table above** | Phase 11C.1C-C-B-B-B-D-B is now **`ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT`** (PR #67 implementation merged into `main`; PR #68 evidence-runner merged into `main` with the empty-workspace `INSUFFICIENT_EVIDENCE` marker; PR #69 merged into `main` and fixed the D-B evidence runner input adapter gap; the real VPS D-A export evidence was rerun on `main`; this docs-only closeout PR records the resulting B1 evidence run). The full closeout — including the D-A export input check (`HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED=2`, `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED=300`, `D_A_EXPORT_INPUT_CHECK=PASS`), the B1 evidence run output (`status=EVIDENCE_GENERATED`, `reference_window=60d`, `evaluated_count=300`, `report_generated_count=1`, output dir `data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence`), the outcome label summary (`INSUFFICIENT_PRICE_PATH=195/300`, `MISSED_STRONG_TAIL=105/300`), the detection timing summary (`INSUFFICIENT_DATA=195/300`, `MISSED=105/300`), the notable-symbols block (`RAVEUSDT` and `STOUSDT` remain unresolved as `INSUFFICIENT_PRICE_PATH / INSUFFICIENT_DATA`), the `d_a_backfill_records_missing_using_record_audited_fallback` warning, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-D-B (ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT)" below. **`ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT` is explicitly NOT full quality accepted.** It records that PR #69 fixed the D-B runner input adapter gap, that D-B can now consume real D-A export records, that 300 D-A records were evaluated, that `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` was produced, and that the output is evidence-generated but **not** direction-quality accepted because 195/300 records are `INSUFFICIENT_PRICE_PATH` and 105/300 records are `MISSED_STRONG_TAIL`. **D-B does NOT solve direction. D-B does NOT prove strategy profitability. D-B does NOT authorise auto-tuning. D-B does NOT authorise DeepSeek trade decisions. Phase 12 remains FORBIDDEN.** Next allowed route: B1 closeout accepted as toolchain + partial quality only; then **either** B1.1 *Historical Price Path Completeness / Kline Path Adapter* (recommended) **or** B2 *Severe Missed Tail Triage* (with explicit note that `RAVEUSDT` and `STOUSDT` currently require price-path / data-gap triage). The next allowed route is **NOT** to start DeepSeek directly and is **NOT** to start blind walk-forward directly. Safety flags unchanged across this docs-only closeout. Phase 12 remains **FORBIDDEN**. |
+| 11C.1C-C-B-B-B-D-B.1 | Historical Price Path Completeness / Kline Path Adapter v0 (*历史价格路径完整性 / K线路径适配器 v0*; paper / report / evidence-only small follow-up patch under Phase 11C.1C-C-B-B-B-D-B; ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY via PR #71 implementation + this docs-only closeout PR) | **ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY — see Closed phases table above** | Phase 11C.1C-C-B-B-B-D-B.1 is now **`ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY`** (PR #71 implementation merged into `main`; the real D-B evidence runner was rerun on `main` from the operator VPS against the new adapter; this docs-only closeout PR records the resulting B1.1 main-evidence run). The full closeout — including the B1.1 evidence run output (`status=EVIDENCE_GENERATED`, `evaluated_count=300`, `report_generated_count=1`, `event_counts.POST_DISCOVERY_OUTCOME_EVALUATED=300`, `event_counts.POST_DISCOVERY_OUTCOME_REPORT_GENERATED=1`, `kline_interval_used=1d`, output dir `data/reports/post_discovery_outcome/pr71_main_price_path_evidence`), the price-path coverage block (`price_path_records_loaded=17`, `price_path_records_missing=283`), the source summary (`historical_market_store_daily_top_movers=17`, `absent=283`), the missing-reason summary (`no_top_mover_row_covering_first_seen_time=133`, `no_first_seen_time=110`, `insufficient_post_first_seen_points=40`), the notable-symbols block (`RAVEUSDT` and `STOUSDT` remain unresolved with `missing_reason=no_top_mover_row_covering_first_seen_time`), the `B1_1_PRICE_PATH_MAIN_EVIDENCE_CHECK=PASS` confirmation, the `d_a_backfill_records_missing_using_record_audited_fallback` warning, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-D-B.1 (ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY)" below. **`ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY` is explicitly NOT "intraday 1m / 5m kline path solved".** It records that PR #71 shipped the record-level price-path resolution and operator-path Lookahead Guard, that the daily-bucket adapter (`kline_interval_used=1d`) is in place, that 300 records were evaluated and 1 report was generated, and that the local Historical Market Store currently supplies a price path for 17 / 300 records (283 / 300 remain `absent`). **B1.1 does NOT solve the intraday 1m / 5m kline path problem. B1.1 does NOT solve direction. B1.1 does NOT prove strategy profitability. B1.1 does NOT authorise auto-tuning. B1.1 does NOT authorise DeepSeek trade decisions. Phase 12 remains FORBIDDEN.** **Next allowed route: B2 — Severe Missed Tail Triage v0.** B1 is a focused branch off the mainline and is not to be extended indefinitely; B1.1 closeout returns the project to the main route. B2 attributes unresolved severe-miss cases (e.g. `RAVEUSDT`, `STOUSDT`) into a closed bucket (`PRICE_PATH_GAP` / `DATA_UNRELIABLE` / `EVENT_HISTORY_MISSING` / `UNIVERSE_GAP` / `SYMBOL_LIMIT_GAP` / `CANDIDATE_POOL_EVICTED` / `THRESHOLD_TOO_STRICT` / `WS_DATA_GAP` / `REST_REFERENCE_GAP` / `RISK_REJECTED_BUT_MOVED` / `TRUE_DISCOVERY_FAILURE` / `UNKNOWN`); B2 remains forbidden from authorising auto-tuning, threshold change, `symbol_limit` expansion, candidate-pool capacity change, Regime weight change, live trading, DeepSeek trade decision, or Phase 12. A *Historical Kline Store Builder / Intraday Price Path Backfill* ("B1.2") is **NOT** started now; it is recorded as an **optional future data-quality task only**, available only if B2 triage proves severe-miss attribution is blocked by missing intraday price paths, and only with explicit owner approval — it is **not** the recommended next slice, **not** a precondition for B2, and **does not** block B2. Safety flags unchanged across this docs-only closeout. Phase 12 remains **FORBIDDEN**. |
 | 12         | Real money / live trading                                            | **FORBIDDEN**               | Phase 12 remains **FORBIDDEN** under the Phase 1 safety lock. Spec §41 Go/No-Go checklist is the only path forward, and it has **not** been initiated. NOT permitted from any Phase 11C sub-phase alone (incl. Phase 11C.1C-C-A acceptance, Phase 11C.1C-C-B-A acceptance, Phase 11C.1C-C-B-B-A acceptance, Phase 11C.1C-C-B-B-B-A acceptance, Phase 11C.1C-C-B-B-B-B acceptance, Phase 11C.1C-C-B-B-B-C acceptance, Phase 11C.1C-C-B-B-B-D acceptance via PR #62 (PR #60 docs-only kickoff + PR #61 implementation + PR #62 docs-only closeout), Phase 11C.1C-C-B-B-B, or any other Phase 11C sub-phase). |
 
 
@@ -5023,3 +5025,255 @@ reserved for a Phase 12 candidate review and is explicitly
 out of scope here], **NOT** a continued widening of system
 complexity; inherits every prior forbidden item verbatim);
 and **Phase 12 remains FORBIDDEN**.
+
+
+
+## Closed phase: Phase 11C.1C-C-B-B-B-D-B.1 (ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY)
+
+**Phase:** Phase 11C.1C-C-B-B-B-D-B.1 — Historical Price Path
+Completeness / Kline Path Adapter v0 (*历史价格路径完整性 /
+K线路径适配器 v0*).
+
+**Status:** `ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE /
+DAILY_BUCKET_ONLY` — explicitly **NOT** "intraday 1m / 5m
+kline path solved".
+
+**Type:** Paper / report / evidence-only small follow-up patch
+under Phase 11C.1C-C-B-B-B-D-B. **NOT** an indefinite
+extension of B1. Closeout returns the project to the main
+route.
+
+**Acceptance route:** PR #71 implementation merged into `main`
+(record-level price-path resolution; operator-supplied-path
+Lookahead Guard; daily-bucket adapter from
+`data/historical_market_store/top_movers/*.jsonl`). The real
+D-B evidence runner was rerun on `main` from the operator
+VPS against the new adapter. This docs-only closeout PR
+records the resulting B1.1 main-evidence run and flips the
+slice from `IN_REVIEW` to `ACCEPTED_TOOLCHAIN /
+PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY`.
+
+### Required closeout statements (verbatim)
+
+  1. **B1.1 toolchain passed.**
+  2. **PR #71 evidence runner can evaluate 300 records.**
+  3. **300 `POST_DISCOVERY_OUTCOME_EVALUATED` events were
+     emitted.**
+  4. **1 `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` event was
+     emitted.**
+  5. **The price-path adapter is currently daily-bucket
+     only (`kline_interval_used = 1d`).**
+  6. **The local Historical Market Store currently supplies
+     a price path for 17 of 300 records.**
+  7. **283 of 300 records still lack a price path.**
+  8. **`RAVEUSDT` and `STOUSDT` remain unresolved with
+     `missing_reason =
+     no_top_mover_row_covering_first_seen_time`.**
+  9. **B1.1 does NOT mean intraday 1m / 5m kline path is
+     solved.**
+  10. **B1.1 does NOT solve direction.**
+  11. **B1.1 does NOT prove strategy profitability.**
+  12. **B1.1 does NOT authorise auto-tuning.**
+  13. **B1.1 does NOT authorise DeepSeek trade decisions.**
+  14. **Phase 12 remains FORBIDDEN.**
+
+### B1.1 evidence run output (operator VPS, real D-A export)
+
+Output directory:
+`data/reports/post_discovery_outcome/pr71_main_price_path_evidence`
+
+Summary:
+
+  - `status = EVIDENCE_GENERATED`
+  - `evaluated_count = 300`
+  - `report_generated_count = 1`
+  - `event_counts.POST_DISCOVERY_OUTCOME_EVALUATED = 300`
+  - `event_counts.POST_DISCOVERY_OUTCOME_REPORT_GENERATED = 1`
+  - `kline_interval_used = 1d`
+
+Price path resolution coverage:
+
+  - `price_path_records_loaded = 17`
+  - `price_path_records_missing = 283`
+
+Price path source summary:
+
+  - `historical_market_store_daily_top_movers = 17`
+  - `absent = 283`
+
+Price path missing-reason summary:
+
+  - `no_top_mover_row_covering_first_seen_time = 133`
+  - `no_first_seen_time = 110`
+  - `insufficient_post_first_seen_points = 40`
+
+Notable symbol price-path summary:
+
+  - `RAVEUSDT` — `loaded = false`,
+    `loaded_record_count = 0`, `record_count = 17`,
+    `source = absent`, `missing_reason =
+    no_top_mover_row_covering_first_seen_time`.
+  - `STOUSDT` — `loaded = false`,
+    `loaded_record_count = 0`, `record_count = 3`,
+    `source = absent`, `missing_reason =
+    no_top_mover_row_covering_first_seen_time`.
+
+Warnings:
+
+  - `d_a_backfill_records_missing_using_record_audited_fallback`
+    (Format B fallback engaged; expected for the real D-A
+    export shape; carried over from the B1 closeout and
+    unchanged in B1.1).
+
+Main-evidence check: **`B1_1_PRICE_PATH_MAIN_EVIDENCE_CHECK
+= PASS`**.
+
+### What this acceptance level MEANS
+
+  - **The B1.1 toolchain works end-to-end against the real
+    D-A export.** The price-path adapter
+    (`app/adaptive/post_discovery_price_path_adapter.py`)
+    resolves price paths at **record level** (not
+    symbol-only and not first-record-wins) and enforces the
+    operator-supplied-path Lookahead Guard (no point with
+    `timestamp > first_seen_time_utc_ms` may serve as
+    `first_seen_price`). The runner emits 300
+    `POST_DISCOVERY_OUTCOME_EVALUATED` events plus 1
+    `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` event under
+    `data/reports/post_discovery_outcome/pr71_main_price_path_evidence/`.
+  - **Coverage is partial.** Only 17 of 300 records have an
+    adapter-loaded price path today; 283 of 300 remain
+    `absent`. The dominant missing reasons are
+    `no_top_mover_row_covering_first_seen_time = 133`,
+    `no_first_seen_time = 110`, and
+    `insufficient_post_first_seen_points = 40`.
+  - **The price-path resolution is daily-bucket only.**
+    `kline_interval_used = 1d`. For the containing day only
+    the close at `day_end_ms` is emitted (intra-day
+    open / high / low timestamps are unknown and may have
+    been before `first_seen_time`); for subsequent days the
+    daily high / low are stamped at `day_end_ms`, surfaced
+    as `approximate_intra_day_timestamps = true`. **B1.1
+    does NOT solve the intraday 1m / 5m kline path
+    problem.**
+
+### What this acceptance level does NOT MEAN
+
+  - **B1.1 does NOT mean intraday 1m / 5m kline path is
+    solved.** It is daily-bucket only.
+  - **B1.1 does NOT solve direction.** No `long` / `short`
+    / `entry` / `exit` / `stop` / `target` /
+    `position_size` / `leverage` field is emitted.
+  - **B1.1 does NOT prove strategy profitability.** No PnL
+    was simulated; no order was submitted; no Risk Engine
+    decision was reproduced.
+  - **B1.1 does NOT authorise auto-tuning.** No
+    `symbol_limit` expansion, anomaly threshold change,
+    candidate-pool capacity change, Regime weight change,
+    or any other runtime knob is authorised by this
+    closeout. "Looking at the answer key" against the
+    post-hoc reference set is forbidden.
+  - **B1.1 does NOT authorise DeepSeek trade decisions.**
+    DeepSeek remains read-only / sandbox-only / offline
+    under the AI Layer Constitution.
+  - **Phase 12 remains FORBIDDEN.**
+
+### Next allowed route (mainline; back on the main route)
+
+> **Next allowed route: B2 — Severe Missed Tail Triage v0.**
+
+B1 is a focused branch off the mainline and is **not** to
+be extended indefinitely. B1.1 is the small patch on B1,
+and B1.1 closeout returns the project to the main route.
+The next allowed slice is **B2 — Severe Missed Tail Triage
+v0**.
+
+B2 will perform root-cause triage on unresolved
+severe-miss cases such as `RAVEUSDT` and `STOUSDT`,
+attributing each into a **closed bucket** that includes
+(but is not limited to):
+
+  - `PRICE_PATH_GAP`
+  - `DATA_UNRELIABLE`
+  - `EVENT_HISTORY_MISSING`
+  - `UNIVERSE_GAP`
+  - `SYMBOL_LIMIT_GAP`
+  - `CANDIDATE_POOL_EVICTED`
+  - `THRESHOLD_TOO_STRICT`
+  - `WS_DATA_GAP`
+  - `REST_REFERENCE_GAP`
+  - `RISK_REJECTED_BUT_MOVED`
+  - `TRUE_DISCOVERY_FAILURE`
+  - `UNKNOWN`
+
+B2 remains forbidden from authorising:
+
+  - auto-tuning;
+  - any threshold change;
+  - `symbol_limit` expansion;
+  - candidate-pool capacity change;
+  - Regime weight change;
+  - live trading;
+  - DeepSeek trade decision;
+  - Phase 12.
+
+A *Historical Kline Store Builder / Intraday Price Path
+Backfill* (sometimes referred to as "B1.2") is **NOT**
+started now. It is recorded as an **optional future
+data-quality task only**, available **only if** B2 triage
+proves that severe-miss attribution is blocked by missing
+intraday price paths, and **only with explicit owner
+approval**. It is **not** the recommended next slice, **not**
+a precondition for B2, and **does not** block B2.
+
+### Forbidden (under B1.1 closeout and remaining so)
+
+  - **Phase 12** (real money / live trading) — remains
+    **FORBIDDEN**;
+  - Binance private API (no API key, no API secret, no
+    signed endpoint, no `listenKey`, no private WS);
+  - live orders;
+  - real Telegram outbound;
+  - DeepSeek / LLM trade decisions (direction, position
+    size, leverage, stop-loss, target price, execution
+    command, runtime config patch);
+  - automatic parameter tuning (incl. `symbol_limit`
+    expansion, anomaly threshold change, candidate pool
+    capacity change, Regime weight change);
+  - blind walk-forward via D-B / B1.1 alone;
+  - any rule relaxation based on D-B / B1.1 labels;
+  - any Telegram command that bypasses the Risk Engine;
+  - extending B1 / B1.1 indefinitely instead of returning
+    to the main route.
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no private API
+  - no live orders
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
+### Docs-only invariants (this closeout PR)
+
+  - **Docs-only.** Only files under `docs/` are modified.
+  - **No runtime files changed.** No file under `app/`,
+    `scripts/`, `tests/`, `configs/`, `risk/`,
+    `execution/`, `exchanges/`, `llm/`, `telegram/`, or
+    database schema is touched by this PR.
+  - **No event names changed.** No `EventType` enum /
+    event-name string is added, removed, or renamed.
+  - **No tests run.** This PR did not invoke `pytest`,
+    `unittest`, or any test runner.
+  - **No paper run / export / replay / historical builder
+    invoked.**
+  - **No real API contacted.**

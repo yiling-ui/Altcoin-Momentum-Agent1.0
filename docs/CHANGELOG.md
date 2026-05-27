@@ -7,6 +7,215 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-B.1 — Historical Price Path Completeness / Kline Path Adapter v0 evidence closeout: ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY (docs-only)
+
+**Type:** Docs-only evidence closeout (paper / report /
+evidence only).
+**Runtime effect:** **none.** No file under `app/`, `scripts/`,
+`tests/`, `configs/`, `risk/`, `execution/`, `exchanges/`,
+`llm/`, `telegram/`, or database schema is touched. Only
+`docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+`docs/CHANGELOG.md`, `docs/PR_DESCRIPTION.md`, and
+`docs/PHASE_11C_1C_C_B_B_B_D_B_1_HISTORICAL_PRICE_PATH_KLINE_PATH_ADAPTER.md`
+are modified.
+**Phase ledger effect:** flips Phase 11C.1C-C-B-B-B-D-B.1 from
+`IN_REVIEW` (after PR #71 implementation) to
+**`ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE /
+DAILY_BUCKET_ONLY`** — explicitly **NOT** "intraday 1m / 5m
+kline path solved".
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+**Phase 12:** **FORBIDDEN.**
+
+> **Status: ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE /
+> DAILY_BUCKET_ONLY.** PR #71 merged the Historical Price
+> Path Adapter v0 / Kline Path Adapter v0 implementation into
+> `main` (record-level price-path resolution; operator-
+> supplied-path Lookahead Guard; daily-bucket adapter from
+> `data/historical_market_store/top_movers/*.jsonl`). The
+> real D-B evidence runner was rerun on `main` from the
+> operator VPS against the new adapter. This docs-only
+> closeout PR records the resulting B1.1 main-evidence run
+> and flips the slice to
+> `ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE /
+> DAILY_BUCKET_ONLY`. **Next allowed route: B2 — Severe
+> Missed Tail Triage v0.** Phase 12 remains **FORBIDDEN**.
+
+#### Required closeout statements (verbatim)
+
+  1. **B1.1 toolchain passed.**
+  2. **PR #71 evidence runner can evaluate 300 records.**
+  3. **300 `POST_DISCOVERY_OUTCOME_EVALUATED` events were
+     emitted.**
+  4. **1 `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` event was
+     emitted.**
+  5. **The price-path adapter is currently daily-bucket
+     only (`kline_interval_used = 1d`).**
+  6. **The local Historical Market Store currently supplies
+     a price path for 17 of 300 records.**
+  7. **283 of 300 records still lack a price path.**
+  8. **`RAVEUSDT` and `STOUSDT` remain unresolved with
+     `missing_reason =
+     no_top_mover_row_covering_first_seen_time`.**
+  9. **B1.1 does NOT mean intraday 1m / 5m kline path is
+     solved.**
+  10. **B1.1 does NOT solve direction.**
+  11. **B1.1 does NOT prove strategy profitability.**
+  12. **B1.1 does NOT authorise auto-tuning.**
+  13. **B1.1 does NOT authorise DeepSeek trade decisions.**
+  14. **Phase 12 remains FORBIDDEN.**
+
+#### B1.1 evidence run output (operator VPS, real D-A export)
+
+Output directory:
+`data/reports/post_discovery_outcome/pr71_main_price_path_evidence`
+
+Summary:
+
+  - `status = EVIDENCE_GENERATED`
+  - `evaluated_count = 300`
+  - `report_generated_count = 1`
+  - `event_counts.POST_DISCOVERY_OUTCOME_EVALUATED = 300`
+  - `event_counts.POST_DISCOVERY_OUTCOME_REPORT_GENERATED = 1`
+  - `kline_interval_used = 1d`
+
+Price path resolution coverage:
+
+  - `price_path_records_loaded = 17`
+  - `price_path_records_missing = 283`
+
+Price path source summary:
+
+  - `historical_market_store_daily_top_movers = 17`
+  - `absent = 283`
+
+Price path missing-reason summary:
+
+  - `no_top_mover_row_covering_first_seen_time = 133`
+  - `no_first_seen_time = 110`
+  - `insufficient_post_first_seen_points = 40`
+
+Notable symbol price-path summary:
+
+  - `RAVEUSDT` — `loaded = false`,
+    `loaded_record_count = 0`, `record_count = 17`,
+    `source = absent`, `missing_reason =
+    no_top_mover_row_covering_first_seen_time`.
+  - `STOUSDT` — `loaded = false`,
+    `loaded_record_count = 0`, `record_count = 3`,
+    `source = absent`, `missing_reason =
+    no_top_mover_row_covering_first_seen_time`.
+
+Warnings:
+
+  - `d_a_backfill_records_missing_using_record_audited_fallback`
+    (Format B fallback engaged; expected for the real D-A
+    export shape; carried over from the B1 closeout and
+    unchanged in B1.1).
+
+Main-evidence check: **`B1_1_PRICE_PATH_MAIN_EVIDENCE_CHECK
+= PASS`**.
+
+#### What this acceptance level MEANS
+
+  - **B1.1 toolchain works end-to-end** against the real
+    D-A export. Record-level price-path resolution is
+    enforced (no longer symbol-only and no longer
+    first-record-wins); the operator-supplied-path
+    Lookahead Guard is enforced (no point with `timestamp >
+    first_seen_time_utc_ms` may serve as
+    `first_seen_price`); the runner emits 300
+    `POST_DISCOVERY_OUTCOME_EVALUATED` events plus 1
+    `POST_DISCOVERY_OUTCOME_REPORT_GENERATED` event under
+    `data/reports/post_discovery_outcome/pr71_main_price_path_evidence/`.
+  - **Coverage is partial.** Only 17 of 300 records have an
+    adapter-loaded price path today; 283 of 300 remain
+    `absent`.
+  - **The price-path resolution is daily-bucket only.**
+    `kline_interval_used = 1d`. **B1.1 does NOT solve the
+    intraday 1m / 5m kline path problem.**
+
+#### What this acceptance level does NOT MEAN
+
+  - **B1.1 does NOT mean intraday 1m / 5m kline path is
+    solved.** It is daily-bucket only.
+  - **B1.1 does NOT solve direction.**
+  - **B1.1 does NOT prove strategy profitability.**
+  - **B1.1 does NOT authorise auto-tuning.**
+  - **B1.1 does NOT authorise DeepSeek trade decisions.**
+  - **Phase 12 remains FORBIDDEN.**
+
+#### Next allowed route (mainline; back on the main route)
+
+> **Next allowed route: B2 — Severe Missed Tail Triage v0.**
+
+B1 is a focused branch off the mainline and is **not** to
+be extended indefinitely. B1.1 is the small patch on B1,
+and B1.1 closeout returns the project to the main route.
+
+B2 will perform root-cause triage on unresolved
+severe-miss cases such as `RAVEUSDT` and `STOUSDT`,
+attributing each into a closed bucket that includes (but
+is not limited to): `PRICE_PATH_GAP`, `DATA_UNRELIABLE`,
+`EVENT_HISTORY_MISSING`, `UNIVERSE_GAP`,
+`SYMBOL_LIMIT_GAP`, `CANDIDATE_POOL_EVICTED`,
+`THRESHOLD_TOO_STRICT`, `WS_DATA_GAP`,
+`REST_REFERENCE_GAP`, `RISK_REJECTED_BUT_MOVED`,
+`TRUE_DISCOVERY_FAILURE`, `UNKNOWN`.
+
+B2 remains forbidden from authorising auto-tuning, any
+threshold change, `symbol_limit` expansion, candidate-pool
+capacity change, Regime weight change, live trading,
+DeepSeek trade decision, or Phase 12.
+
+A *Historical Kline Store Builder / Intraday Price Path
+Backfill* (sometimes referred to as "B1.2") is **NOT**
+started now. It is recorded as an **optional future
+data-quality task only**, available **only if** B2 triage
+proves that severe-miss attribution is blocked by missing
+intraday price paths, and **only with explicit owner
+approval**. It is **not** the recommended next slice,
+**not** a precondition for B2, and **does not** block B2.
+
+#### Out of scope / unchanged (this docs-only closeout PR)
+
+  - **No** file under `app/`, `scripts/`, `tests/`,
+    `configs/`, `risk/`, `execution/`, `exchanges/`,
+    `llm/`, `telegram/`, or database schema is touched.
+  - **No** event name is added, removed, or renamed.
+  - **No** schema version is changed.
+  - **No** runtime behaviour is changed.
+  - **No** test was run by this PR.
+  - **No** paper run, export, replay, or historical builder
+    was invoked by this PR.
+  - **No** real API was contacted by this PR.
+  - **No** Risk Engine, Execution FSM, exchange-private,
+    LLM, or Telegram surface is touched.
+  - **No** change to `symbol_limit`, candidate-pool
+    capacity, anomaly thresholds, or Regime weights.
+  - **No** Phase 12 work; Phase 12 remains **FORBIDDEN**.
+
+#### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no private API
+  - no live orders
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
 ### Phase 11C.1C-C-B-B-B-D-B.1 (PR #71 follow-up fix) — Historical Price Path Adapter v0 / Kline Path Adapter v0 — record-level resolution + operator-path Lookahead Guard
 
 **Type:** Bugfix on PR #71 (paper / report / evidence ONLY).
