@@ -9,6 +9,216 @@ intentionally short. The full phase-gate ledger lives in
 
 > **Phase 11C.1C-C-B-B-B-D-B — Post-Discovery Outcome Metrics
 > v0 (*发现后结果度量 v0*).**
+> **Status: ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
+> PRICE_PATH_INSUFFICIENT.**
+>
+> The D-B layer has now produced its first **real** evidence
+> output against the Phase 11C.1C-C-B-B-B-D-A export that was
+> rerun on `main` from the operator VPS. The closeout level
+> below is **explicitly NOT full quality accepted** — it
+> records that the toolchain works end-to-end against real
+> D-A export records, while the outcome quality is bounded
+> by missing post-first-seen price-path data.
+>
+> ### What this docs-only closeout records
+>
+>   - **PR #69 fixed the D-B evidence runner input adapter
+>     gap.** The runner now consumes the real D-A export
+>     shape: `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`
+>     events whose payload **is** the per-mover record (not
+>     wrapped in a `record` key), with the symbol-fallback
+>     chain `record["symbol"]` →
+>     `record["reference"]["symbol"]` →
+>     `record["capture_path"]["symbol"]` → event-level
+>     `symbol`.
+>   - **D-B can now consume real D-A export records.** The
+>     D-A export input check passed:
+>     `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED = 2`,
+>     `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED = 300`,
+>     `D_A_EXPORT_INPUT_CHECK = PASS`.
+>   - **300 D-A records were evaluated** by the D-B runner
+>     against the real D-A export rerun on `main`.
+>   - **`POST_DISCOVERY_OUTCOME_REPORT_GENERATED` was
+>     produced** (one report per batch), alongside 300
+>     `POST_DISCOVERY_OUTCOME_EVALUATED` events (one per
+>     record).
+>   - **The output is evidence-generated, but NOT
+>     direction-quality accepted.** See the outcome / timing
+>     summary below for the reason.
+>
+> ### B1 evidence run output (operator VPS, real D-A export)
+>
+> Output directory:
+> `data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence`
+>
+> Summary:
+>
+>   - `status = EVIDENCE_GENERATED`
+>   - `reference_window = 60d`
+>   - `evaluated_count = 300`
+>   - `report_generated_count = 1`
+>   - output report:
+>     `data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/post_discovery_outcome_report.json`
+>   - output events:
+>     `data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/events.jsonl`
+>
+> Outcome label summary:
+>
+>   - `INSUFFICIENT_PRICE_PATH = 195 / 300`
+>   - `MISSED_STRONG_TAIL = 105 / 300`
+>
+> Detection timing summary:
+>
+>   - `INSUFFICIENT_DATA = 195 / 300`
+>   - `MISSED = 105 / 300`
+>
+> Notable symbols (still unresolved by D-B alone):
+>
+>   - `RAVEUSDT` — `INSUFFICIENT_PRICE_PATH /
+>     INSUFFICIENT_DATA`.
+>   - `STOUSDT` — `INSUFFICIENT_PRICE_PATH /
+>     INSUFFICIENT_DATA`.
+>
+> Warnings:
+>
+>   - `d_a_backfill_records_missing_using_record_audited_fallback`
+>     (Format B fallback engaged; expected for the real
+>     D-A export shape, where
+>     `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED.payload.records`
+>     is `None` and the per-mover records ride on
+>     `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`).
+>
+> ### What this acceptance level MEANS
+>
+>   - **The D-B toolchain works end-to-end against real
+>     D-A export records.** The runner reads the real D-A
+>     export, adapts the `RECORD_AUDITED` events into
+>     post-discovery outcome inputs, evaluates each one,
+>     emits one `POST_DISCOVERY_OUTCOME_EVALUATED` per
+>     record, aggregates them into one
+>     `POST_DISCOVERY_OUTCOME_REPORT_GENERATED`, and writes
+>     the JSON / JSONL / markdown artefacts under
+>     `data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/`.
+>     This is the **toolchain** half of the acceptance.
+>   - **The output is evidence-generated, but NOT
+>     direction-quality accepted.** 195/300 records (65%)
+>     are `INSUFFICIENT_PRICE_PATH` because the D-A export
+>     does not yet carry post-first-seen K-line price paths
+>     for those movers; 105/300 records (35%) are
+>     `MISSED_STRONG_TAIL` (the system never had a
+>     first-seen anchor at all). Neither outcome class lets
+>     the report classify the *quality* of the system's
+>     timing — we cannot tell from this run whether the
+>     first sighting was early, late, choppy, late-reversal,
+>     or fake-breakout, because the price path that would
+>     allow that classification is missing for every
+>     evaluable record. This is the **partial quality**
+>     half of the acceptance.
+>   - **`RAVEUSDT` and `STOUSDT` remain unresolved** because
+>     they are `INSUFFICIENT_PRICE_PATH /
+>     INSUFFICIENT_DATA`. They cannot be triaged as severe
+>     missed tails by D-B alone yet; they require
+>     price-path completeness or explicit data-gap triage
+>     before the Severe Missed Tail Triage slice can
+>     consume them.
+>
+> ### What this acceptance level does NOT MEAN
+>
+>   - **D-B does NOT solve direction.** The runner does
+>     not emit, and is forbidden to emit, any
+>     `long` / `short` / `entry` / `exit` / `stop` /
+>     `target` / `position_size` / `leverage` field. The
+>     two label sets (`detection_timing_label`,
+>     `outcome_label`) are descriptive only.
+>   - **D-B does NOT prove strategy profitability.** No
+>     PnL was simulated; no order was submitted; no Risk
+>     Engine decision was reproduced. The labels describe
+>     what the reference set already recorded; they do
+>     not measure P&L.
+>   - **D-B does NOT authorise auto-tuning.** The labels
+>     MUST NOT drive `symbol_limit` expansion, anomaly
+>     threshold changes, candidate-pool capacity changes,
+>     Regime weight changes, or any other runtime knob.
+>     "Looking at the answer key" against the post-hoc
+>     D-A reference set is forbidden.
+>   - **D-B does NOT authorise DeepSeek trade decisions.**
+>     DeepSeek remains read-only / sandbox-only / offline
+>     under the AI Layer Constitution; D-B's labels are
+>     **not** trade authorisation surface for DeepSeek or
+>     any other LLM.
+>   - **Phase 12 remains FORBIDDEN.** No Phase 1 safety
+>     flag is loosened by this closeout; Spec §41 Go/No-Go
+>     has not been initiated.
+>
+> ### Next allowed route (paper-only; gated, sequential)
+>
+>   - **B1 (this slice) closeout** — accepted as
+>     **toolchain + partial quality only**, NOT
+>     direction-quality. This is the closeout currently
+>     being recorded.
+>   - Then **either** (operator's choice, gated by an
+>     explicit kickoff PR per slice):
+>       - **B1.1** — *Historical Price Path Completeness /
+>         Kline Path Adapter* — likely needed because
+>         195/300 records lack sufficient post-first-seen
+>         price path, and `RAVEUSDT` / `STOUSDT` remain
+>         unresolved on price-path / data-gap grounds.
+>         Improving D-B outcome quality before B2 is the
+>         **recommended** next route.
+>       - **B2** — *Severe Missed Tail Triage* —
+>         admissible **only with the explicit note that
+>         `RAVEUSDT` and `STOUSDT` currently require
+>         price-path / data-gap triage** before they can
+>         be classified as severe missed tails by D-B
+>         alone.
+>   - The **next allowed route is NOT** to start DeepSeek
+>     directly, and is **NOT** to start blind walk-forward
+>     directly.
+>   - Recommended next slice after this docs PR: **B1.1
+>     Price Path Completeness / Kline Path Adapter.**
+>
+> ### Forbidden (under D-B PARTIAL_QUALITY closeout and
+> remaining so)
+>
+>   - **Phase 12** (real money / live trading) — remains
+>     **FORBIDDEN**;
+>   - Binance private API (no API key, no API secret, no
+>     signed endpoint, no `listenKey`, no private WS);
+>   - live orders;
+>   - real Telegram outbound;
+>   - DeepSeek / LLM trade decisions (direction, position
+>     size, leverage, stop-loss, target price, execution
+>     command, runtime config patch);
+>   - automatic parameter tuning (incl. `symbol_limit`
+>     expansion, anomaly threshold change, candidate pool
+>     capacity change, Regime weight change);
+>   - blind walk-forward via D-B alone;
+>   - any rule relaxation based on D-B labels;
+>   - any Telegram command that bypasses the Risk Engine.
+>
+> ### Safety boundary (held end-to-end)
+>
+>   - `mode = paper`
+>   - `live_trading = False`
+>   - `exchange_live_orders = False`
+>   - `right_tail = False`
+>   - `llm = False`
+>   - `telegram_outbound_enabled = False`
+>   - `binance_private_api_enabled = False`
+>   - no private API
+>   - no live orders
+>   - no real Telegram outbound
+>   - no DeepSeek trade decision
+>   - **Phase 12 = FORBIDDEN**
+>
+> **The Risk Engine remains the single trade-decision
+> gate.**
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
+> **Phase 11C.1C-C-B-B-B-D-B — Post-Discovery Outcome Metrics
+> v0 (*发现后结果度量 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not
 > `ACCEPTED` until evidence closeout).**
 >

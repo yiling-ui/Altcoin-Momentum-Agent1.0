@@ -427,3 +427,207 @@ artefact is supplied; nothing was fabricated.
   - D-B does **NOT** authorise automatic parameter tuning.
   - D-B does **NOT** authorise DeepSeek trade decisions.
   - Phase 12 remains **FORBIDDEN**.
+
+
+
+## Evidence closeout (PR after #69) — ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT
+
+> **Status: ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
+> PRICE_PATH_INSUFFICIENT** (explicitly **NOT** full quality
+> accepted).
+>
+> This is a **docs-only** closeout. PR #69 fixed the D-B
+> evidence runner input adapter gap so the runner consumes
+> the **real** D-A export shape
+> (`HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED` events whose
+> payload **is** the per-mover record, not wrapped in a
+> `record` key). The real VPS D-A export evidence was rerun
+> on `main`. This closeout PR records the resulting B1
+> evidence run and flips the slice from
+> `IN_REVIEW / INSUFFICIENT_EVIDENCE / EVIDENCE_CLOSEOUT_ONLY`
+> to **`ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
+> PRICE_PATH_INSUFFICIENT`**.
+
+### Required closeout statements (verbatim)
+
+  1. **PR #69 fixed the D-B runner input adapter gap.**
+  2. **D-B can now consume real D-A export records.**
+  3. **300 D-A records were evaluated.**
+  4. **`POST_DISCOVERY_OUTCOME_REPORT_GENERATED` was
+     produced.**
+  5. **The output is evidence-generated, but NOT
+     direction-quality accepted.**
+  6. **195 / 300 records are `INSUFFICIENT_PRICE_PATH`.**
+  7. **105 / 300 records are `MISSED_STRONG_TAIL`.**
+  8. **`RAVEUSDT` and `STOUSDT` remain unresolved because
+     they are `INSUFFICIENT_PRICE_PATH /
+     INSUFFICIENT_DATA`.**
+  9. **D-B does NOT solve direction.**
+  10. **D-B does NOT prove strategy profitability.**
+  11. **D-B does NOT authorise auto-tuning.**
+  12. **D-B does NOT authorise DeepSeek trade decisions.**
+  13. **Phase 12 remains FORBIDDEN.**
+
+### D-A export input check (real VPS rerun on `main`)
+
+  - `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED = 2`
+  - `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED = 300`
+  - `D_A_EXPORT_INPUT_CHECK = PASS`
+
+### B1 evidence run output
+
+Output directory:
+`data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence`
+
+Summary:
+
+  - `status = EVIDENCE_GENERATED`
+  - `reference_window = 60d`
+  - `evaluated_count = 300`
+  - `report_generated_count = 1`
+  - `output_report =
+    data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/post_discovery_outcome_report.json`
+  - `output_events =
+    data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/events.jsonl`
+
+Outcome label summary:
+
+  - `INSUFFICIENT_PRICE_PATH = 195 / 300`
+  - `MISSED_STRONG_TAIL = 105 / 300`
+
+Detection timing summary:
+
+  - `INSUFFICIENT_DATA = 195 / 300`
+  - `MISSED = 105 / 300`
+
+Notable symbols (still unresolved by D-B alone):
+
+  - `RAVEUSDT` — `INSUFFICIENT_PRICE_PATH /
+    INSUFFICIENT_DATA`.
+  - `STOUSDT` — `INSUFFICIENT_PRICE_PATH /
+    INSUFFICIENT_DATA`.
+
+Warnings:
+
+  - `d_a_backfill_records_missing_using_record_audited_fallback`
+    (Format B fallback engaged; expected for the real D-A
+    export shape, where
+    `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED.payload.records`
+    is `None` and the per-mover records ride on
+    `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`).
+
+### What `ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT` means
+
+  - **The D-B toolchain works end-to-end against real D-A
+    export records.** The runner reads the real D-A export,
+    adapts the `RECORD_AUDITED` events into post-discovery
+    outcome inputs, evaluates each one, emits one
+    `POST_DISCOVERY_OUTCOME_EVALUATED` per record, aggregates
+    them into one `POST_DISCOVERY_OUTCOME_REPORT_GENERATED`,
+    and writes the JSON / JSONL / markdown artefacts under
+    `data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/`.
+    This is the **toolchain** half of the acceptance.
+  - **The output is evidence-generated, but NOT
+    direction-quality accepted.** 195/300 records (65%) are
+    `INSUFFICIENT_PRICE_PATH` because the D-A export does
+    not yet carry post-first-seen K-line price paths for
+    those movers; 105/300 records (35%) are
+    `MISSED_STRONG_TAIL` (the system never had a first-seen
+    anchor at all). Neither outcome class lets the report
+    classify the *quality* of the system's timing — we
+    cannot tell from this run whether the first sighting
+    was early, late, choppy, late-reversal, or
+    fake-breakout, because the price path that would allow
+    that classification is missing for every evaluable
+    record. This is the **partial quality** half of the
+    acceptance.
+  - **`RAVEUSDT` and `STOUSDT` remain unresolved by D-B
+    alone.** Both show up in this run as
+    `INSUFFICIENT_PRICE_PATH / INSUFFICIENT_DATA`; they
+    require price-path completeness or explicit data-gap
+    triage before the Severe Missed Tail Triage slice can
+    consume them.
+
+### What `ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT` does NOT mean
+
+  - **D-B does NOT solve direction.** The runner does not
+    emit, and is forbidden to emit, any `long` / `short` /
+    `entry` / `exit` / `stop` / `target` / `position_size`
+    / `leverage` field. The two label sets
+    (`detection_timing_label`, `outcome_label`) are
+    descriptive only.
+  - **D-B does NOT prove strategy profitability.** No PnL
+    was simulated; no order was submitted; no Risk Engine
+    decision was reproduced. The labels describe what the
+    reference set already recorded; they do not measure
+    P&L.
+  - **D-B does NOT authorise auto-tuning.** The labels
+    MUST NOT drive `symbol_limit` expansion, anomaly
+    threshold changes, candidate-pool capacity changes,
+    Regime weight changes, or any other runtime knob.
+    "Looking at the answer key" against the post-hoc D-A
+    reference set is forbidden.
+  - **D-B does NOT authorise DeepSeek trade decisions.**
+    DeepSeek remains read-only / sandbox-only / offline
+    under the AI Layer Constitution; D-B's labels are
+    **not** trade authorisation surface for DeepSeek or
+    any other LLM.
+  - **Phase 12 remains FORBIDDEN.** No Phase 1 safety
+    flag is loosened by this closeout; Spec §41 Go/No-Go
+    has not been initiated.
+
+### Next allowed route (paper-only; gated, sequential)
+
+  - **B1 (this slice) closeout** — accepted as
+    **toolchain + partial quality only**, NOT
+    direction-quality. This is the closeout currently
+    being recorded.
+  - Then **either** (operator's choice, gated by an
+    explicit kickoff PR per slice):
+      - **B1.1** — *Historical Price Path Completeness /
+        Kline Path Adapter* — likely needed because
+        195/300 records lack sufficient post-first-seen
+        price path, and `RAVEUSDT` / `STOUSDT` remain
+        unresolved on price-path / data-gap grounds.
+        Improving D-B outcome quality before B2 is the
+        **recommended** next route.
+      - **B2** — *Severe Missed Tail Triage* —
+        admissible **only with the explicit note that
+        `RAVEUSDT` and `STOUSDT` currently require
+        price-path / data-gap triage** before they can be
+        classified as severe missed tails by D-B alone.
+  - The **next allowed route is NOT** to start DeepSeek
+    directly, and is **NOT** to start blind walk-forward
+    directly.
+  - Recommended next slice after this docs PR: **B1.1
+    Price Path Completeness / Kline Path Adapter.**
+
+### What this docs-only closeout PR did NOT change
+
+  - **No** file under `app/`, `scripts/`, `tests/`,
+    `configs/`, `risk/`, `execution/`, `exchanges/`,
+    `llm/`, `telegram/`, or database schema is touched.
+  - **No** event name is added, removed, or renamed.
+  - **No** schema version is changed.
+  - **No** runtime behaviour is changed.
+  - **No** test was run by this PR.
+  - **No** paper run, export, replay, or historical
+    builder was invoked by this PR.
+  - **No** real API was contacted by this PR.
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no private API
+  - no live orders
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+**The Risk Engine remains the single trade-decision gate.**

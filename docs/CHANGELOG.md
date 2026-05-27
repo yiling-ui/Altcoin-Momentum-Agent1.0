@@ -7,6 +7,164 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0 evidence closeout: ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT (docs-only)
+
+**Type:** Docs-only evidence closeout (paper / report / evidence
+only).
+**Runtime effect:** **none.** No file under `app/`, `scripts/`,
+`tests/`, `configs/`, `risk/`, `execution/`, `exchanges/`,
+`llm/`, `telegram/`, or database schema is touched. Only
+`docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+`docs/CHANGELOG.md`, `docs/PR_DESCRIPTION.md`, and
+`docs/PHASE_11C_1C_C_B_B_B_D_B_POST_DISCOVERY_OUTCOME_METRICS.md`
+are modified.
+**Phase ledger effect:** flips Phase 11C.1C-C-B-B-B-D-B from
+`IN_REVIEW / INSUFFICIENT_EVIDENCE / EVIDENCE_CLOSEOUT_ONLY`
+(after PR #67 implementation + PR #68 evidence-runner empty
+marker) to **`ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
+PRICE_PATH_INSUFFICIENT`** — explicitly **NOT** full quality
+accepted.
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+
+> **Status: ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
+> PRICE_PATH_INSUFFICIENT.** PR #69 fixed the D-B evidence
+> runner input adapter gap so the runner consumes the **real**
+> D-A export shape. The real VPS D-A export evidence was
+> rerun on `main`. This docs-only closeout PR records the
+> resulting B1 evidence run and flips the slice to
+> `ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY /
+> PRICE_PATH_INSUFFICIENT`. Phase 12 remains **FORBIDDEN**.
+
+#### Required closeout statements (verbatim)
+
+  1. **PR #69 fixed the D-B runner input adapter gap.**
+  2. **D-B can now consume real D-A export records.**
+  3. **300 D-A records were evaluated.**
+  4. **`POST_DISCOVERY_OUTCOME_REPORT_GENERATED` was
+     produced.**
+  5. **The output is evidence-generated, but NOT
+     direction-quality accepted.**
+  6. **195 / 300 records are `INSUFFICIENT_PRICE_PATH`.**
+  7. **105 / 300 records are `MISSED_STRONG_TAIL`.**
+  8. **`RAVEUSDT` and `STOUSDT` remain unresolved because
+     they are `INSUFFICIENT_PRICE_PATH /
+     INSUFFICIENT_DATA`.**
+  9. **D-B does NOT solve direction.**
+  10. **D-B does NOT prove strategy profitability.**
+  11. **D-B does NOT authorise auto-tuning.**
+  12. **D-B does NOT authorise DeepSeek trade decisions.**
+  13. **Phase 12 remains FORBIDDEN.**
+
+#### D-A export input check (real VPS rerun on `main`)
+
+  - `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED = 2`
+  - `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED = 300`
+  - `D_A_EXPORT_INPUT_CHECK = PASS`
+
+#### B1 evidence run output
+
+Output directory:
+`data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence`
+
+Summary:
+
+  - `status = EVIDENCE_GENERATED`
+  - `reference_window = 60d`
+  - `evaluated_count = 300`
+  - `report_generated_count = 1`
+  - `output_report =
+    data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/post_discovery_outcome_report.json`
+  - `output_events =
+    data/reports/post_discovery_outcome/pr69_main_real_d_a_evidence/events.jsonl`
+
+Outcome label summary:
+
+  - `INSUFFICIENT_PRICE_PATH = 195 / 300`
+  - `MISSED_STRONG_TAIL = 105 / 300`
+
+Detection timing summary:
+
+  - `INSUFFICIENT_DATA = 195 / 300`
+  - `MISSED = 105 / 300`
+
+Notable symbols (still unresolved by D-B alone):
+
+  - `RAVEUSDT` — `INSUFFICIENT_PRICE_PATH /
+    INSUFFICIENT_DATA`.
+  - `STOUSDT` — `INSUFFICIENT_PRICE_PATH /
+    INSUFFICIENT_DATA`.
+
+Warnings:
+
+  - `d_a_backfill_records_missing_using_record_audited_fallback`
+    (Format B fallback engaged; expected for the real D-A
+    export shape, where
+    `HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED.payload.records`
+    is `None` and the per-mover records ride on
+    `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`).
+
+#### Next allowed route (paper-only; gated, sequential)
+
+  - **B1 (this slice) closeout** accepted as **toolchain +
+    partial quality only**, NOT direction-quality.
+  - Then **either** (operator's choice, gated by an
+    explicit kickoff PR per slice):
+      - **B1.1** — *Historical Price Path Completeness /
+        Kline Path Adapter* — recommended; needed because
+        195/300 records lack sufficient post-first-seen
+        price path and `RAVEUSDT` / `STOUSDT` remain
+        unresolved on price-path / data-gap grounds.
+      - **B2** — *Severe Missed Tail Triage* — admissible
+        **only with the explicit note that `RAVEUSDT` and
+        `STOUSDT` currently require price-path / data-gap
+        triage** before they can be classified as severe
+        missed tails by D-B alone.
+  - The **next allowed route is NOT** to start DeepSeek
+    directly, and is **NOT** to start blind walk-forward
+    directly.
+  - Recommended next slice after this docs PR: **B1.1
+    Price Path Completeness / Kline Path Adapter.**
+
+#### Out of scope / unchanged (this docs-only closeout PR)
+
+  - **No** file under `app/`, `scripts/`, `tests/`,
+    `configs/`, `risk/`, `execution/`, `exchanges/`,
+    `llm/`, `telegram/`, or database schema is touched.
+  - **No** event name is added, removed, or renamed.
+  - **No** schema version is changed.
+  - **No** runtime behaviour is changed.
+  - **No** test was run by this PR.
+  - **No** paper run, export, replay, or historical builder
+    was invoked by this PR.
+  - **No** real API was contacted by this PR.
+  - **No** Risk Engine, Execution FSM, exchange-private,
+    LLM, or Telegram surface is touched.
+  - **No** change to `symbol_limit`, candidate-pool
+    capacity, anomaly thresholds, or Regime weights.
+  - **No** Phase 12 work; Phase 12 remains **FORBIDDEN**.
+
+#### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no private API
+  - no live orders
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
 ### Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0 evidence runner: real D-A export input adapter
 
 **Type:** Evidence runner fix (paper / report / evidence only).
