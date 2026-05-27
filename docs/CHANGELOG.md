@@ -174,6 +174,141 @@ until a separate evidence-closeout PR).
     operator-driven evidence-collection run + a docs-only
     closeout PR will flip the slice to `ACCEPTED`.
 
+### Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0 (evidence-closeout PR)
+
+**Type:** Evidence-closeout PR (paper / report / evidence only).
+**Runtime effect:** new paper-only script
+`scripts/run_post_discovery_outcome_evidence.py`, an 8-case
+runner unit-test module
+`tests/unit/test_post_discovery_outcome_evidence_runner.py`,
+plus the marker artefacts produced by running the runner
+against the empty workspace. **No** strategy, **no** runtime
+config, **no** threshold, **no** `symbol_limit`, **no**
+candidate-pool capacity, **no** Regime weight, and **no**
+Risk / Execution / Exchange-private / LLM / Telegram surface
+is touched. **Phase ledger effect:** Phase
+11C.1C-C-B-B-B-D-B remains **`IN_REVIEW /
+INSUFFICIENT_EVIDENCE / EVIDENCE_CLOSEOUT_ONLY`** because
+the workspace does not currently carry real Phase
+11C.1C-C-B-B-B-D-A historical mover coverage records
+(`data/historical_market_store/`, `data/sqlite/events.db`,
+and `data/reports/exports/` are absent or empty). The runner
+correctly refused to fabricate D-A records and wrote a marker
+report. **Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+
+> **Status: EVIDENCE-CLOSEOUT PR.** This PR adds the
+> paper-only evidence runner + its tests + an honest
+> `INSUFFICIENT_EVIDENCE` evidence run. D-B will be flipped
+> to `ACCEPTED` only after a follow-up operator-driven run
+> against real D-A artefacts.
+
+#### Implementation summary
+
+  - New paper-only script
+    `scripts/run_post_discovery_outcome_evidence.py`. The
+    runner consumes a Phase 11C.1C-C-B-B-B-D-A coverage
+    payload (via `--coverage-payload`, `--export-dir`, or
+    `--events-db`; `--historical-store-dir` recorded as a
+    warning when no fresh-audit hook is reachable),
+    optionally accepts an operator-supplied
+    `--price-paths-json`, calls
+    `PostDiscoveryOutcomeEvaluator.evaluate` once per
+    audited mover, builds a
+    `PostDiscoveryOutcomeReport`, and writes:
+      - `events.jsonl` with one
+        `POST_DISCOVERY_OUTCOME_EVALUATED` event per record
+        and one `POST_DISCOVERY_OUTCOME_REPORT_GENERATED`
+        event per batch.
+      - `post_discovery_outcome_report.json` (full report
+        payload).
+      - `post_discovery_outcome_report.md` (markdown
+        summary surfacing label / timing / notable-symbol
+        / safety-boundary blocks).
+  - When no D-A artefact is reachable, the runner writes a
+    marker report with status `INSUFFICIENT_EVIDENCE` /
+    `NEEDS_OPERATOR_DATA`, an empty `events.jsonl`, and the
+    safety-boundary markdown summary; the CLI exits with
+    status code `2` so a downstream caller cannot
+    mistakenly mark D-B `ACCEPTED`.
+  - New unit-test module
+    `tests/unit/test_post_discovery_outcome_evidence_runner.py`
+    (8 cases): insufficient-evidence path,
+    coverage-payload happy path, missed-strong-tail
+    surfacing, operator price-paths refinement, export-dir
+    fallback, forbidden-key recursive guard on every
+    artefact the runner writes, forbidden-imports static
+    check on the runner source (`app.risk` /
+    `app.execution` / `app.exchanges.binance` /
+    `app.exchanges.binance_public_ws` / `app.llm` /
+    `app.telegram` are absent), and CLI exit code on
+    missing inputs.
+  - No change to `app/risk/`, `app/execution/`,
+    `app/exchanges/`, `app/llm/`, `app/telegram/`,
+    `app/config/`, runtime thresholds, `symbol_limit`,
+    `candidate_pool`, Regime weights, the DeepSeek
+    transport, or the Telegram outbound transport.
+  - No change to
+    `app/adaptive/post_discovery_outcome_metrics.py` or
+    `app/core/events.py`; the implementation surface from
+    PR #67 stays intact.
+
+#### Evidence run (this workspace)
+
+The runner was invoked with the operator-style command:
+
+```
+python scripts/run_post_discovery_outcome_evidence.py \
+  --historical-store-dir data/historical_market_store \
+  --events-db data/sqlite/events.db \
+  --export-dir data/reports/exports \
+  --output-dir data/reports/post_discovery_outcome \
+  --reference-window 60d
+```
+
+Outcome:
+
+  - `status = INSUFFICIENT_EVIDENCE`,
+    `needs_operator_data = true`,
+    `evaluated_count = 0`,
+    `report_generated_count = 0`,
+    warnings:
+    `export_dir_no_d_a_payload:data/reports/exports`,
+    `events_db_no_d_a_payload:data/sqlite/events.db`,
+    `historical_store_dir_missing:data/historical_market_store`,
+    `NEEDS_OPERATOR_DATA`.
+  - Output artefacts written:
+    `data/reports/post_discovery_outcome/post_discovery_outcome_report.json`,
+    `data/reports/post_discovery_outcome/post_discovery_outcome_report.md`,
+    `data/reports/post_discovery_outcome/events.jsonl`
+    (empty).
+  - `RAVEUSDT` and `STOUSDT` are recorded as `ABSENT`
+    because no D-A payload reached the runner; nothing
+    was fabricated.
+
+#### Tests
+
+  - `tests/unit/test_post_discovery_outcome_metrics.py` -
+    20/20 pass.
+  - `tests/unit/test_post_discovery_outcome_evidence_runner.py`
+    - 8/8 pass.
+  - Full unit-test suite: `2450 passed`.
+
+#### D-B status
+
+  - **Status: IN_REVIEW / INSUFFICIENT_EVIDENCE /
+    EVIDENCE_CLOSEOUT_ONLY.**
+  - D-B does **NOT** authorise live trading.
+  - D-B does **NOT** prove strategy profitability.
+  - D-B does **NOT** solve direction.
+  - D-B does **NOT** authorise automatic parameter tuning.
+  - D-B does **NOT** authorise DeepSeek trade decisions.
+  - Phase 12 remains **FORBIDDEN**.
+
 ### docs: Phase 11C.1C-C-B-B-B-D-A closeout
 
 **Type:** docs-only consistency repair PR (paper / report /
