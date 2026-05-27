@@ -7,7 +7,81 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
-### Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0 (implementation PR)
+### Phase 11C.1C-C-B-B-B-D-B - Post-Discovery Outcome Metrics v0 evidence runner: real D-A export input adapter
+
+**Type:** Evidence runner fix (paper / report / evidence only).
+**Runtime effect:** none. Only `scripts/run_post_discovery_outcome_evidence.py`
+and its unit tests are modified.
+**Trade authority granted:** none. Phase 12 remains FORBIDDEN.
+
+The Phase 11C.1C-C-B-B-B-D-B evidence runner used to read D-A
+records exclusively from
+`HISTORICAL_MOVER_COVERAGE_BACKFILL_GENERATED.payload.records`.
+The real D-A export observed on the operator VPS emits that
+event with `records` missing / `None` and ships the per-mover
+records on separate `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED`
+events whose payload **is** the record (not wrapped in a
+`record` key). The runner therefore produced
+`evaluated_count = 0` despite a passing D-A export input check
+(300 audited movers, miss audit ready), and the closeout final
+check failed with `D_B_EVALUATED_COUNT_ZERO`.
+
+**Fix:**
+
+- Add a Format B input adapter to
+  `scripts/run_post_discovery_outcome_evidence.py`. The runner
+  now scans the export dir / events DB for
+  `HISTORICAL_MOVER_COVERAGE_RECORD_AUDITED` events and adapts
+  each payload into a D-A record dict.
+- The adapter supports both shapes: `payload['record']` (legacy /
+  wrapped form) **and** `payload` itself (real D-A export emit).
+- Symbol resolution falls back through `record["symbol"]` →
+  `record["reference"]["symbol"]` → `record["capture_path"]["symbol"]`
+  → event-level `symbol`.
+- Priority: if `BACKFILL_GENERATED.payload.records` is non-empty
+  it is used as before; otherwise the runner falls back to the
+  RECORD_AUDITED records and synthesises a payload that re-uses
+  the BACKFILL_GENERATED report-level fields.
+- All canonical D-A record fields are preserved on the adapted
+  output: `coverage_status`, `reference`, `capture_path`,
+  `miss_reason`, `miss_reasons`, `first_seen_time_utc_ms`,
+  `first_seen_event_type`, `first_seen_latency_seconds`,
+  `capture_path_depth`, `risk_rejected`, `reached_anomaly`,
+  `reached_label_queue`, `reached_tail_label`,
+  `reached_strategy_validation_sample`.
+- Closeout-quality guard: when the export carries
+  RECORD_AUDITED events but the D-B input adapter produces zero
+  inputs, the runner now emits a new explicit warning
+  `d_a_records_present_but_no_post_discovery_inputs` and sets
+  status `INSUFFICIENT_EVALUABLE_RECORDS` with non-zero CLI
+  exit code so closeout tooling refuses to mark the phase
+  ACCEPTED.
+
+**Out of scope / unchanged:**
+
+- No event names changed.
+- No schema versions changed.
+- No runtime trading behaviour changed.
+- No Risk Engine change.
+- No Execution FSM change.
+- No exchange-private / Binance-private API call.
+- No LLM / DeepSeek call.
+- No Telegram outbound.
+- No change to `symbol_limit`, candidate-pool capacity,
+  anomaly thresholds, or Regime weights.
+- Phase 12 remains FORBIDDEN.
+
+**Tests:**
+
+- `tests/unit/test_post_discovery_outcome_evidence_runner.py`
+  extended with Case A (Format A `records` path), Case B
+  (Format B flat-payload RECORD_AUDITED fallback - mirrors the
+  operator-VPS shape, asserts `evaluated_count > 0`), Case B'
+  (RECORD_AUDITED wrapped-payload fallback), Case C (RECORD_
+  AUDITED present but unusable), and adapter-level unit tests
+  for the symbol-fallback chain.
+
+
 
 **Type:** Implementation PR (paper / report / evidence only).
 **Runtime effect:** new pure module under `app/adaptive/` plus
