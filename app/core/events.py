@@ -757,6 +757,85 @@ class EventType(str, Enum):
     FALSE_NEGATIVE_REJECT_DETECTED = "FALSE_NEGATIVE_REJECT_DETECTED"
     CORRECT_PROTECTIVE_REJECT_CONFIRMED = "CORRECT_PROTECTIVE_REJECT_CONFIRMED"
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-C-B - Severe Missed Tail Triage v0.
+    #
+    # The Severe Missed Tail Triage v0 layer consumes the simplified
+    # outputs of:
+    #
+    #   * Phase 11C.1C-C-B-B-B-D-A  Historical 60D Mover Coverage
+    #     Audit (capture_status, miss reason, candidate-pool /
+    #     universe / symbol-limit gating signals, data-gap flags),
+    #   * Phase 11C.1C-C-B-B-B-D-B  Post-Discovery Outcome Metrics
+    #     (outcome label, detection-timing label, post-seen MFE /
+    #     MAE, remaining-upside-to-peak),
+    #   * Phase 11C.1C-C-B-B-B-D-B.1 Historical Price Path /
+    #     Kline-Path Adapter (price_path_status,
+    #     price_path_missing_reason),
+    #   * Phase 11C.1C-C-B-B-B-D-C-A Reject-to-Outcome Attribution
+    #     (reject_attribution_verdict, primary reason),
+    #
+    # and emits, per audited candidate, a closed
+    # ``SevereMissRootCause`` (UNIVERSE_GAP / SYMBOL_LIMIT_GAP /
+    # CANDIDATE_POOL_EVICTED / THRESHOLD_TOO_STRICT /
+    # PRE_ANOMALY_WEAK / ANOMALY_TOO_LATE / WS_DATA_GAP /
+    # REST_REFERENCE_GAP / EVENT_HISTORY_MISSING /
+    # PRICE_PATH_MISSING / PRICE_PATH_INSUFFICIENT /
+    # NO_TOP_MOVER_ROW_COVERING_FIRST_SEEN_TIME /
+    # RISK_REJECTED_PROTECTIVE / RISK_REJECTED_FALSE_NEGATIVE /
+    # STRATEGY_MODE_FALSE_NEGATIVE / LABEL_WINDOW_TOO_SHORT /
+    # TRUE_DISCOVERY_FAILURE / INSUFFICIENT_EVIDENCE / UNKNOWN)
+    # plus a closed ``SevereMissSeverity`` (LOW / MEDIUM / HIGH /
+    # SEVERE / CRITICAL / INSUFFICIENT_EVIDENCE).
+    #
+    # Phase 11C.1C-C-B-B-B-D-C-B boundary:
+    # - Every event below is paper / report / evidence only. None
+    #   of them authorises a real trade, modifies a real position,
+    #   or flips a Phase 1 safety flag.
+    # - ``severity`` and ``root_cause`` are *descriptive* labels.
+    #   They are NEVER inputs to a trade-decision pipeline; the
+    #   Risk Engine remains the single trade-decision gate.
+    # - The triage MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution
+    #   FSM, ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - The payload MUST NOT include any of: buy / sell / long /
+    #   short / direction / entry / exit / position_size /
+    #   leverage / stop / stop_loss / target / take_profit /
+    #   risk_budget / order / execution_command /
+    #   runtime_config_patch / symbol_limit_patch /
+    #   threshold_patch / candidate_pool_patch /
+    #   regime_weight_patch.
+    # - Every payload MUST carry ``auto_tuning_allowed=False`` and
+    #   ``evidence_refs``.
+    # - A ``CRITICAL`` severity (e.g.
+    #   ``RISK_REJECTED_FALSE_NEGATIVE``) does **NOT** authorise
+    #   the Risk Engine to be loosened. It routes the case to a
+    #   human reviewer via the operator-review queue.
+    # - ``RAVEUSDT`` / ``STOUSDT`` and similar severe-miss
+    #   candidates are recorded as **data-gap or severe-miss
+    #   triage candidates only**; this layer never asserts a
+    #   parameter error from a single coin.
+    #
+    #   SEVERE_MISSED_TAIL_TRIAGE_GENERATED      - one
+    #     :class:`SevereMissTriageReport` was assembled across
+    #     many records. Carries the aggregate counts, the
+    #     root_cause summary, and the operator-review /
+    #     rule-review / data-recovery symbol lists.
+    #   SEVERE_MISSED_TAIL_ROOT_CAUSE_ASSIGNED   - one
+    #     :class:`SevereMissTriageRecord` was emitted for one
+    #     audited candidate. Carries the descriptive root_cause +
+    #     severity + ``evidence_refs``.
+    #   SEVERE_MISS_ESCALATION_REQUIRED          - shorthand event
+    #     for the operator-review / rule-review queue: one record
+    #     was attributed ``SEVERE`` / ``CRITICAL`` severity OR a
+    #     rule-related root_cause that needs human review.
+    SEVERE_MISSED_TAIL_TRIAGE_GENERATED = "SEVERE_MISSED_TAIL_TRIAGE_GENERATED"
+    SEVERE_MISSED_TAIL_ROOT_CAUSE_ASSIGNED = (
+        "SEVERE_MISSED_TAIL_ROOT_CAUSE_ASSIGNED"
+    )
+    SEVERE_MISS_ESCALATION_REQUIRED = "SEVERE_MISS_ESCALATION_REQUIRED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(
