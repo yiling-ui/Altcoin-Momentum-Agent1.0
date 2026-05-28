@@ -5497,3 +5497,113 @@ The implementation PR ships:
 
 The phase is marked **IN_REVIEW** here. Maintainer-led review of
 the implementation PR is the only path to **ACCEPTED**.
+
+
+
+
+## Phase 11C.1C-C-B-B-B-E-C — Evidence Contract Baseline v0 (IN_REVIEW)
+
+**Status:** IN_REVIEW (implementation PR; awaits maintainer review).
+**Block:** Block C3 (Evidence Contract Baseline v0).
+**Predecessors:** Block A complete; Block B implementation chain
+complete; Block B Integrated Evidence Checkpoint =
+`PARTIAL_EVIDENCE` (advance allowed); Block C1
+(Phase 11C.1C-C-B-B-B-E-A *Replay Extension for 11C Adaptive Events
+v0*) merged; Block C2 (Phase 11C.1C-C-B-B-B-E-B *Reflection
+Extension for 11C Adaptive Events v0*) merged.
+**Successor allowed by this phase:** Block C closeout (whole-block,
+**not** per-PR) **OR** AI Evidence Bundle preparation later. **No
+other phase is unlocked.**
+
+### What this phase does
+
+Adds a paper / report / evidence-only `evidence_refs` contract under
+`app/evidence/` so every Block A / Block B output surface that
+today carries a free-form `evidence_refs` tuple (report / replay /
+reflection / discovery-quality / post-discovery / severe-miss /
+reject-attribution) can be validated against a single rule:
+
+> Any claim must be traceable to evidence; a claim that lacks
+> evidence MUST be degraded, NEVER accepted as fact, and NEVER
+> silently dropped.
+
+The package ships:
+
+  - `EvidenceRefType` (closed enum: `EVENT`, `SYMBOL`,
+    `OPPORTUNITY`, `SCAN_BATCH`, `METRIC`, `REPORT`, `UNKNOWN`)
+  - `ClaimStatus` (closed enum: `ACCEPTED`,
+    `DEGRADED_NO_EVIDENCE`, `REJECTED_INVALID_EVIDENCE`,
+    `PARTIAL`, `INSUFFICIENT_EVIDENCE`)
+  - `EvidenceRef`, `EvidenceClaimInput`, `EvidenceClaim`,
+    `EvidenceContractResult` value objects
+  - `parse_evidence_ref(raw)`, `EvidenceContractValidator`,
+    `validate_claims(claims)`
+  - three new descriptive event types on
+    `app.core.events.EventType`: `EVIDENCE_CONTRACT_VALIDATED`,
+    `EVIDENCE_CLAIM_DEGRADED`, `EVIDENCE_CLAIM_REJECTED`.
+
+### What this phase does NOT do
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise auto-tuning. Every emitted
+    `EvidenceContractResult` carries `auto_tuning_allowed=False`,
+    hard-pinned at the `to_dict` boundary.
+  - It does **NOT** call DeepSeek / any LLM. It is rule-based.
+  - It does **NOT** retrofit existing surfaces. Block A / Block B
+    surfaces continue to ship `evidence_refs: tuple[str, ...]`
+    fields exactly as they did before this phase.
+  - It does **NOT** close out cloud evidence (closeout is done
+    per-block, not per-PR).
+  - It does **NOT** start Phase 12. **Phase 12 remains
+    FORBIDDEN.**
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+### Forbidden modifications (held end-to-end)
+
+  - no edit under `app/risk/**`
+  - no edit under `app/execution/**`
+  - no edit under `app/exchanges/**`
+  - no edit under `app/llm/**`
+  - no edit under `app/telegram/**`
+  - no edit under `app/config/**`
+  - no change to `symbol_limit`
+  - no change to anomaly thresholds
+  - no change to `candidate_pool`
+  - no change to regime weights
+  - no `runtime_config_patch` produced
+  - no buy / sell / long / short / position_size / leverage /
+    stop / target / risk_budget produced
+
+### Acceptance signal
+
+The implementation PR ships:
+
+  - `app/evidence/__init__.py` (new package)
+  - `app/evidence/evidence_contract.py` (new module)
+  - `app/core/events.py` — three new descriptive event types only
+  - `tests/unit/test_evidence_contract_baseline.py` (covers the
+    brief's 10 numbered checks plus closed-vocabulary integrity
+    and Mapping-input compatibility)
+  - `docs/PHASE_11C_1C_C_B_B_B_E_C_EVIDENCE_CONTRACT_BASELINE.md`
+    (this phase's design + acceptance doc)
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` updates
+
+The phase is marked **IN_REVIEW** here. Maintainer-led review of
+the implementation PR is the only path to **ACCEPTED**.

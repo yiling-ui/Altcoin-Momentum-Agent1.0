@@ -908,6 +908,63 @@ class EventType(str, Enum):
         "DISCOVERY_QUALITY_BUCKET_EVALUATED"
     )
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-E-C - Evidence Contract Baseline v0.
+    #
+    # The Evidence Contract Baseline v0 introduces a unified,
+    # paper / report / evidence-only ``evidence_refs`` contract
+    # for every Block A / Block B output surface that today
+    # carries a free-form ``evidence_refs`` tuple (report,
+    # replay, reflection, discovery-quality, post-discovery,
+    # severe-miss, reject-attribution).
+    #
+    # Phase 11C.1C-C-B-B-B-E-C boundary:
+    # - Every event below is paper / report / evidence only.
+    #   None of them authorises a real trade, modifies a real
+    #   position, or flips a Phase 1 safety flag.
+    # - The validator's verdict is *descriptive* - one of
+    #   ``ACCEPTED`` / ``DEGRADED_NO_EVIDENCE`` /
+    #   ``REJECTED_INVALID_EVIDENCE`` / ``PARTIAL`` /
+    #   ``INSUFFICIENT_EVIDENCE``. It is NEVER an input to a
+    #   trade-decision pipeline; the Risk Engine remains the
+    #   single trade-decision gate.
+    # - The validator MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution
+    #   FSM, ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - The payload MUST NOT include any of: buy / sell / long /
+    #   short / direction / entry / exit / position_size /
+    #   leverage / stop / stop_loss / target / take_profit /
+    #   risk_budget / order / execution_command /
+    #   runtime_config_patch / symbol_limit_patch /
+    #   threshold_patch / candidate_pool_patch /
+    #   regime_weight_patch.
+    # - Every payload MUST carry ``auto_tuning_allowed=False``.
+    # - This is **NOT** AI Learning, **NOT** automatic parameter
+    #   optimisation, **NOT** reinforcement learning, **NOT**
+    #   DeepSeek wiring, **NOT** Phase 12.
+    # - A ``DEGRADED_NO_EVIDENCE`` or ``REJECTED_INVALID_EVIDENCE``
+    #   verdict does **NOT** authorise the Risk Engine to be
+    #   loosened. It routes the case to operator review only.
+    #
+    #   EVIDENCE_CONTRACT_VALIDATED  - one
+    #     :class:`EvidenceContractResult` payload was assembled
+    #     across many claims. Carries the aggregate counts +
+    #     overall_status + ``auto_tuning_allowed=False``.
+    #   EVIDENCE_CLAIM_DEGRADED      - one claim was degraded to
+    #     ``DEGRADED_NO_EVIDENCE`` because no ``evidence_refs``
+    #     were supplied. Carries the claim_id + claim_type +
+    #     degradation_reason. Paper / evidence only - cannot
+    #     trigger orders or modify the Risk Engine / Execution
+    #     FSM.
+    #   EVIDENCE_CLAIM_REJECTED      - one claim was rejected as
+    #     ``REJECTED_INVALID_EVIDENCE`` because every supplied
+    #     evidence ref failed to parse. Carries the claim_id +
+    #     claim_type + warnings.
+    EVIDENCE_CONTRACT_VALIDATED = "EVIDENCE_CONTRACT_VALIDATED"
+    EVIDENCE_CLAIM_DEGRADED = "EVIDENCE_CLAIM_DEGRADED"
+    EVIDENCE_CLAIM_REJECTED = "EVIDENCE_CLAIM_REJECTED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(
