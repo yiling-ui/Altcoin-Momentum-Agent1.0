@@ -47,6 +47,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
 | #          | Title                                                                | State                       | Detail                                                                 |
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
+| AI-CHECKPOINT | AI Integrated Checkpoint v0 (*AI 综合检查点 v0*; paper / report / evidence-only end-to-end roll-up of the AI-1 → AI-2 → AI-3 → AI-4 (offline sandbox / fake provider) → AI-5 → AI-6 chain into one descriptive `ai_integrated_checkpoint_report.json`; **NOT** a per-phase `ACCEPTED` gate, **NOT** trade authority, **NOT** auto-tuning, **NOT** the DeepSeek hot path, **NOT** Telegram live outbound, **NOT** Phase 12) | **IN_REVIEW (after this implementation PR; not `ACCEPTED` until maintainer review)** | Phase AI-CHECKPOINT is **`IN_REVIEW`** after the implementation PR. The PR ships `scripts/run_ai_integrated_checkpoint.py` (paper / report / evidence-only runner; reads only local files under `--block-c-report` / `--evidence-bundle` / `--sandbox-output` / `--operator-briefing-dir` and writes only files under `--output-dir`; aggregates the AI-1 / AI-4 / AI-5 / AI-6 simplified outputs into one descriptive `ai_integrated_checkpoint_report.json` plus matching `.md` summary; emits one of three closed statuses (`INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` / `EVIDENCE_GENERATED`) and the corresponding `next_allowed_phase` (`Offline Rule Sandbox Replay v0 preparation` / `Offline Rule Sandbox Replay preparation / AI operator evidence run` / `NEEDS_AI_OPERATOR_EVIDENCE`); when an input is missing on disk the runner substitutes a deterministic fallback fixture marked `source=fallback_fixture` and never carries fabricated market conclusions; reuses the existing `app.ai.evidence_bundle.FORBIDDEN_AI_OUTPUT_FIELDS` list and the `app.reflection.ai_reflection.replay_and_reflect_artefacts` convenience wrapper; never imports `app.risk` / `app.execution` / `app.exchanges` / `app.telegram` / `app.config`; never imports any HTTP / network library; hard-pins `phase_12_forbidden=true`, `auto_tuning_allowed=false`, `trade_authority=false`, `ai_output_is_commentary_only=true`, `ai_output_can_be_truth=false`, `ai_output_can_be_training_label=false`, `ai_output_can_be_tail_label=false`, `ai_output_can_be_strategy_sample=false` on every emitted payload), the `tests/unit/test_ai_integrated_checkpoint.py` unit-test module covering every brief-mandated acceptance test (no input → `INSUFFICIENT_EVIDENCE`, partial / fallback input → `PARTIAL_EVIDENCE`, valid AI chain input → `EVIDENCE_GENERATED`, `next_allowed_phase` correct, `phase_12_forbidden=true` on every payload, `auto_tuning_allowed=false` on every payload, `trade_authority=false` on every payload, `ai_output_can_be_truth=false`, `ai_output_can_be_training_label=false`, `ai_output_can_be_tail_label=false`, `ai_output_can_be_strategy_sample=false`, no forbidden trade-authority / runtime-tuning keys at any nesting depth, no banned imports (`app.risk` / `app.execution` / `app.exchanges` / `app.telegram` / `app.config`), no live LLM / DeepSeek network call required (no HTTP-library import + a `socket.socket`-monkeypatched run), deterministic output across two runs, plus output paths and CLI exit codes), and the new phase doc `docs/PHASE_AI_INTEGRATED_CHECKPOINT.md`. **Status taxonomy is intentionally NOT `ACCEPTED`.** Per-phase closeout PRs (AI-1 / AI-2 / AI-3 / AI-4 / AI-5 / AI-6) retain their own `IN_REVIEW` / `ACCEPTED` labels — the integrated checkpoint defers to those labels and never overrides them. The runner connects to no network, calls no LLM / DeepSeek, opens no Telegram socket, signs no request, never modifies `app.config`, and never reads a private API. **NOT live trading. NOT trade authority. NOT auto-tuning. NOT the DeepSeek hot path. NOT Telegram live outbound. NOT a per-phase `ACCEPTED` gate. NOT a strategy profitability proof. NOT a direction call. NOT Phase 12.** A `status = EVIDENCE_GENERATED` does **not** mean live trading is approved; it only authorises the next paper-only step (the *Offline Rule Sandbox Replay v0* preparation work). A `status = INSUFFICIENT_EVIDENCE` does **not** mean live trading is disapproved either; live-trading approval is a Phase 12 concern that requires the Spec §41 Go/No-Go checklist, and the checklist has not been initiated. Every emitted checkpoint carries `auto_tuning_allowed=false`; the constant is hard-pinned in the runner source. The Risk Engine remains the single trade-decision gate. Tests on this PR: `tests/unit/test_ai_integrated_checkpoint.py` 22/22 PASS. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-D-E | Block B Integrated Evidence Checkpoint v0 (*Block B 综合证据检查点 v0*; paper / report / evidence-only Block B aggregation checkpoint that rolls up the simplified outputs of D-A / D-B / B1.1 / B2-A / B2-B / B3 into one descriptive integrated evidence report; **NOT** a per-phase `ACCEPTED` gate, **NOT** Replay / Reflection extension, **NOT** strategy profitability proof) | **IN_REVIEW (after this implementation PR; not `ACCEPTED` until evidence closeout)** | Phase 11C.1C-C-B-B-B-D-E is **`IN_REVIEW`** after the implementation PR. The PR ships `scripts/run_block_b_integrated_evidence_checkpoint.py` (paper / report / evidence-only runner; reads only local `events.jsonl` / `*.jsonl` files under `--reports-dir` / `--exports-dir` / `--post-discovery-dir`; reads the most recent `post_discovery_outcome_report.json` under `--post-discovery-dir`; aggregates the simplified D-A / D-B / B1.1 / B2-A / B2-B / B3 outputs into one descriptive `block_b_integrated_evidence_report.json` plus matching `.md` summary; emits one of three closed statuses (`INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` / `EVIDENCE_GENERATED`) and the corresponding `next_allowed_phase` (`Phase 11C.1C-C-B-B-B-E-A Replay Extension for 11C Adaptive Events v0` or `NEEDS_OPERATOR_EVIDENCE`); reuses the existing `app.adaptive.discovery_quality_scorecard.build_discovery_quality_scorecard` builder + recursive `assert_payload_has_no_forbidden_keys` guard; never imports `app.risk` / `app.execution` / `app.exchanges` / `app.llm` / `app.telegram` / `app.config`; hard-pins `phase_12_forbidden = true` and `auto_tuning_allowed = false` on every emitted payload), the `tests/unit/test_block_b_integrated_evidence_checkpoint.py` unit-test module covering every brief-mandated acceptance test (`INSUFFICIENT_EVIDENCE` on empty workspace, `PARTIAL_EVIDENCE` when D-B post-discovery is missing OR data-gap is high, `EVIDENCE_GENERATED` when every component is present, `next_allowed_phase` correct, `phase_12_forbidden = true` on every payload, `auto_tuning_allowed = false` on every payload, no forbidden trade-authority / runtime-tuning keys on any payload, no banned imports, CLI exit-codes correct), and the new phase doc `docs/PHASE_11C_1C_C_B_B_B_D_E_BLOCK_B_INTEGRATED_EVIDENCE_CHECKPOINT.md`. **Status taxonomy is intentionally NOT `ACCEPTED`.** Per-phase closeout PRs (D-A, D-B, B1.1) retain their own `ACCEPTED_TOOLCHAIN` / `PARTIAL_QUALITY` / `BLOCK_B_CHECKPOINT_ONLY` labels — the integrated checkpoint defers to those labels and never overrides them. The runner connects to no network, calls no LLM / DeepSeek, opens no Telegram socket, signs no request, never modifies `app.config`, and never reads a private API. **NOT live trading. NOT AI Learning. NOT automatic parameter optimisation. NOT reinforcement learning. NOT a per-phase `ACCEPTED` gate. NOT a strategy profitability proof. NOT a direction call. NOT the Block C Replay / Reflection extension implementation (that is the *next-allowed* phase, not part of this PR). NOT the DeepSeek integration. NOT Phase 12.** A `status = EVIDENCE_GENERATED` does **not** mean live trading is approved. A `status = INSUFFICIENT_EVIDENCE` does **not** mean live trading is disapproved either; live-trading approval is a Phase 12 concern that requires the Spec §41 Go/No-Go checklist, and the checklist has not been initiated. Every emitted checkpoint carries `auto_tuning_allowed = false`; the constant is hard-pinned in the runner source. The Risk Engine remains the single trade-decision gate. Tests on this PR: `tests/unit/test_block_b_integrated_evidence_checkpoint.py` 13/13 PASS; full `tests/unit` 2600/2600 PASS. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-E-A | Replay Extension for 11C Adaptive Events v0 (*11C 自适应事件 Replay 扩展 v0*; paper / report / evidence-only next-allowed phase opened by a Phase 11C.1C-C-B-B-B-D-E Block B Integrated Evidence Checkpoint with `status ∈ {EVIDENCE_GENERATED, PARTIAL_EVIDENCE}`) | **NEXT_ALLOWED / NOT_STARTED** | Reserved phase. Will extend the existing Replay engine to play back the Block B adaptive events (D-A / D-B / B1.1 / B2-A / B2-B / B3) over previously captured event streams. Paper / report / evidence-only. **NOT live trading. NOT auto-tuning. NOT DeepSeek trade decisions. NOT Phase 12.** Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C / 11C.1C-C-B-B-B-D / 11C.1C-C-B-B-B-D-A / 11C.1C-C-B-B-B-D-B / 11C.1C-C-B-B-B-D-B.1 / 11C.1C-C-B-B-B-D-C-A / 11C.1C-C-B-B-B-D-C-B / 11C.1C-C-B-B-B-D-D / 11C.1C-C-B-B-B-D-E forbidden item verbatim. Will require its own kickoff PR with brief, scope, boundary table, forbidden list, and acceptance evidence. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-E-B | Reflection Extension for 11C Adaptive Events v0 (*11C 自适应事件 Reflection 扩展 v0*; paper / report-only Block C2 child slice opened by Phase 11C.1C-C-B-B-B-E-A Replay Extension acceptance via PR #78) | **IN_REVIEW (after this implementation PR; not `ACCEPTED` until maintainer review)** | Phase 11C.1C-C-B-B-B-E-B is **`IN_REVIEW`** after the implementation PR. The PR ships `app/reflection/adaptive_11c.py` (read-only reflection extension; `Reflection11CAdaptiveEngine`, `AdaptiveReflectionTag` closed enum of the 18 brief-mandated tags + `late_discovery`, `AdaptiveReflectionSeverity` closed enum, `AdaptiveReflectionInput` / `AdaptiveReflectionCase` / `AdaptiveReflectionSummary` frozen dataclasses with `to_payload()` plus a recursive `_assert_no_forbidden_keys` guard; `auto_tuning_allowed=False` hard-pinned on every emitted payload; never imports `app.risk` / `app.execution` / `app.exchanges` / `app.llm` / `app.telegram`; never produces `buy` / `sell` / `long` / `short` / `position_size` / `leverage` / `stop` / `target` / `risk_budget` / `runtime_config_patch`), the `tests/unit/test_reflection_11c_adaptive_events.py` unit-test module covering every brief-mandated test (POST_DISCOVERY_OUTCOME → `late_top_chase` / `early_discovery` / `post_discovery_no_edge`; REJECT_TO_OUTCOME → `false_negative_reject` / `correct_protective_reject` / `data_gap`; SEVERE_MISSED_TAIL → `severe_miss` / `needs_data_recovery`; DISCOVERY_QUALITY DEGRADED → `degraded_discovery_quality`; HISTORICAL_MOVER_COVERAGE missed → `missed_tail`; missing-fields-do-not-crash → `insufficient_evidence`; evidence_refs preserved with `event_id` fallback; `auto_tuning_allowed=False` everywhere; forbidden-imports static check; forbidden-fields-absent guard; deterministic ordering), and the new phase doc `docs/PHASE_11C_1C_C_B_B_B_E_B_REFLECTION_EXTENSION_11C_EVENTS.md`. Reflection only emits structured tags / summaries / counts / warnings — **NOT** trade advice, **NOT** AI / DeepSeek output, **NOT** runtime config patches, **NOT** auto-tuning. Tests on this PR: `tests/unit/test_reflection_11c_adaptive_events.py` 42/42 PASS; full `tests/unit` 2680/2680 PASS. **NOT live trading. NOT AI Learning. NOT automatic parameter optimisation. NOT reinforcement learning. NOT DeepSeek integration. NOT Phase 12.** Successful Phase 11C.1C-C-B-B-B-E-B only authorises Phase 11C.1C-C-B-B-B-E-C *C3 Evidence Contract Baseline* to start; no other phase is unlocked. Phase 12 remains **FORBIDDEN**. |
@@ -5607,6 +5608,139 @@ The implementation PR ships:
 
 The phase is marked **IN_REVIEW** here. Maintainer-led review of
 the implementation PR is the only path to **ACCEPTED**.
+
+
+
+## Phase AI-CHECKPOINT — AI Integrated Checkpoint v0 (IN_REVIEW)
+
+**Status:** IN_REVIEW (implementation PR; awaits maintainer review).
+**Block:** AI Layer — end-to-end paper / report / evidence-only
+roll-up of the AI-1 → AI-2 → AI-3 → AI-4 (offline sandbox / fake
+provider) → AI-5 → AI-6 chain into one descriptive
+`ai_integrated_checkpoint_report.json` (plus a Markdown twin).
+**Predecessors:** Phase AI-1 (PR #82), Phase AI-2 (PR #83),
+Phase AI-3 (PR #84), Phase AI-4 (PR #85), Phase AI-5 (PR #86),
+and Phase AI-6 (PR #87) all merged into `main`.
+**Type:** Implementation PR (paper / report / evidence-only).
+**Runtime effect:** **none on real trading.** One new runner
+`scripts/run_ai_integrated_checkpoint.py`, one new unit-test
+module `tests/unit/test_ai_integrated_checkpoint.py` (22
+PASSING tests), and one new phase doc
+`docs/PHASE_AI_INTEGRATED_CHECKPOINT.md`. No file under
+`app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, no file under `app/ai/`,
+`app/replay/`, or `app/reflection/`, no event type wired into
+the runtime hot path, and no database schema / migration is
+touched. The runner is read-only / write-only; it reads only
+local files under `--block-c-report` / `--evidence-bundle` /
+`--sandbox-output` / `--operator-briefing-dir` and writes only
+files under `--output-dir`. The runner imports only
+`app.ai.evidence_bundle` (for the canonical forbidden-field
+list) and `app.reflection.ai_reflection` (for the AI-6
+convenience wrapper); it does **NOT** import `app.risk`,
+`app.execution`, `app.exchanges`, `app.telegram`, or
+`app.config`; it does **NOT** import any HTTP / network
+library (`openai` / `anthropic` / `deepseek` / `httpx` /
+`requests` / `aiohttp` / `urllib3` / `websocket` /
+`websockets` / `grpc` / `boto3` / `socket`). A unit test
+additionally monkeypatches `socket.socket` to refuse-on-call
+and runs the full `EVIDENCE_GENERATED` path to prove no
+socket is opened. The `--use-fake-provider` flag is
+descriptive only; the runner NEVER opens the network
+regardless of its value. **Phase ledger effect:** opens Phase
+AI-CHECKPOINT as **`IN_REVIEW`** (not `ACCEPTED` until
+maintainer review of the PR). **Safety flag effect:** **none.**
+`mode=paper`, `live_trading=False`,
+`exchange_live_orders=False`, `right_tail=False`, `llm=False`,
+`llm_outbound_enabled=False`, `sandbox_only=True`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`, `trade_authority=False`,
+`auto_tuning_allowed=False`, `phase_12_forbidden=True`,
+`stateless_inference=True`, `feedback_isolation=True`,
+`ai_output_is_commentary_only=True`,
+`ai_output_can_be_truth=False`,
+`ai_output_can_be_training_label=False`,
+`ai_output_can_be_tail_label=False`,
+`ai_output_can_be_strategy_sample=False` are re-pinned at
+every `to_dict()` boundary; the recursive
+`_assert_no_forbidden_keys` guard refuses to emit any
+payload that carries a trade-action / runtime-config-patch
+/ "live ready" / "trading approved" / "phase_12_allowed"
+key at any nesting depth.
+
+### Status taxonomy (intentionally NOT `ACCEPTED`)
+
+  - `INSUFFICIENT_EVIDENCE` — none of the AI-1 / AI-4 /
+    AI-5 artefacts are on disk AND no Block C report is on
+    disk; `next_allowed_phase = NEEDS_AI_OPERATOR_EVIDENCE`.
+  - `PARTIAL_EVIDENCE` — the AI-1 → AI-6 chain runs end-
+    to-end but at least one stage uses
+    `source=fallback_fixture`, OR the AI-4 sandbox carries
+    degraded / rejected / reality-check-failed claims, OR
+    the AI-6 axes did not produce a case;
+    `next_allowed_phase = Offline Rule Sandbox Replay
+    preparation / AI operator evidence run (paper /
+    read-only)`.
+  - `EVIDENCE_GENERATED` — the AI-1 → AI-6 chain runs end-
+    to-end with operator-supplied artefacts, no fallback
+    fixture is in the chain, AI-4 claims are
+    `SUPPORTED_INTELLIGENCE` /
+    `reality_check_status=SUPPORTED`, AI-6 produced ≥1
+    replay case AND ≥1 reflection case;
+    `next_allowed_phase = Offline Rule Sandbox Replay v0
+    preparation (paper / read-only)`.
+
+### What this phase does NOT do
+
+  - It does **NOT** authorise live trading. **NOT** trade
+    authority. **NOT** auto-tuning.
+  - It does **NOT** authorise the DeepSeek hot path; the
+    DeepSeek HTTP transport remains a refusal-only
+    skeleton.
+  - It does **NOT** authorise Telegram live outbound. The
+    runner never imports `app.telegram` and never calls a
+    Telegram transport.
+  - It does **NOT** make any live LLM call; the runner
+    cannot open a socket.
+  - It does **NOT** modify any runtime knob
+    (`symbol_limit`, anomaly thresholds, `candidate_pool`,
+    Regime weights, strategy parameters).
+  - It does **NOT** retrofit `app/risk/`,
+    `app/execution/`, `app/exchanges/`, `app/telegram/`,
+    or `app/config/`.
+  - It does **NOT** wire AI output into any trade-decision
+    surface; AI output is *commentary substrate* only.
+  - **AI output cannot become Truth Layer fact, training
+    label, tail label, or strategy validation sample.**
+  - It does **NOT** start Phase 12. **Phase 12 remains
+    FORBIDDEN.**
+
+### Tests
+
+`python -m pytest tests/unit/test_ai_integrated_checkpoint.py -q`
+ships 22 PASSING tests covering all 15 brief-mandated
+scenarios plus output paths, CLI exit codes, the
+degraded-claim path, and the socket-monkeypatched no-network
+test.
+
+### Successor allowed
+
+A successful AI integrated checkpoint only authorises the
+next allowed paper-only step:
+
+  - **`Offline Rule Sandbox Replay v0` preparation (paper /
+    read-only)** when `status=EVIDENCE_GENERATED`.
+  - **`Offline Rule Sandbox Replay preparation / AI
+    operator evidence run` (paper / read-only)** when
+    `status=PARTIAL_EVIDENCE`.
+  - **`NEEDS_AI_OPERATOR_EVIDENCE`** when
+    `status=INSUFFICIENT_EVIDENCE`.
+
+No other phase is unlocked. Phase 12 remains **FORBIDDEN**.
+
+The phase is marked **IN_REVIEW** here. Maintainer-led
+review of the implementation PR is the only path to
+**ACCEPTED**.
 
 
 

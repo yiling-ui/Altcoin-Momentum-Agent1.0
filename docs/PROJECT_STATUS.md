@@ -7,6 +7,112 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase AI-CHECKPOINT — AI Integrated Checkpoint v0
+> (*AI 综合检查点 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+>
+> Block A is complete. Block B is complete and the Block B
+> Integrated Evidence Checkpoint is `PARTIAL_EVIDENCE`. Block C
+> is complete and the Block C Integrated Checkpoint produced
+> `status=EVIDENCE_GENERATED`. PR #82 (AI-1 Evidence Bundle
+> Builder), PR #83 (AI-2 Evidence Citation Contract), PR #84
+> (AI-3 Reality Check Layer), PR #85 (AI-4 DeepSeek Offline
+> Sandbox), PR #86 (AI-5 Operator Briefing / Evidence
+> Compression), and PR #87 (AI-6 AI Replay / Reflection
+> Integration) are merged. The project is therefore allowed
+> to issue the **AI Integrated Checkpoint** — the AI Layer's
+> end-to-end paper / report / evidence-only roll-up — but
+> only as commentary substrate that an auditor can review.
+> The project is still **paper only** and Phase 12 remains
+> **FORBIDDEN**.
+>
+> This slice ships the **AI Integrated Checkpoint v0** — a
+> single descriptive `ai_integrated_checkpoint_report.json`
+> (plus its Markdown twin) that proves the AI-1 → AI-2 →
+> AI-3 → AI-4 (offline sandbox / fake provider) → AI-5 →
+> AI-6 chain runs end-to-end on the operator's local report
+> directory, without placing an order, without reading a
+> private exchange API, without calling any live LLM /
+> DeepSeek / Telegram outbound transport, without altering
+> any runtime knob, and without authorising trade authority
+> or auto-tuning. The runner reads only local files under
+> `--block-c-report` / `--evidence-bundle` /
+> `--sandbox-output` / `--operator-briefing-dir` and writes
+> only files under `--output-dir`. The `--use-fake-provider`
+> flag is descriptive only — the runner NEVER opens the
+> network regardless of the value, and a unit test
+> additionally monkeypatches `socket.socket` to refuse-on-
+> call and runs the full `EVIDENCE_GENERATED` path to prove
+> no socket is opened.
+>
+> The runner imports only `app.ai.evidence_bundle` (for the
+> canonical forbidden-field reference list) and
+> `app.reflection.ai_reflection` (for the AI-6 convenience
+> wrapper). It does **NOT** import `app.risk`,
+> `app.execution`, `app.exchanges`, `app.telegram`, or
+> `app.config`. It does **NOT** import any HTTP / network
+> library (`openai`, `anthropic`, `deepseek`, `httpx`,
+> `requests`, `aiohttp`, `urllib3`, `websocket`,
+> `websockets`, `grpc`, `boto3`, `socket`). The output JSON
+> re-pins the project-wide invariants at the serialisation
+> boundary (`mode=paper`, `live_trading=False`,
+> `exchange_live_orders=False`, `right_tail=False`,
+> `llm=False`, `llm_outbound_enabled=False`,
+> `sandbox_only=True`, `telegram_outbound_enabled=False`,
+> `binance_private_api_enabled=False`,
+> `trade_authority=False`, `auto_tuning_allowed=False`,
+> `phase_12_forbidden=True`, `stateless_inference=True`,
+> `feedback_isolation=True`,
+> `ai_output_is_commentary_only=True`,
+> `ai_output_can_be_truth=False`,
+> `ai_output_can_be_training_label=False`,
+> `ai_output_can_be_tail_label=False`,
+> `ai_output_can_be_strategy_sample=False`); the recursive
+> `_assert_no_forbidden_keys` guard refuses to emit any
+> payload that carries a trade-action /
+> runtime-config-patch / "live ready" / "trading approved"
+> / "phase_12_allowed" key at any nesting depth.
+>
+> Status taxonomy (intentionally **not** `ACCEPTED`):
+>
+>   - `INSUFFICIENT_EVIDENCE` — none of the AI-1 / AI-4 /
+>     AI-5 artefacts are on disk AND no Block C report is on
+>     disk; `next_allowed_phase = NEEDS_AI_OPERATOR_EVIDENCE`.
+>   - `PARTIAL_EVIDENCE` — the chain runs end-to-end but at
+>     least one stage uses `source=fallback_fixture`, OR the
+>     AI-4 sandbox carries degraded / rejected /
+>     reality-check-failed claims, OR the AI-6 axes did not
+>     produce a case;
+>     `next_allowed_phase = Offline Rule Sandbox Replay
+>     preparation / AI operator evidence run (paper /
+>     read-only)`.
+>   - `EVIDENCE_GENERATED` — the chain runs end-to-end with
+>     operator-supplied artefacts, no fallback fixture is in
+>     the chain, AI-4 claims are
+>     `SUPPORTED_INTELLIGENCE` /
+>     `reality_check_status=SUPPORTED`, AI-6 produced ≥1
+>     replay case AND ≥1 reflection case;
+>     `next_allowed_phase = Offline Rule Sandbox Replay v0
+>     preparation (paper / read-only)`.
+>
+> A successful AI integrated checkpoint only authorises the
+> next allowed paper-only step (the *Offline Rule Sandbox
+> Replay v0* preparation work). It does **NOT** authorise
+> live trading. It does **NOT** authorise auto-tuning. It
+> does **NOT** authorise the DeepSeek hot path. It does
+> **NOT** authorise Telegram live outbound. It does **NOT**
+> open Phase 12. **Phase 12 remains FORBIDDEN.**
+>
+> Files shipped: `scripts/run_ai_integrated_checkpoint.py`
+> (the runner), `tests/unit/test_ai_integrated_checkpoint.py`
+> (22 PASSING tests covering all 15 brief-mandated
+> scenarios), `docs/PHASE_AI_INTEGRATED_CHECKPOINT.md` (the
+> design / acceptance brief).
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase AI-6 — AI Replay / Reflection Integration v0
 > (*AI 回放 / 反思集成 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not
