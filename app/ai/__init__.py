@@ -35,6 +35,32 @@ contract:
     claim can reach after Reality Check is
     :attr:`AIRealityCheckAuthorityLevel.SUPPORTED_INTELLIGENCE`,
     which is *commentary substrate* only.
+  - **Phase AI-4** :mod:`app.ai.intelligence_schema` and
+    :mod:`app.ai.deepseek_sandbox` - the *DeepSeek Offline
+    Sandbox* runtime artefact. Phase AI-4 ships:
+    :class:`AIIntelligenceOutput` (the schema for offline AI
+    intelligence), the redaction / forbidden-field-stripping
+    helpers, :class:`DeepSeekSandboxConfig` (closed and
+    disabled-by-default), :class:`DeepSeekSandboxInput`,
+    :class:`DeepSeekProviderProtocol`,
+    :class:`FakeDeepSeekProvider` (deterministic in-memory
+    transport used by tests AND by every offline run that
+    has ``outbound_enabled=False``),
+    :class:`OptionalDeepSeekHTTPProvider` (refusal-only
+    skeleton for the future real DeepSeek HTTP transport),
+    and :class:`DeepSeekOfflineSandboxRunner`. The runner
+    consumes a frozen Phase AI-1 evidence bundle, validates
+    every model-emitted claim through the Phase AI-2
+    citation contract, cross-verifies through the Phase AI-3
+    Reality Check engine, strips forbidden trade-action /
+    runtime-config-patch fields, redacts credential-shaped
+    keys, and emits one :class:`AIIntelligenceOutput`. The
+    runner NEVER imports :mod:`app.risk`, :mod:`app.execution`,
+    :mod:`app.exchanges`, :mod:`app.telegram`, or
+    :mod:`app.config`; it NEVER reads private exchange /
+    account state; it NEVER carries an API secret in any
+    serialised payload; it NEVER authorises a trade decision
+    or auto-tuning.
 
 Both phases enforce the four AI root constraints from
 ``docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md``:
@@ -115,6 +141,37 @@ from app.ai.evidence_bundle import (
     ForbiddenAIInputError,
     build_ai_evidence_bundle,
 )
+from app.ai.intelligence_schema import (
+    AI_INTELLIGENCE_OUTPUT_SCHEMA_VERSION,
+    AI_INTELLIGENCE_OUTPUT_SOURCE_MODULE,
+    AI_INTELLIGENCE_OUTPUT_SOURCE_PHASE,
+    AI_SECRET_REDACTED_PLACEHOLDER,
+    FORBIDDEN_INTELLIGENCE_OUTPUT_FIELDS,
+    AIIntelligenceAuthorityLevel,
+    AIIntelligenceClaim,
+    AIIntelligenceOutput,
+    AIIntelligenceStatus,
+    AIIntelligenceTaskType,
+    redact_secrets,
+    strip_forbidden_fields,
+)
+from app.ai.deepseek_sandbox import (
+    DEEPSEEK_SANDBOX_SCHEMA_VERSION,
+    DEEPSEEK_SANDBOX_SOURCE_MODULE,
+    DEEPSEEK_SANDBOX_SOURCE_PHASE,
+    DeepSeekOfflineSandboxRunner,
+    DeepSeekOutboundDisabledError,
+    DeepSeekProviderProtocol,
+    DeepSeekProviderRateLimitedError,
+    DeepSeekProviderServerError,
+    DeepSeekProviderTimeoutError,
+    DeepSeekSandboxConfig,
+    DeepSeekSandboxError,
+    DeepSeekSandboxInput,
+    FakeDeepSeekProvider,
+    OptionalDeepSeekHTTPProvider,
+    run_deepseek_offline_sandbox,
+)
 __all__ = [
     # Phase AI-1 - AI Evidence Bundle Builder v0.
     "AI_EVIDENCE_BUNDLE_SCHEMA_VERSION",
@@ -160,4 +217,32 @@ __all__ = [
     "AIRealityCheckStatus",
     "FORBIDDEN_REALITY_CHECK_FIELDS",
     "reality_check_claim",
+    # Phase AI-4 - DeepSeek Offline Sandbox v0.
+    "AI_INTELLIGENCE_OUTPUT_SCHEMA_VERSION",
+    "AI_INTELLIGENCE_OUTPUT_SOURCE_MODULE",
+    "AI_INTELLIGENCE_OUTPUT_SOURCE_PHASE",
+    "AI_SECRET_REDACTED_PLACEHOLDER",
+    "AIIntelligenceAuthorityLevel",
+    "AIIntelligenceClaim",
+    "AIIntelligenceOutput",
+    "AIIntelligenceStatus",
+    "AIIntelligenceTaskType",
+    "DEEPSEEK_SANDBOX_SCHEMA_VERSION",
+    "DEEPSEEK_SANDBOX_SOURCE_MODULE",
+    "DEEPSEEK_SANDBOX_SOURCE_PHASE",
+    "DeepSeekOfflineSandboxRunner",
+    "DeepSeekOutboundDisabledError",
+    "DeepSeekProviderProtocol",
+    "DeepSeekProviderRateLimitedError",
+    "DeepSeekProviderServerError",
+    "DeepSeekProviderTimeoutError",
+    "DeepSeekSandboxConfig",
+    "DeepSeekSandboxError",
+    "DeepSeekSandboxInput",
+    "FORBIDDEN_INTELLIGENCE_OUTPUT_FIELDS",
+    "FakeDeepSeekProvider",
+    "OptionalDeepSeekHTTPProvider",
+    "redact_secrets",
+    "run_deepseek_offline_sandbox",
+    "strip_forbidden_fields",
 ]

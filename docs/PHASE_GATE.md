@@ -6304,3 +6304,121 @@ ships 15 tests, all PASS;
 The phase is marked **IN_REVIEW** here. Maintainer-led review of
 the implementation PR plus the eventual whole-block Block C
 closeout PR are the only paths to **ACCEPTED**.
+
+
+
+## Open phase: Phase AI-4 (IN_REVIEW)
+
+> **Title:** Phase AI-4 — DeepSeek Offline Sandbox v0
+> (*DeepSeek 离线沙箱 v0*).
+> **Status:** IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).
+>
+> Block C is complete. PR #82 (Phase AI-1 Evidence Bundle
+> Builder v0), PR #83 (Phase AI-2 Truth Layer / AI Evidence
+> Citation Contract v0), and PR #84 (Phase AI-3 Reality Check
+> Layer v0) are merged into `main`. Phase AI-4 is the AI
+> Layer's first **outbound-capable** runtime artefact - a
+> deterministic offline runner that consumes a frozen Phase
+> AI-1 evidence bundle, validates every model-emitted claim
+> through the Phase AI-2 citation contract, cross-verifies
+> through the Phase AI-3 Reality Check engine, and emits one
+> schema-checked, redacted, commentary-only
+> :class:`AIIntelligenceOutput`. The runner is **disabled by
+> default** (`enabled=False`), **outbound is closed by
+> default** (`outbound_enabled=False`), and the v0 HTTP
+> provider skeleton refuses to actually contact the network
+> even when both gates are open. The project remains **paper
+> only**; **Phase 12 remains FORBIDDEN**.
+
+### What this phase does
+
+  - Ships the closed :class:`AIIntelligenceOutput` schema and
+    the recursive `strip_forbidden_fields` /
+    `redact_secrets` helpers under
+    `app/ai/intelligence_schema.py`.
+  - Ships the closed :class:`DeepSeekSandboxConfig` (15
+    disabled-by-default gates), :class:`DeepSeekSandboxInput`,
+    :class:`DeepSeekProviderProtocol`,
+    :class:`FakeDeepSeekProvider`,
+    :class:`OptionalDeepSeekHTTPProvider` (refusal-only
+    skeleton), and :class:`DeepSeekOfflineSandboxRunner`
+    under `app/ai/deepseek_sandbox.py`.
+  - Ships the offline CLI runner
+    `scripts/run_deepseek_offline_sandbox.py` that reads a
+    frozen Phase AI-1 evidence bundle JSON, hands it to the
+    runner, and writes
+    `deepseek_sandbox_output.json` /
+    `deepseek_sandbox_output.md`.
+  - Ships 94 unit tests under
+    `tests/unit/test_deepseek_offline_sandbox.py` covering
+    every brief-mandated scenario plus defensive companions.
+  - Ships `docs/PHASE_AI_4_DEEPSEEK_OFFLINE_SANDBOX.md` and
+    `docs/DEEPSEEK_SANDBOX_RUNBOOK.md`.
+
+### What this phase does NOT do
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise auto-tuning.
+  - It does **NOT** call DeepSeek live (the v0 HTTP provider
+    skeleton refuses to contact the network).
+  - It does **NOT** ship Operator Briefing live publishing
+    (separate later phase AI-5).
+  - It does **NOT** modify any runtime knob (`symbol_limit`,
+    anomaly thresholds, `candidate_pool`, Regime weights).
+  - It does **NOT** retrofit `app/risk/`, `app/execution/`,
+    `app/exchanges/`, `app/telegram/`, or `app/config/`.
+  - It does **NOT** wire AI output into any trade-decision
+    surface; AI output is *commentary substrate* only.
+  - It does **NOT** start Phase 12. **Phase 12 remains
+    FORBIDDEN.**
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `llm_outbound_enabled = False`
+  - `sandbox_only = True`
+  - `allow_trade_decision = False`
+  - `allow_runtime_config_change = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - no real DeepSeek HTTP transport
+  - **Phase 12 = FORBIDDEN**
+
+### Forbidden modifications (held end-to-end)
+
+  - no edit under `app/risk/**`
+  - no edit under `app/execution/**`
+  - no edit under `app/exchanges/**`
+  - no edit under `app/telegram/**`
+  - no edit under `app/config/**`
+  - no edit under `app/ai/evidence_bundle.py`,
+    `app/ai/claim_contract.py`, or
+    `app/ai/reality_check.py`
+  - no change to `symbol_limit`
+  - no change to anomaly thresholds
+  - no change to `candidate_pool`
+  - no change to regime weights
+  - no `runtime_config_patch` produced
+  - no buy / sell / long / short / position_size / leverage /
+    stop / target / risk_budget produced
+
+### Tests
+
+`python -m pytest tests/unit/test_deepseek_offline_sandbox.py -q`
+ships 94 tests, all PASS;
+`python -m pytest tests/unit -q` reports 3015 PASS, 0
+failures (was 2921 before this phase; +94 from this phase).
+
+The phase is marked **IN_REVIEW** here. Maintainer-led review
+of the implementation PR is the only path to **ACCEPTED**.
