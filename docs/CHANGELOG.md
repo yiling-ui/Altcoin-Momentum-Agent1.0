@@ -7,6 +7,78 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-B — Paper Shadow Strategy Validation v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence-only).
+**Runtime effect:** **none on real trading.** One new package
+`app/paper_shadow/` (an `__init__.py` and
+`strategy_validation.py`), one new runner
+`scripts/run_paper_shadow_strategy_validation.py`, one new
+unit-test module `tests/unit/test_paper_shadow_strategy_validation.py`
+(22 PASSING tests covering all 16 brief-mandated scenarios plus
+extras: example-fixture exercises all four verdict paths,
+sample input validation, empty-samples insufficient-evidence
+status, runner file output, byte-identical re-run with a fixed
+clock, SAFETY_CONTRACT shape), and one new phase doc
+`docs/PHASE_11C_1D_B_PAPER_SHADOW_STRATEGY_VALIDATION.md`. No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, or `app/config/`, no event type wired into the
+runtime hot path, and no database schema / migration is touched.
+The runner reads only local files under `--block-b-report` /
+`--block-c-report` / `--rule-sandbox-report` and writes only
+files under `--output-dir`. The runner imports only
+`app.paper_shadow.strategy_validation`. It does **NOT** import
+`app.risk`, `app.execution`, `app.exchanges`, `app.telegram`, or
+`app.config`. It does **NOT** import any HTTP / network library
+(`deepseek`, `openai`, `anthropic`, `telegram`, `binance`,
+`ccxt`, `websocket`, `websockets`, `httpx`, `aiohttp`,
+`requests`, `urllib.request`, `http.client`, `grpc`, `boto3`).
+The output JSON re-pins the project-wide invariants at the
+serialisation boundary (`mode=paper`, `live_trading=False`,
+`exchange_live_orders=False`, `right_tail=False`, `llm=False`,
+`llm_outbound_enabled=False`, `sandbox_only=True`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`, `trade_authority=False`,
+`auto_tuning_allowed=False`, `writes_runtime_config=False`,
+`phase_12_forbidden=True`); the recursive
+`assert_no_forbidden_fields` guard refuses to emit any payload
+that carries a trade-action / runtime-config-patch / "live
+ready" / "trading approved" / "phase_12_allowed" key at any
+nesting depth.
+
+The recommendation taxonomy is intentionally *not*
+`APPLY` / `DEPLOY` / `TRADE` / `BUY` / `SELL`:
+
+  - `REVIEW_ONLY` — default; cohort needs operator review.
+  - `PROMISING_FOR_FORWARD_TEST` — cohort has enough samples,
+    high usable discovery, low late-chase / fake-breakout /
+    severe-miss; only marks the cohort as a candidate for the
+    next allowed paper / read-only preparation step (Risk /
+    Execution / Capital Safety Matrix preparation OR strict
+    walk-forward preparation).
+  - `INCONCLUSIVE` — sample size too small or data-gap rate too
+    high to draw a verdict.
+  - `RISKY` — elevated severe-miss / fake-breakout / data-gap
+    rates.
+  - `REJECTED_BY_EVIDENCE` — catastrophic severe-miss or
+    fake-breakout rate.
+
+A successful paper shadow validation run with at least one
+`PROMISING_FOR_FORWARD_TEST` cohort only authorises the next
+allowed paper-only step (Risk / Execution / Capital Safety
+Matrix preparation OR strict walk-forward preparation). It does
+**NOT** authorise live trading. It does **NOT** authorise
+auto-tuning. It does **NOT** authorise the DeepSeek hot path.
+It does **NOT** authorise Telegram live outbound. It does
+**NOT** open Phase 12. **Phase 12 remains FORBIDDEN.**
+
+`python -m pytest tests/unit/test_paper_shadow_strategy_validation.py -q`
+ships **22 PASSING** tests; `python -m pytest tests/unit -q`
+reports **3368 PASSING** tests, 0 failures (was 3346 before
+this phase; +22 from this phase). The phase is marked
+**IN_REVIEW**. Maintainer-led review of the implementation PR
+is the only path to **ACCEPTED**.
+
 ### Phase AI-CHECKPOINT — AI Integrated Checkpoint v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only).

@@ -7,6 +7,102 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-B — Paper Shadow Strategy Validation v0
+> (*纸面影子策略验证 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+>
+> Block A is complete. Block B is complete and integrated.
+> Block C is complete and integrated. AI-1 → AI-6 are
+> complete and the AI Integrated Checkpoint is merged. PR
+> #89 (Phase 11C / Offline Rule Sandbox Replay v0) is
+> merged. The project is therefore allowed to ship the
+> **Paper Shadow Strategy Validation v0** — a strictly
+> paper-only / report-only / evidence-only cohort
+> evaluation layer that turns the structured outputs of
+> the Block B integrated evidence checkpoint, the Block C
+> integrated checkpoint, and the Offline Rule Sandbox
+> Replay into ``PaperShadowSample`` rows, groups them into
+> cohorts, computes cohort-level metrics, and emits one
+> descriptive ``paper_shadow_strategy_validation_report.json``
+> (plus its Markdown twin) that an auditor can review to
+> decide which discovery patterns / regime-cluster cohorts
+> have a structural edge on the historical record. The
+> project is still **paper only** and Phase 12 remains
+> **FORBIDDEN.**
+>
+> The runner reads only local files under
+> ``--block-b-report`` / ``--block-c-report`` /
+> ``--rule-sandbox-report`` and writes only files under
+> ``--output-dir``. When an input report is missing on
+> disk the runner substitutes a deterministic example
+> fixture marked ``source=example_fixture`` and sets
+> ``used_example_fixture=true`` in the payload; the
+> fixture NEVER claims to be operator-supplied paper
+> evidence.
+>
+> The engine and runner do **NOT** import ``app.risk``,
+> ``app.execution``, ``app.exchanges``, ``app.telegram``,
+> or ``app.config``. The engine and runner do **NOT**
+> import any HTTP / network library (``deepseek``,
+> ``openai``, ``anthropic``, ``telegram``, ``binance``,
+> ``ccxt``, ``websocket``, ``websockets``, ``httpx``,
+> ``aiohttp``, ``requests``, ``urllib.request``,
+> ``http.client``, ``grpc``, ``boto3``). The output JSON
+> re-pins the project-wide invariants at the
+> serialisation boundary (``mode=paper``,
+> ``live_trading=False``, ``exchange_live_orders=False``,
+> ``right_tail=False``, ``llm=False``,
+> ``llm_outbound_enabled=False``, ``sandbox_only=True``,
+> ``telegram_outbound_enabled=False``,
+> ``binance_private_api_enabled=False``,
+> ``trade_authority=False``, ``auto_tuning_allowed=False``,
+> ``writes_runtime_config=False``,
+> ``phase_12_forbidden=True``); the recursive
+> ``assert_no_forbidden_fields`` guard refuses to emit any
+> payload that carries a trade-action /
+> runtime-config-patch / "live ready" / "trading approved"
+> / "phase_12_allowed" key at any nesting depth.
+>
+> Recommendation taxonomy (intentionally **not**
+> ``APPLY`` / ``DEPLOY`` / ``TRADE`` / ``BUY`` / ``SELL``):
+>
+>   - ``REVIEW_ONLY`` — default; cohort needs operator
+>     review.
+>   - ``PROMISING_FOR_FORWARD_TEST`` — cohort has enough
+>     samples, high usable discovery, low late-chase /
+>     fake-breakout / severe-miss; only marks the cohort
+>     as a candidate for the next allowed paper /
+>     read-only preparation step (Risk / Execution /
+>     Capital Safety Matrix preparation OR strict
+>     walk-forward preparation).
+>   - ``INCONCLUSIVE`` — sample size too small or data-gap
+>     rate too high to draw a verdict.
+>   - ``RISKY`` — elevated severe-miss / fake-breakout /
+>     data-gap rates.
+>   - ``REJECTED_BY_EVIDENCE`` — catastrophic severe-miss
+>     or fake-breakout rate.
+>
+> A ``PROMISING_FOR_FORWARD_TEST`` recommendation only
+> authorises the next allowed paper-only step. It does
+> **NOT** authorise live trading. It does **NOT**
+> authorise auto-tuning. It does **NOT** authorise the
+> DeepSeek hot path. It does **NOT** authorise Telegram
+> live outbound. It does **NOT** open Phase 12.
+> **Phase 12 remains FORBIDDEN.**
+>
+> Files shipped: ``app/paper_shadow/__init__.py``,
+> ``app/paper_shadow/strategy_validation.py``,
+> ``scripts/run_paper_shadow_strategy_validation.py``,
+> ``tests/unit/test_paper_shadow_strategy_validation.py``
+> (22 PASSING tests covering all 16 brief-mandated
+> scenarios plus extras),
+> ``docs/PHASE_11C_1D_B_PAPER_SHADOW_STRATEGY_VALIDATION.md``
+> (the design / acceptance brief).
+>
+> *Prior status (kept for history; superseded by the
+> entry above):*
+>
 > **Phase AI-CHECKPOINT — AI Integrated Checkpoint v0
 > (*AI 综合检查点 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not

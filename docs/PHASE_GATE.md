@@ -6954,3 +6954,120 @@ Shadow Strategy Validation phase itself is out of scope for Phase 11C.
 ships **19 PASSING** tests covering the full safety contract;
 `python -m pytest tests/unit -q` reports **3346 PASSING** tests, 0
 failures (no regression vs. the prior post-PR baseline).
+
+
+
+---
+
+## Open phase: Phase 11C.1D-B / Paper Shadow Strategy Validation v0 (IN_REVIEW)
+
+> **Title:** Paper Shadow Strategy Validation v0
+> *纸面影子策略验证 v0*
+> **Status:** IN_REVIEW (after the implementation PR is merged the
+> phase moves from IN_REVIEW to ACCEPTED only via a separate docs
+> closeout PR; this PR alone does NOT mark the phase ACCEPTED).
+> **Parent:** Phase 11C umbrella.
+> **Trade authority:** **none.**
+> **Phase 12:** **FORBIDDEN.**
+
+### Purpose
+
+A strictly paper-only / report-only / evidence-only cohort
+evaluation layer that turns the structured outputs of the Block B
+integrated evidence checkpoint, the Block C integrated checkpoint,
+and the Offline Rule Sandbox Replay v0 (PR #89) into
+``PaperShadowSample`` rows, groups them into cohorts, computes
+cohort-level metrics, and emits a paper shadow validation report.
+The report tells the operator which discovery patterns /
+regime-cluster cohorts have a structural edge on the historical
+record, and which look like noise / late chase / fake breakout /
+data gap. It closes the next paper-only roadmap gap after PR #89
+("operator cannot safely score discovery patterns and
+regime-cluster cohorts on the historical record before scoping
+forward-test preparation") without granting any new authority.
+
+### Gate flags (Phase 11C.1D-B / Paper Shadow Strategy Validation v0)
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `right_tail` | `False` |
+| `llm` | `False` (default) |
+| `llm_outbound_enabled` | `False` (default) |
+| `telegram_outbound_enabled` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `sandbox_only` | `True` |
+| `allow_trade_decision` | `False` |
+| `allow_runtime_config_change` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `trade_authority` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+### Allowed event types (added by this phase, all report/export/replay scope)
+
+- `PAPER_SHADOW_SAMPLE_CREATED`
+- `PAPER_SHADOW_COHORT_EVALUATED`
+- `PAPER_SHADOW_REPORT_GENERATED`
+
+No trade-action events are added. No event is wired into the
+runtime hot path. No database schema or migration is touched.
+
+### Allowed recommendation levels (closed taxonomy)
+
+```
+REVIEW_ONLY
+PROMISING_FOR_FORWARD_TEST
+INCONCLUSIVE
+RISKY
+REJECTED_BY_EVIDENCE
+```
+
+`APPLY`, `DEPLOY`, `ENABLE_LIVE`, `TRADE`, `BUY`, `SELL`,
+`GO_LIVE`, `AUTO_APPLY` are intentionally NOT defined and the
+engine refuses to ever emit them.
+
+### Forbidden by this phase (verbatim)
+
+- Do not modify `app/risk/**`, `app/execution/**`,
+  `app/exchanges/**`, `app/telegram/**`, or `app/config/**`.
+- Do not write back to runtime config.
+- Do not modify `symbol_limit`, anomaly thresholds,
+  `candidate_pool`, or Regime weights.
+- Do not generate `runtime_config_patch`, `threshold_patch`,
+  `symbol_limit_patch`, `candidate_pool_patch`,
+  `regime_weight_patch`, or `strategy_parameter_patch`.
+- Do not output `buy`, `sell`, `long`, `short`, `direction`,
+  `entry`, `exit`, `position_size`, `leverage`, `stop`,
+  `stop_loss`, `target`, `take_profit`, `risk_budget`, `order`,
+  `execution_command`, `signal_to_trade`, `should_buy`,
+  `should_short`, `apply_change`, `deploy_change`, or
+  `enable_live`.
+- Do not call DeepSeek / LLM / network endpoints.
+- Do not send Telegram messages.
+- Do not touch the Binance private API.
+- Do not auto-tune.
+- Do not enter Phase 12.
+
+### Allowed transitions
+
+| From | To | Allowed? |
+| --- | --- | --- |
+| Phase 11C.1D-B IN_REVIEW | Phase 11C.1D-B ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-B IN_REVIEW | Risk / Execution / Capital Safety Matrix preparation | After a successful paper shadow run with at least one `PROMISING_FOR_FORWARD_TEST` cohort; transition itself is the next phase's responsibility. |
+| Phase 11C.1D-B IN_REVIEW | Strict walk-forward preparation | After a successful paper shadow run with at least one `PROMISING_FOR_FORWARD_TEST` cohort; transition itself is the next phase's responsibility. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+A `recommendation_level` of `PROMISING_FOR_FORWARD_TEST` does
+**not** authorise a forward-test run on its own — it only marks
+the cohort as a candidate for the next phase's preparation work.
+The forward-test phase itself is out of scope for Phase 11C.1D-B.
+
+### Tests
+
+`python -m pytest tests/unit/test_paper_shadow_strategy_validation.py -q`
+ships **22 PASSING** tests covering the full safety contract for
+this phase;
+`python -m pytest tests/unit -q` reports **3368 PASSING** tests, 0
+failures (was 3346 before this phase; +22 from this phase).
