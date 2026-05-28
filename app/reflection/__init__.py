@@ -64,6 +64,19 @@ from app.reflection.adaptive_11c import (
     AdaptiveReflectionTag,
     Reflection11CAdaptiveEngine,
 )
+from app.reflection.ai_reflection import (
+    AI_REFLECTION_CASE_GENERATED,
+    AI_REFLECTION_SUMMARY_GENERATED,
+    AIReflectionCase,
+    AIReflectionSeverity,
+    AIReflectionSummary,
+    AIReflectionTag,
+    AIReplayReflectionEngine,
+    FORBIDDEN_REFLECTION_TAGS,
+    reflect_replay_case,
+    reflect_replay_cases,
+    replay_and_reflect_artefacts,
+)
 from app.reflection.engine import ReflectionConfig, ReflectionEngine
 from app.reflection.metrics import (
     MetricResult,
@@ -115,4 +128,16 @@ __all__ = [
     "AdaptiveReflectionForbiddenFieldError",
     "ADAPTIVE_REFLECTION_EVENT_TYPES",
     "FORBIDDEN_REFLECTION_PAYLOAD_KEYS",
+    # Phase AI-6 - AI Reflection Integration v0
+    "AI_REFLECTION_CASE_GENERATED",
+    "AI_REFLECTION_SUMMARY_GENERATED",
+    "AIReflectionCase",
+    "AIReflectionSeverity",
+    "AIReflectionSummary",
+    "AIReflectionTag",
+    "AIReplayReflectionEngine",
+    "FORBIDDEN_REFLECTION_TAGS",
+    "reflect_replay_case",
+    "reflect_replay_cases",
+    "replay_and_reflect_artefacts",
 ]

@@ -7,6 +7,340 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase AI-6 — AI Replay / Reflection Integration v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / sandbox-only).
+**Runtime effect:** **none on real trading.** Two new
+read-only modules `app/replay/ai_replay.py` and
+`app/reflection/ai_reflection.py` are added alongside the
+existing Phase 10A / 10B / 11C replay / reflection surfaces,
+with `app/replay/__init__.py` and
+`app/reflection/__init__.py` extended to re-export the
+Phase AI-6 public surface, plus a matching unit-test module
+under `tests/unit/test_ai_replay_reflection_integration.py`
+(164 tests). No file under `app/risk/`, `app/execution/`,
+`app/exchanges/`, `app/telegram/`, `app/config/`, no file
+under `app/ai/`, no event type already wired into the
+runtime, no database schema / migration is touched. The
+modules are read-only at runtime: they never append,
+mutate, or reorder rows in `events.db`; they never produce
+direction, sizing, leverage, stop, target, or risk-budget
+fields; they never produce a `runtime_config_patch`; and
+they never call any LLM / DeepSeek / network transport. No
+runtime knob (`symbol_limit`, anomaly threshold, candidate
+pool capacity, Regime weights) is changed.
+**Phase ledger effect:** opens Phase AI-6 as **`IN_REVIEW`**
+(not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`llm_outbound_enabled=False`, `sandbox_only=True`,
+`allow_trade_decision=False`,
+`allow_runtime_config_change=False`,
+`require_evidence_refs=True`,
+`require_reality_check=True`,
+`stateless_inference=True`,
+`feedback_isolation=True`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no
+API secret, no signed endpoint, no private WebSocket, no
+`listenKey`, no DeepSeek trade decision, no real DeepSeek
+HTTP transport, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Auto-tuning effect:** **none.**
+`auto_tuning_allowed=False` is hard-pinned at every
+`to_dict()` boundary even if a caller flips the dataclass
+field. The recursive `_assert_no_forbidden_fields` guard
+refuses to emit any payload carrying a `*_patch` key.
+**AI output isolation:** every emitted payload re-pins
+`ai_output_can_be_truth=False`,
+`ai_output_can_be_training_label=False`,
+`ai_output_can_be_tail_label=False`,
+`ai_output_can_be_strategy_sample=False`,
+`ai_output_is_commentary_only=True` at every `to_dict()`
+boundary even if a caller flips the dataclass field via
+`object.__setattr__`.
+**Successor allowed:** later (separately gated) **AI
+Integrated Checkpoint** that aggregates Phase AI-1 / AI-2 /
+AI-3 / AI-4 / AI-5 / AI-6 outputs into one offline audit
+report. **NOT** the real DeepSeek HTTP transport. **NOT**
+DeepSeek trade decisions. **NOT** the AI Layer's
+involvement in the Risk Engine. **NOT** the AI Layer's
+involvement in the Execution FSM. **NOT** auto-tuning.
+**NOT** real Telegram outbound. **NOT** Operator Briefing
+live publishing. **NOT** Rule Sandbox. **NOT** Paper
+Shadow. **NOT** Phase 12.
+
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).** This slice ships
+> the AI Layer's first **audit integration** runtime
+> artefact — the AI Replay / Reflection Integration v0.
+> The integration consumes the Phase AI-1
+> :class:`AIEvidenceBundle`, the Phase AI-4
+> :class:`AIIntelligenceOutput`, the Phase AI-5
+> :class:`OperatorBriefing`, and the Phase AI-5
+> :class:`EvidenceCompressionReport` JSON artefacts and
+> projects them into structural :class:`AIReplayCase`
+> value objects (one per artefact); aggregates the cases
+> into one :class:`AIReplaySummary`; reflects each case
+> through the closed :class:`AIReflectionTag` vocabulary
+> into one :class:`AIReflectionCase`; and aggregates the
+> reflection cases into one
+> :class:`AIReflectionSummary`. The integration NEVER
+> imports `app.risk` / `app.execution` / `app.exchanges` /
+> `app.telegram` / `app.config`; it NEVER reads private
+> exchange / account state; it NEVER carries an API
+> secret in any logged / exported / serialised payload;
+> it NEVER authorises a trade decision or auto-tuning.
+> The maximum any case can reach is *commentary
+> substrate* — **AI output cannot become Truth Layer
+> fact, training label, tail label, or strategy
+> validation sample**. The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced
+> in code AND in tests. **Phase 12 remains FORBIDDEN.**
+> The Risk Engine remains the single trade-decision gate.
+
+#### Added
+
+- `app/replay/ai_replay.py` — paper / pure /
+  deterministic replay module. Ships:
+  - `AIReplaySourceKind` closed string vocabulary with 4
+    values: `evidence_bundle`, `ai_intelligence_output`,
+    `operator_briefing`, `evidence_compression_report`.
+  - `AIReplayCase` frozen dataclass with the brief-
+    mandated fields: `case_id`, `bundle_id`,
+    `ai_output_id`, `task_type`, `source_kind`,
+    `source_report_paths`, `claim_count`,
+    `supported_claim_count`, `unsupported_claim_count`,
+    `contradicted_claim_count`, `degraded_claim_count`,
+    `rejected_claim_count`,
+    `reality_check_status_summary`, `evidence_refs`,
+    `forbidden_fields_stripped`,
+    `redacted_secret_count`, `risk_tags`,
+    `notable_symbols`, `warnings`, `degraded_reasons`,
+    `timestamp_utc`, plus the hard-pinned
+    `trade_authority=False`,
+    `auto_tuning_allowed=False`,
+    `phase_12_forbidden=True`,
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_truth=False`,
+    `ai_output_can_be_training_label=False`,
+    `ai_output_can_be_tail_label=False`,
+    `ai_output_can_be_strategy_sample=False` flags.
+    Re-pinned at every `to_dict()` boundary even if a
+    caller flips the dataclass field via
+    `object.__setattr__`.
+  - `AIReplaySummary` frozen dataclass with the brief-
+    mandated counts: `total_cases`,
+    `evidence_bundle_count`,
+    `ai_intelligence_output_count`,
+    `operator_briefing_count`,
+    `evidence_compression_count`,
+    `supported_claim_count`,
+    `unsupported_claim_count`,
+    `contradicted_claim_count`,
+    `reality_check_failed_count`,
+    `missing_evidence_count`,
+    `forbidden_field_stripped_count`,
+    `degraded_run_count`, `redacted_secret_count`,
+    `evidence_refs`, `notable_symbols`, `warnings`,
+    `cases`.
+  - `AIReplayBuilder` (and the
+    `build_ai_replay_case` /
+    `build_ai_replay_summary` convenience wrappers) —
+    deterministic; auto-detects source kind from the
+    artefact's `source_module` / shape; never invents
+    a missing `evidence_refs` entry; never paraphrases
+    a claim_text; never imports the Risk / Execution /
+    Exchange / Telegram / Config / LLM / network
+    surfaces; refuses payloads carrying forbidden
+    trade-action / runtime-config-patch keys via the
+    Phase AI-1 recursive
+    `_assert_no_forbidden_fields` guard.
+  - Closed event-type string constants
+    `AI_REPLAY_CASE_RECONSTRUCTED` and
+    `AI_REPLAY_SUMMARY_GENERATED`. Neither is wired
+    into the runtime hot path; they are not registered
+    in `app.core.events.EventType`.
+- `app/reflection/ai_reflection.py` — paper / pure /
+  deterministic reflection module. Ships:
+  - `AIReflectionTag` closed string enum with 10
+    allowed values: `ai_helpful_explanation`,
+    `ai_unsupported_claim`,
+    `ai_contradicted_by_truth_layer`,
+    `ai_reality_check_failed`,
+    `ai_evidence_missing`,
+    `ai_narrative_pollution_risk`,
+    `ai_forbidden_field_stripped`,
+    `ai_degraded_output`,
+    `ai_operator_briefing_generated`,
+    `ai_evidence_compression_generated`. The
+    brief-forbidden tags `ai_said_buy`,
+    `ai_said_long`, `ai_target_hit`,
+    `ai_direction_correct`,
+    `ai_trade_signal_correct` are intentionally
+    **omitted** from the enum.
+  - `FORBIDDEN_REFLECTION_TAGS` frozenset that exposes
+    the 5 forbidden tag strings for downstream audit.
+  - `AIReflectionSeverity` closed string enum with 5
+    values: `info`, `low`, `medium`, `high`,
+    `unknown`.
+  - `AIReflectionCase` frozen dataclass with
+    `case_id`, `bundle_id`, `ai_output_id`,
+    `source_kind`, `tags`, `severity`,
+    `evidence_refs`, `needs_operator_review`,
+    `warnings`, plus the hard-pinned
+    `trade_authority=False`,
+    `auto_tuning_allowed=False`,
+    `phase_12_forbidden=True`,
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_truth=False`,
+    `ai_output_can_be_training_label=False`,
+    `ai_output_can_be_tail_label=False`,
+    `ai_output_can_be_strategy_sample=False` flags.
+    Re-pinned at every `to_dict()` boundary even if a
+    caller flips the dataclass field via
+    `object.__setattr__`.
+  - `AIReflectionSummary` frozen dataclass with
+    `total_cases`, `tag_counts`, `severity_counts`,
+    `needs_operator_review_count`, `evidence_refs`,
+    `warnings`, `cases`.
+  - `AIReplayReflectionEngine` — stateless one-shot
+    engine combining replay + reflection. Public
+    surface: `reflect_replay_case`,
+    `reflect_replay_cases`, `replay_and_reflect`.
+    Convenience module-level wrappers:
+    `reflect_replay_case`, `reflect_replay_cases`,
+    `replay_and_reflect_artefacts`.
+  - Closed event-type string constants
+    `AI_REFLECTION_CASE_GENERATED` and
+    `AI_REFLECTION_SUMMARY_GENERATED`. Neither is
+    wired into the runtime hot path; they are not
+    registered in `app.core.events.EventType`.
+- `app/replay/__init__.py` — extended re-exports for the
+  Phase AI-6 public API alongside the existing Phase 10A /
+  11C surfaces:
+  `AI_REPLAY_CASE_RECONSTRUCTED`,
+  `AI_REPLAY_SUMMARY_GENERATED`,
+  `AIReplayBuilder`, `AIReplayCase`,
+  `AIReplaySourceKind`, `AIReplaySummary`,
+  `build_ai_replay_case`, `build_ai_replay_summary`.
+- `app/reflection/__init__.py` — extended re-exports for
+  the Phase AI-6 public API alongside the existing
+  Phase 10B / 11C surfaces:
+  `AI_REFLECTION_CASE_GENERATED`,
+  `AI_REFLECTION_SUMMARY_GENERATED`,
+  `AIReflectionCase`, `AIReflectionSeverity`,
+  `AIReflectionSummary`, `AIReflectionTag`,
+  `AIReplayReflectionEngine`,
+  `FORBIDDEN_REFLECTION_TAGS`,
+  `reflect_replay_case`, `reflect_replay_cases`,
+  `replay_and_reflect_artefacts`.
+- `tests/unit/test_ai_replay_reflection_integration.py`
+  (177 cases) covering every brief-mandated scenario:
+  builds replay case from operator briefing /
+  evidence-compression / AI-intelligence /
+  evidence-bundle artefacts; preserves `evidence_refs`
+  on replay AND reflection; unsupported claims create
+  `AI_UNSUPPORTED_CLAIM` tag; contradicted claims
+  create `AI_CONTRADICTED_BY_TRUTH_LAYER` tag; failed
+  Reality Check creates `AI_REALITY_CHECK_FAILED` tag
+  (parametrised over `CONTRADICTED` and
+  `REJECTED_LOOKAHEAD` paths); missing evidence
+  creates `AI_EVIDENCE_MISSING` tag (parametrised over
+  the degraded-claims path and the no-refs-with-claims
+  path); forbidden fields stripped creates
+  `AI_FORBIDDEN_FIELD_STRIPPED` tag; AI output cannot
+  become truth / training label / tail label /
+  strategy validation sample (parametrised over 4
+  flags on both replay and reflection cases, with
+  mutation defence verified via `object.__setattr__`);
+  `trade_authority=False`,
+  `auto_tuning_allowed=False`,
+  `phase_12_forbidden=True` (asserted on replay,
+  reflection, and summary payloads); forbidden fields
+  absent at every nesting depth (parametrised over 29
+  fields on both replay and reflection); a smuggled
+  forbidden key (`leverage` / `runtime_config_patch`)
+  in the intake mapping causes `build_ai_replay_case`
+  to raise; no Risk / Execution / Exchanges / Telegram
+  / Config consumer of Phase AI-6 modules
+  (parametrised over 5 packages, AST + string scan);
+  JSON output serializable (4 dataclass kinds);
+  deterministic output (same input ⇒ identical
+  `to_dict()` and `json.dumps()`); forbidden imports
+  absent on both Phase AI-6 modules (parametrised over
+  13 forbidden packages including `app.risk`,
+  `app.execution`, `app.exchanges`, `app.telegram`,
+  `app.config`, `openai`, `anthropic`, `deepseek`,
+  `httpx`, `requests`, `aiohttp`, `urllib3`,
+  `websocket`, `websockets`, `grpc`, `boto3`,
+  `socket`); no live LLM / DeepSeek call shape
+  (parametrised string scan); forbidden reflection
+  tags never emitted (parametrised over 5 forbidden
+  tags); allowed reflection tags present in enum
+  (parametrised over 10 allowed tags); event-type
+  constants are correct strings; replay summary
+  evidence_refs de-duplicated; replay builder rejects
+  non-Mapping inputs; reflection engine rejects
+  non-`AIReplayCase` inputs; replay artefact accepts
+  objects with a `to_dict()` method; replay summary
+  counts match inputs; reflection summary tag counts
+  cover both `OPERATOR_BRIEFING_GENERATED` and
+  `EVIDENCE_COMPRESSION_GENERATED`; replay case
+  round-trip JSON preserves every documented field.
+- `docs/PHASE_AI_6_REPLAY_REFLECTION_INTEGRATION.md` —
+  this phase's design document.
+
+#### Changed
+
+- `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+  `docs/CHANGELOG.md` (this entry) updated to reflect
+  Phase AI-6 = **IN_REVIEW**.
+
+#### Tests
+
+- `python -m pytest tests/unit/test_ai_replay_reflection_integration.py -q`:
+  PASS.
+- `python -m pytest tests/unit -q`: 3305 PASS / 0 fail
+  (was 3141 before this phase; +164 from this phase).
+
+#### Safety boundary (held end-to-end)
+
+- `mode = paper`
+- `live_trading = False`
+- `exchange_live_orders = False`
+- `right_tail = False`
+- `llm = False`
+- `llm_outbound_enabled = False`
+- `sandbox_only = True`
+- `allow_trade_decision = False`
+- `allow_runtime_config_change = False`
+- `require_evidence_refs = True`
+- `require_reality_check = True`
+- `stateless_inference = True`
+- `feedback_isolation = True`
+- `telegram_outbound_enabled = False`
+- `binance_private_api_enabled = False`
+- no Binance API key / secret
+- no signed endpoint
+- no private WebSocket
+- no `listenKey`
+- no real Telegram outbound
+- no DeepSeek trade decision
+- no real DeepSeek HTTP transport
+- **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
+#### Phase status
+
+Phase AI-6 = **IN_REVIEW** after this implementation PR.
+Not `ACCEPTED`. Not live ready. Not trade authority granted.
+Not real DeepSeek HTTP transport. Not Operator Briefing live
+publishing. Not Rule Sandbox. Not Paper Shadow. Not
+auto-tuning. **Phase 12 = FORBIDDEN.**
+
 ### Phase AI-5 — Operator Briefing / Evidence Compression v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / sandbox-only).
