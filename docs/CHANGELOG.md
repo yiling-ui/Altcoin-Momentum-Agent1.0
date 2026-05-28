@@ -7,6 +7,270 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase AI-5 — Operator Briefing / Evidence Compression v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / sandbox-only).
+**Runtime effect:** **none on real trading.** Two new
+read-only modules `app/ai/operator_briefing.py` and
+`app/ai/evidence_compression.py` are added alongside the
+existing `app/ai/evidence_bundle.py` (Phase AI-1),
+`app/ai/claim_contract.py` (Phase AI-2),
+`app/ai/reality_check.py` (Phase AI-3),
+`app/ai/intelligence_schema.py` (Phase AI-4), and
+`app/ai/deepseek_sandbox.py` (Phase AI-4), with
+`app/ai/__init__.py` extended to re-export the Phase AI-5
+public surface, plus a new offline CLI runner
+`scripts/run_ai_operator_briefing.py` and a matching
+unit-test module under
+`tests/unit/test_ai_operator_briefing.py` (113 tests). No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`,
+`app/ai/evidence_bundle.py`, `app/ai/claim_contract.py`,
+`app/ai/reality_check.py`,
+`app/ai/intelligence_schema.py`, or
+`app/ai/deepseek_sandbox.py`, no event type already wired
+into the runtime, no database schema / migration is touched.
+The modules are read-only at runtime: they never append,
+mutate, or reorder rows in `events.db`; they never produce
+direction, sizing, leverage, stop, target, or risk-budget
+fields; they never produce a `runtime_config_patch`; and
+they never call any LLM / DeepSeek / network transport. No
+runtime knob (`symbol_limit`, anomaly threshold, candidate
+pool capacity, Regime weights) is changed.
+**Phase ledger effect:** opens Phase AI-5 as **`IN_REVIEW`**
+(not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`llm_outbound_enabled=False`, `sandbox_only=True`,
+`allow_trade_decision=False`,
+`allow_runtime_config_change=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no
+API secret, no signed endpoint, no private WebSocket, no
+`listenKey`, no DeepSeek trade decision, no real DeepSeek
+HTTP transport, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Auto-tuning effect:** **none.**
+`auto_tuning_allowed=False` is hard-pinned at every
+`to_dict()` boundary even if a caller flips the dataclass
+field. The recursive `_assert_no_forbidden_fields` guard
+refuses to emit any payload carrying a `*_patch` key.
+**Successor allowed:** later (separately gated) **Phase AI-6
+Replay / Reflection Integration of AI outputs** that
+consumes the Phase AI-5 `OperatorBriefing` artefact and
+records it in the replay / reflection artefacts as an
+*annotation* (still paper / report / sandbox-only). **NOT**
+the real DeepSeek HTTP transport. **NOT** DeepSeek trade
+decisions. **NOT** the AI Layer's involvement in the Risk
+Engine. **NOT** the AI Layer's involvement in the Execution
+FSM. **NOT** auto-tuning. **NOT** real Telegram outbound.
+**NOT** Operator Briefing live publishing. **NOT** Phase 12.
+
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).** This slice ships
+> the AI Layer's first **human-readable operator briefing**
+> runtime artefact - the Operator Briefing / Evidence
+> Compression v0. The builder consumes a Phase AI-1
+> evidence bundle JSON, a Phase AI-4 sandbox output JSON,
+> and an optional Block C Integrated Checkpoint report
+> JSON; classifies every claim into the closed compression
+> vocabulary (`SUPPORTED` / `UNSUPPORTED` /
+> `DEGRADED_NO_EVIDENCE` / `REJECTED` / `CONTRADICTED` /
+> `COMMENTARY_ONLY`); groups findings into the closed
+> :class:`OperatorBriefingSection` vocabulary (12 values:
+> `EXECUTIVE_SUMMARY`, `MARKET_INTELLIGENCE`,
+> `DISCOVERY_QUALITY`, `COVERAGE_AUDIT`,
+> `POST_DISCOVERY_OUTCOME`, `REJECT_ATTRIBUTION`,
+> `SEVERE_MISS_TRIAGE`, `REPLAY_REFLECTION`,
+> `CONTRADICTIONS`, `UNSUPPORTED_CLAIMS`, `DATA_GAPS`,
+> `OPERATOR_ACTION_ITEMS`); strips forbidden trade-action
+> / runtime-config-patch fields (defence in depth);
+> redacts credential-shaped keys (defence in depth); and
+> emits two deterministic, JSON-serialisable artefacts:
+> :class:`OperatorBriefing` and
+> :class:`EvidenceCompressionReport`. The builder NEVER
+> imports `app.risk` / `app.execution` / `app.exchanges` /
+> `app.telegram` / `app.config`; it NEVER reads private
+> exchange / account state; it NEVER carries an API secret
+> in any logged / exported / serialised payload; it NEVER
+> authorises a trade decision or auto-tuning. The maximum
+> any briefing can reach is `COMMENTARY_SUBSTRATE`, which
+> is *commentary substrate* only — **no member of
+> `OperatorBriefingAuthorityLevel` grants trade authority**.
+> The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced
+> in code AND in tests. **Phase 12 remains FORBIDDEN.**
+> The Risk Engine remains the single trade-decision gate.
+
+#### Added
+
+- `app/ai/operator_briefing.py` — paper / pure /
+  deterministic schema and helpers. Ships:
+  - `OperatorBriefingSection` closed enum with 12 values:
+    `EXECUTIVE_SUMMARY`, `MARKET_INTELLIGENCE`,
+    `DISCOVERY_QUALITY`, `COVERAGE_AUDIT`,
+    `POST_DISCOVERY_OUTCOME`, `REJECT_ATTRIBUTION`,
+    `SEVERE_MISS_TRIAGE`, `REPLAY_REFLECTION`,
+    `CONTRADICTIONS`, `UNSUPPORTED_CLAIMS`, `DATA_GAPS`,
+    `OPERATOR_ACTION_ITEMS`.
+  - `OperatorBriefingAuthorityLevel` closed enum with 4
+    values: `COMMENTARY_SUBSTRATE`,
+    `DEGRADED_PARTIAL_EVIDENCE`,
+    `DEGRADED_NO_EVIDENCE`, `REJECTED`. **No member
+    grants trade authority.**
+  - `OperatorBriefingFinding` frozen dataclass with
+    `finding_id`, `section`, `headline`, `detail`,
+    `classification`, `evidence_refs`,
+    `related_claim_ids`, `review_only=True` (hard-pinned
+    at every `to_dict()` boundary).
+  - `OperatorBriefingSectionRecord` frozen dataclass.
+  - `OperatorBriefing` frozen dataclass with
+    `briefing_id`, `created_at_utc`, `reference_window`,
+    `source_bundle_id`, `source_ai_output_id`,
+    `source_block_c_status`, `source_report_paths`,
+    `sections`, `key_findings`, `unsupported_claims`,
+    `contradictions`, `data_gaps`,
+    `operator_review_items`, `evidence_refs`,
+    `notable_symbols`, `risk_tags`, `authority_level`,
+    `forbidden_fields_stripped`, `redacted_secret_count`,
+    `warnings`, `consumer_contract`, plus the
+    hard-pinned `trade_authority=False`,
+    `auto_tuning_allowed=False`,
+    `phase_12_forbidden=True`,
+    `stateless_inference=True`,
+    `feedback_isolation=True`,
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_training_label=False` flags.
+    Re-pinned at every `to_dict()` boundary even if a
+    caller flips the dataclass field.
+  - `OperatorBriefingBuilder` (and the
+    `build_operator_briefing` convenience wrapper) —
+    deterministic; classifies every AI-4 claim into the
+    closed compression vocabulary; groups findings into
+    the closed section vocabulary; never invents a
+    missing `evidence_refs` entry; never paraphrases
+    `claim_text`; runs `strip_forbidden_fields` and
+    `redact_secrets` as defence in depth; never calls an
+    LLM / DeepSeek; never opens a network socket; never
+    reads or carries API secrets; never reads private
+    exchange / account state; never authorises a trade
+    decision or auto-tuning.
+  - `render_operator_briefing_markdown` helper.
+  - Closed event-type constants:
+    `AI_OPERATOR_BRIEFING_GENERATED`,
+    `AI_EVIDENCE_COMPRESSION_GENERATED`,
+    `AI_UNSUPPORTED_CLAIMS_SUMMARIZED`. None are wired
+    into the runtime hot path.
+- `app/ai/evidence_compression.py` — paper / pure /
+  deterministic schema and helpers. Ships:
+  - `CompressedClaim` frozen dataclass preserving
+    `claim_id`, `claim_type`, `claim_text` (verbatim),
+    `evidence_refs`, `truth_layer_fields_used`,
+    `citation_authority_level`, `reality_check_status`,
+    `reality_check_authority_level`, `classification`,
+    `confidence_raw`, `confidence_reality_checked`,
+    `warnings`.
+  - `EvidenceCompressionReport` frozen dataclass with
+    `report_id`, `created_at_utc`, `reference_window`,
+    `source_bundle_id`, `source_ai_output_id`,
+    `summary`, `compressed_claims`, `supported_claims`,
+    `degraded_claims`, `rejected_claims`,
+    `contradictions`, `unsupported_claims`,
+    `reality_check_summary`,
+    `evidence_quality_summary`, `data_gap_summary`,
+    `notable_symbols`, `risk_tags`, `evidence_refs`,
+    `forbidden_fields_stripped`,
+    `redacted_secret_count`, `warnings`, plus the
+    hard-pinned `trade_authority=False`,
+    `auto_tuning_allowed=False`,
+    `phase_12_forbidden=True`,
+    `stateless_inference=True`,
+    `feedback_isolation=True`,
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_training_label=False` flags.
+  - `EvidenceCompressionReportBuilder` (and the
+    `build_evidence_compression_report` convenience
+    wrapper).
+  - `classify_claim` helper that maps Phase AI-2
+    citation authority + Phase AI-3 Reality Check status
+    into the closed compression vocabulary
+    (`CLAIM_CLASS_SUPPORTED`,
+    `CLAIM_CLASS_UNSUPPORTED`,
+    `CLAIM_CLASS_DEGRADED_NO_EVIDENCE`,
+    `CLAIM_CLASS_REJECTED`,
+    `CLAIM_CLASS_CONTRADICTED`,
+    `CLAIM_CLASS_COMMENTARY_ONLY`).
+  - `render_evidence_compression_report_markdown` helper.
+- `app/ai/__init__.py` — extended re-exports for the
+  Phase AI-5 public API alongside the Phase AI-1 +
+  AI-2 + AI-3 + AI-4 surfaces.
+- `scripts/run_ai_operator_briefing.py` — paper /
+  read-only / no-network offline runner. Reads a Phase
+  AI-1 evidence bundle JSON, a Phase AI-4 sandbox output
+  JSON, and an optional Block C Integrated Checkpoint
+  report JSON; writes
+  `<output-dir>/operator_briefing.json`,
+  `<output-dir>/operator_briefing.md`,
+  `<output-dir>/evidence_compression_report.json`,
+  `<output-dir>/evidence_compression_report.md`. Imports
+  nothing from `app.risk`, `app.execution`,
+  `app.exchanges`, `app.telegram`, or `app.config`.
+- `tests/unit/test_ai_operator_briefing.py` — 113 unit
+  tests covering every brief-mandated scenario:
+  - builds operator briefing from evidence bundle +
+    sandbox output;
+  - preserves evidence_refs;
+  - unsupported claims appear in the
+    `UNSUPPORTED_CLAIMS` section, NEVER in
+    `key_findings`;
+  - rejected / contradicted claims do not become
+    supported findings;
+  - data gaps surfaced;
+  - operator action items are review-only (no
+    `buy`/`sell`/`long`/`short`/`enter`/`exit`/
+    `place_order`/`open_position`/`close_position`/
+    `execute` prefixes);
+  - forbidden fields stripped (parametrised over 25
+    fields) and absent in clean briefing payloads;
+  - `trade_authority=False`, `auto_tuning_allowed=False`,
+    `phase_12_forbidden=True`,
+    `stateless_inference=True`,
+    `feedback_isolation=True` re-pinned at every
+    `to_dict()` boundary even if the dataclass field is
+    flipped via `object.__setattr__`;
+  - no Telegram outbound (AST imports + string scan);
+  - no Risk / Execution / Exchanges / Telegram / Config
+    consumer of `app.ai` (parametrised over 5 packages);
+  - credential-shaped values redacted; private account
+    state tokens absent;
+  - Markdown output non-empty;
+  - JSON round-trips;
+  - same input produces same output (deterministic);
+  - no live LLM / DeepSeek call shape;
+  - defensive companions for `classify_claim` paths,
+    authority-level transitions, claim_type → section
+    mapping, consumer_contract assertions, notable
+    symbol extraction.
+- `docs/PHASE_AI_5_OPERATOR_BRIEFING_EVIDENCE_COMPRESSION.md` —
+  this phase's design document.
+
+#### Tests
+
+- `python -m pytest tests/unit/test_ai_operator_briefing.py -q`
+  → 113/113 PASS.
+- `python -m pytest tests/unit -q` → 3128/3128 PASS, no
+  regression vs. post-PR-#85 main 3015 baseline; +113 new
+  tests on the new modules.
+
+#### Phase status
+
+Phase AI-5 = **IN_REVIEW** after this implementation PR.
+Not `ACCEPTED`. Not live ready. Not trade authority granted.
+Not real DeepSeek HTTP transport. Not Operator Briefing
+live publishing. Not Rule Sandbox. Not Paper Shadow. Not
+auto-tuning. **Phase 12 = FORBIDDEN.**
+
 ### Phase AI-4 — DeepSeek Offline Sandbox v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / sandbox-only).
