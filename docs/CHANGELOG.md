@@ -7,6 +7,244 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase AI-3 — Reality Check Layer v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / read-only).
+**Runtime effect:** **none on real trading.** A new read-only
+module `app/ai/reality_check.py` is added alongside the existing
+`app/ai/evidence_bundle.py` (Phase AI-1) and
+`app/ai/claim_contract.py` (Phase AI-2), with `app/ai/__init__.py`
+extended to re-export the Phase AI-3 public surface, and a
+matching unit-test module under
+`tests/unit/test_ai_reality_check_layer.py` (70 tests). No file
+under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, `app/ai/evidence_bundle.py`,
+`app/ai/claim_contract.py`, no event type, no database schema /
+migration is touched. The module is read-only: it never appends,
+mutates, or reorders rows in `events.db`; it never produces
+direction, sizing, leverage, stop, target, or risk-budget fields;
+it never produces a `runtime_config_patch`; and it never calls an
+LLM / DeepSeek / Telegram outbound. No runtime knob
+(`symbol_limit`, anomaly threshold, candidate pool capacity,
+Regime weights) is changed.
+**Phase ledger effect:** opens Phase AI-3 as **`IN_REVIEW`**
+(not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`,
+no DeepSeek trade decision, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Auto-tuning effect:** **none.** `auto_tuning_allowed=false` is
+hard-pinned at every `to_dict()` boundary even if a caller flips
+the dataclass field. The recursive `_assert_no_forbidden_fields`
+guard refuses to emit any payload carrying a `*_patch` key.
+**Successor allowed:** later (separately gated) **Phase AI-4
+DeepSeek Offline Sandbox** that consumes the Reality Check
+substrate plus the Phase AI-1 Evidence Bundle in an offline /
+sandboxed environment. **NOT** the runtime hot path. **NOT**
+DeepSeek trade decisions. **NOT** the AI Layer's involvement in
+the Risk Engine. **NOT** the AI Layer's involvement in the
+Execution FSM. **NOT** auto-tuning. **NOT** real Telegram
+outbound. **NOT** Phase 12.
+
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).** This slice ships the
+> AI Layer's *deterministic / statistical* Reality Check
+> verifier. Having `evidence_refs` is necessary but **not
+> sufficient**; an AI claim is also cross-checked against
+> the Truth Layer that its `evidence_refs` point at, plus
+> the market / system-behavior / outcome facts pinned in the
+> Phase AI-1 Evidence Bundle. Reality Check is **not** an
+> LLM, **not** a DeepSeek client, **not** a network
+> transport, and **not** a prompt template. Claims with
+> citations but no facts are demoted to
+> `INSUFFICIENT_EVIDENCE`; claims that contradict the bundle
+> are demoted to `CONTRADICTED` (or `PARTIALLY_SUPPORTED`
+> for single-axis contradictions); claims that smuggle
+> unverifiable narrative ("smart money is definitely
+> entering" / "whales are accumulating" / "faith is
+> returning" / "main force intention is clear") with no
+> computable backing are rejected via
+> `REJECTED_UNVERIFIABLE_NARRATIVE`; claims that depend on a
+> future / unsealed window are rejected via
+> `REJECTED_LOOKAHEAD`. Confidence calibration is always
+> non-increasing
+> (`confidence_reality_checked <= confidence_raw`). The
+> maximum authority any claim can reach is
+> `SUPPORTED_INTELLIGENCE`, which is *commentary substrate*
+> only — **no member of `AIRealityCheckAuthorityLevel`
+> grants trade authority**. The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced in
+> code AND in tests. **Phase 12 remains FORBIDDEN.** The Risk
+> Engine remains the single trade-decision gate.
+
+#### Added
+
+- `app/ai/reality_check.py` — paper / pure / deterministic
+  schema, engine, and recursive guards. Ships:
+  - `AIRealityCheckStatus` closed enum with 6 values:
+    `SUPPORTED`, `PARTIALLY_SUPPORTED`, `CONTRADICTED`,
+    `INSUFFICIENT_EVIDENCE`, `REJECTED_LOOKAHEAD`,
+    `REJECTED_UNVERIFIABLE_NARRATIVE`. **No member carries
+    trade-action semantics.**
+  - `AIRealityCheckCategory` closed enum with 7 values:
+    `STATISTICAL_VERIFICATION`,
+    `MICROSTRUCTURE_VALIDATION`, `CONFIDENCE_CALIBRATION`,
+    `CONTRADICTION_DETECTION`,
+    `ADVERSARIAL_EVIDENCE_CHECK`, `LOOKAHEAD_GUARD`,
+    `NARRATIVE_POLLUTION_GUARD`.
+  - `AIRealityCheckAuthorityLevel` closed enum with 4
+    values: `SUPPORTED_INTELLIGENCE`,
+    `UNSUPPORTED_INTELLIGENCE`, `DEGRADED_NO_EVIDENCE`,
+    `REJECTED_BY_REALITY_CHECK`. **No member grants trade
+    authority.** The maximum any claim can reach is
+    `SUPPORTED_INTELLIGENCE`, which is *commentary
+    substrate* only.
+  - `AIRealityCheckInput` / `AIRealityCheckResult` frozen
+    dataclasses preserving `claim_id`, `claim_type`,
+    `claim_text`, `evidence_refs`,
+    `truth_layer_fields_used`, `authority_level`,
+    `confidence_raw`, `evidence_bundle_facts`,
+    `market_facts`, `system_behavior_facts`,
+    `outcome_facts`, `lookahead_policy`, plus the
+    engine-emitted `status`, `categories_checked`,
+    `supporting_evidence_refs`,
+    `contradicting_evidence_refs`,
+    `confidence_reality_checked`,
+    `authority_level_after_check`, `degradation_reason`,
+    `warnings`, plus the hard-pinned
+    `auto_tuning_allowed=false`,
+    `phase_12_forbidden=true`,
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_training_label=False` flags.
+    Re-pinned at every `to_dict()` boundary even if the
+    dataclass field is mutated.
+  - `AIRealityCheckEngine` (and the `reality_check_claim`
+    convenience wrapper) — deterministic; coerces every
+    input to a JSON-serializable form; runs the seven
+    verification axes in fixed order (Lookahead Guard →
+    Narrative Pollution Guard → Statistical Verification →
+    Contradiction Detection → Microstructure Validation →
+    Adversarial Evidence Check → Confidence Calibration);
+    emits `confidence_reality_checked <= confidence_raw`
+    always; clamps raw confidence to `[0.0, 1.0]` first;
+    never invents supporting / contradicting evidence_refs
+    beyond what the producer cited; runs the recursive
+    `_assert_no_forbidden_fields` guard at the
+    serialisation boundary.
+  - Closed lookahead-policy vocabulary: required flags
+    (`frozen_evidence_only`, `no_future_market_data`,
+    `no_training_from_ai_output`, `no_runtime_feedback`,
+    `post_hoc_analysis_only_when_window_closed`) MUST be
+    `True`; forbidden flags
+    (`live_inference_uses_future_outcome`,
+    `uses_unsealed_window`, `uses_future_market_data`,
+    `trains_from_ai_output`) MUST be absent or `False`.
+  - Closed unverifiable-narrative vocabulary
+    ("smart money is definitely entering" / "whales are
+    accumulating" / "faith is returning" / "main force
+    intention is clear" / "definitely entering" /
+    "obviously bullish" / "without a doubt" /
+    "guaranteed to" plus 8 close variants).
+  - Closed contradiction-signal vocabulary tied to the
+    Phase AI-1 fact groups (`market_facts.breadth_weak`,
+    `market_facts.data_gap_severe`,
+    `market_facts.data_gap_rate >= 0.5`,
+    `system_behavior_facts.late_chase_high`,
+    `system_behavior_facts.late_chase_rate >= 0.5`,
+    `system_behavior_facts.fake_breakout_rising`,
+    `system_behavior_facts.funding_overheated`,
+    `outcome_facts.failed_continuation`,
+    `outcome_facts.missed_strong_tail_rate >= 0.5`).
+  - Re-uses the recursive `_assert_no_forbidden_fields`
+    output guard from `app.ai.evidence_bundle` against
+    `buy`, `sell`, `long`, `short`, `direction`, `side`,
+    `entry`, `exit`, `position_size`, `leverage`, `stop`,
+    `stop_loss`, `stop_price`, `target`, `target_price`,
+    `take_profit`, `risk_budget`, `order`, `order_type`,
+    `execution_command`, `runtime_config_patch`,
+    `symbol_limit_patch`, `threshold_patch`,
+    `candidate_pool_patch`, `regime_weight_patch`,
+    `strategy_parameter_patch`, `signal_to_trade`,
+    `should_buy`, `should_short`, plus defensive aliases
+    `trading_approved`, `live_ready`,
+    `live_trading_allowed`. Re-exported as
+    `FORBIDDEN_REALITY_CHECK_FIELDS`.
+  - Does NOT import `app.risk`, `app.execution`,
+    `app.exchanges`, `app.llm`, `app.telegram`, or
+    `app.config` (AST-checked). Does NOT import `openai`,
+    `anthropic`, `deepseek`, `httpx`, `requests`, `aiohttp`,
+    `urllib3`, `websocket`, `websockets`, `grpc`, `boto3`,
+    or `socket` (AST-checked). Source contains no
+    `deepseek.` / `DeepSeekClient(` / `call_deepseek(` /
+    `requests.get(` / `httpx.post(` /
+    `aiohttp.ClientSession(` /
+    `websocket.create_connection(` shape (string-checked).
+- `app/ai/__init__.py` — extended to re-export the Phase AI-3
+  public API alongside the Phase AI-1 + AI-2 surface:
+  `AIRealityCheckStatus`, `AIRealityCheckCategory`,
+  `AIRealityCheckAuthorityLevel`, `AIRealityCheckInput`,
+  `AIRealityCheckResult`, `AIRealityCheckEngine`,
+  `reality_check_claim`, `FORBIDDEN_REALITY_CHECK_FIELDS`,
+  `AI_REALITY_CHECK_SCHEMA_VERSION`,
+  `AI_REALITY_CHECK_SOURCE_PHASE`,
+  `AI_REALITY_CHECK_SOURCE_MODULE`.
+- `tests/unit/test_ai_reality_check_layer.py` (70 cases)
+  covering every brief-mandated scenario: supported claim →
+  `SUPPORTED`, partial support → confidence downgrade,
+  contradicted → `CONTRADICTED` / `REJECTED_BY_REALITY_CHECK`,
+  missing evidence → `INSUFFICIENT_EVIDENCE`, lookahead
+  violation → `REJECTED_LOOKAHEAD`, unverifiable narrative →
+  `REJECTED_UNVERIFIABLE_NARRATIVE`,
+  `confidence_reality_checked <= confidence_raw`, no-trade-
+  authority on result, forbidden-fields absent on serialised
+  payload (parametrised over 25 fields), forbidden imports
+  (`app.risk`/`app.execution`/`app.exchanges`/`app.llm`/
+  `app.telegram`/`app.config`) absent, no LLM / DeepSeek /
+  HTTP / network call path (AST + source + public-callable
+  check), deterministic output across six status classes,
+  defensive companions (closed enum coverage, Mapping-input
+  coercion, string-flag honoured by Lookahead Guard,
+  supporting / contradicting refs are subset of input refs,
+  invariants re-pinned at `to_dict()` after dataclass
+  mutation).
+- `docs/PHASE_AI_3_REALITY_CHECK_LAYER.md` — new phase doc.
+
+#### Changed
+
+- `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+  `docs/CHANGELOG.md` (this entry) updated to reflect Phase
+  AI-3 = **IN_REVIEW**.
+
+#### Tests
+
+- `python -m pytest tests/unit/test_ai_reality_check_layer.py -q`:
+  70 PASS / 0 fail.
+- `python -m pytest tests/unit -q`: 2921 PASS / 0 fail (was
+  2851 before this phase; +70 from this phase).
+
+#### Safety boundary (held end-to-end)
+
+- `mode = paper`
+- `live_trading = False`
+- `exchange_live_orders = False`
+- `right_tail = False`
+- `llm = False`
+- `telegram_outbound_enabled = False`
+- `binance_private_api_enabled = False`
+- no Binance API key / secret
+- no signed endpoint
+- no private WebSocket
+- no `listenKey`
+- no real Telegram outbound
+- no DeepSeek trade decision
+- **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
 ### Phase AI-2 — Truth Layer / AI Evidence Citation Contract v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / read-only).

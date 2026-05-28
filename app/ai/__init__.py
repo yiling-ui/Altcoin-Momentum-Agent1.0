@@ -21,6 +21,20 @@ contract:
     authority any claim can reach is
     :attr:`AIClaimAuthorityLevel.SUPPORTED_INTELLIGENCE`,
     which is *commentary substrate* only.
+  - **Phase AI-3** :mod:`app.ai.reality_check` - the
+    *deterministic / statistical* Reality Check Layer that
+    cross-verifies an AI claim against the Phase AI-1
+    Evidence Bundle's frozen facts. Having ``evidence_refs``
+    is necessary but not sufficient; a claim must also be
+    supported by the bundle's market / system-behavior /
+    outcome facts. Reality Check produces a closed
+    :class:`AIRealityCheckStatus` and a downgraded
+    :class:`AIRealityCheckAuthorityLevel`, never invokes an
+    LLM, never opens a network socket, and never authorises
+    a trade decision or auto-tuning. The maximum authority a
+    claim can reach after Reality Check is
+    :attr:`AIRealityCheckAuthorityLevel.SUPPORTED_INTELLIGENCE`,
+    which is *commentary substrate* only.
 
 Both phases enforce the four AI root constraints from
 ``docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md``:
@@ -69,6 +83,19 @@ from app.ai.claim_contract import (
     AIClaimType,
     validate_ai_claims,
 )
+from app.ai.reality_check import (
+    AI_REALITY_CHECK_SCHEMA_VERSION,
+    AI_REALITY_CHECK_SOURCE_MODULE,
+    AI_REALITY_CHECK_SOURCE_PHASE,
+    FORBIDDEN_REALITY_CHECK_FIELDS,
+    AIRealityCheckAuthorityLevel,
+    AIRealityCheckCategory,
+    AIRealityCheckEngine,
+    AIRealityCheckInput,
+    AIRealityCheckResult,
+    AIRealityCheckStatus,
+    reality_check_claim,
+)
 from app.ai.evidence_bundle import (
     AI_EVIDENCE_BUNDLE_SCHEMA_VERSION,
     AI_EVIDENCE_BUNDLE_SOURCE_MODULE,
@@ -88,7 +115,6 @@ from app.ai.evidence_bundle import (
     ForbiddenAIInputError,
     build_ai_evidence_bundle,
 )
-
 __all__ = [
     # Phase AI-1 - AI Evidence Bundle Builder v0.
     "AI_EVIDENCE_BUNDLE_SCHEMA_VERSION",
@@ -122,4 +148,16 @@ __all__ = [
     "SUPPORTED_EVIDENCE_REF_FORMATS",
     "SUPPORTED_EVIDENCE_REF_PREFIXES",
     "validate_ai_claims",
+    # Phase AI-3 - Reality Check Layer v0.
+    "AI_REALITY_CHECK_SCHEMA_VERSION",
+    "AI_REALITY_CHECK_SOURCE_MODULE",
+    "AI_REALITY_CHECK_SOURCE_PHASE",
+    "AIRealityCheckAuthorityLevel",
+    "AIRealityCheckCategory",
+    "AIRealityCheckEngine",
+    "AIRealityCheckInput",
+    "AIRealityCheckResult",
+    "AIRealityCheckStatus",
+    "FORBIDDEN_REALITY_CHECK_FIELDS",
+    "reality_check_claim",
 ]
