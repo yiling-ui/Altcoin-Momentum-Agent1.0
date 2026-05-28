@@ -7,6 +7,36 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-E-A — Replay Extension for 11C Adaptive Events v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / replay / report-only).
+**Runtime effect:** **none on real trading.** A new read-only
+module `app/replay/adaptive_replay_11c.py` is added and re-exported
+from `app/replay/__init__.py`. A matching unit-test module under
+`tests/unit/test_replay_11c_adaptive_events.py` is added. No file
+under `app/risk/`, `app/execution/`, `app/exchanges/`, `app/llm/`,
+`app/telegram/`, `app/config/`, or any database schema / migration
+is touched. The replay extension is read-only: it never appends,
+mutates, or reorders rows in `events.db`; it never produces
+direction, sizing, leverage, stop, target, or risk-budget fields;
+and it never produces a `runtime_config_patch`. No runtime knob
+(`symbol_limit`, anomaly threshold, candidate pool capacity, Regime
+weights) is changed.
+**Phase ledger effect:** opens Phase 11C.1C-C-B-B-B-E-A as
+**`IN_REVIEW`** (not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`,
+no DeepSeek trade decision, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Successor allowed:** only Phase 11C.1C-C-B-B-B-E-B *Reflection
+Extension for 11C Adaptive Events v0*. No other phase is unlocked.
+**Tests:** `python -m pytest tests/unit/test_replay_11c_adaptive_events.py -q`
+(25 tests, all pass) and `python -m pytest tests/unit -q` (full
+unit suite green).
+
 ### Phase 11C.1C-C-B-B-B-D-E — Block B Integrated Evidence Checkpoint v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence only).

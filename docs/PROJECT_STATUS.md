@@ -3649,3 +3649,66 @@ hold: `mode=paper`, `live_trading=False`, `right_tail=False`,
 Binance API secret, no signed endpoint, no private WebSocket,
 no `listenKey`, no DeepSeek trade decision, no real Telegram
 outbound.
+
+
+
+
+## Phase 11C.1C-C-B-B-B-E-A — Replay Extension for 11C Adaptive Events v0 (IN_REVIEW)
+
+Phase 11C.1C-C-B-B-B-E-A *Replay Extension for 11C Adaptive Events
+v0* opens as **IN_REVIEW** with this implementation PR. The phase is
+the first block of Block C1 (Replay Extension) and is the only phase
+the Block B Integrated Evidence Checkpoint
+(`PARTIAL_EVIDENCE`, `next_allowed_phase = Phase 11C.1C-C-B-B-B-E-A`)
+authorised.
+
+### What changed
+
+  - Added `app/replay/adaptive_replay_11c.py`, a read-only replay
+    extension that reconstructs the Phase 11C adaptive / discovery /
+    evidence event chain into eight deterministic value objects
+    (`ReplayDiscoveryTimeline`, `ReplayCandidateLifecycle`,
+    `ReplayTailOutcome`, `ReplayMoverCoverageCase`,
+    `ReplayPostDiscoveryOutcomeCase`, `ReplayRejectAttributionCase`,
+    `ReplaySevereMissCase`, `ReplayDiscoveryQualityCase`) plus an
+    aggregate `AdaptiveReplayBundle`.
+  - Wired the new symbols through `app/replay/__init__.py`.
+  - Added `tests/unit/test_replay_11c_adaptive_events.py` covering
+    the brief's ten required tests (LABEL / TAIL_LABEL,
+    HISTORICAL_MOVER_COVERAGE, POST_DISCOVERY_OUTCOME,
+    REJECT_TO_OUTCOME, SEVERE_MISSED_TAIL, DISCOVERY_QUALITY,
+    missing-fields-do-not-crash, replay-count-equals-input-count,
+    forbidden-imports, forbidden-fields-absent).
+  - Added `docs/PHASE_11C_1C_C_B_B_B_E_A_REPLAY_EXTENSION_11C_EVENTS.md`
+    as the phase design / acceptance doc.
+
+### Forbidden / not done in this phase
+
+  - Reflection (Phase 11C.1C-C-B-B-B-E-B) is **not** started.
+  - DeepSeek is **not** wired in.
+  - Auto-tuning is **not** enabled (replay payloads explicitly carry
+    `auto_tuning_allowed=False` where applicable).
+  - No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+    `app/llm/`, `app/telegram/`, or `app/config/` is touched.
+  - No change to `symbol_limit`, anomaly thresholds, `candidate_pool`,
+    or regime weights.
+  - No `runtime_config_patch` is produced.
+  - No `buy` / `sell` / `long` / `short` / `position_size` /
+    `leverage` / `stop` / `target` / `risk_budget` field is produced.
+  - **Phase 12 remains FORBIDDEN.**
+
+### Safety boundary (held)
+
+`mode=paper`, `live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`, no Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`, no
+real Telegram outbound, no DeepSeek trade decision. The Risk Engine
+remains the single trade-decision gate.
+
+### Successor allowed by this phase
+
+Only **Phase 11C.1C-C-B-B-B-E-B Reflection Extension for 11C
+Adaptive Events v0** is unlocked by a successful Phase
+11C.1C-C-B-B-B-E-A. No other phase is unlocked. Phase 12 remains
+**FORBIDDEN**.

@@ -5282,3 +5282,101 @@ The Risk Engine remains the single trade-decision gate.
   - **No paper run / export / replay / historical builder
     invoked.**
   - **No real API contacted.**
+
+
+
+
+## Phase 11C.1C-C-B-B-B-E-A — Replay Extension for 11C Adaptive Events v0 (IN_REVIEW)
+
+**Status:** IN_REVIEW (implementation PR; awaits maintainer review).
+**Block:** Block C1 (Replay Extension v0).
+**Predecessors:** Block A complete; Block B implementation chain
+complete (D-A, D-B, B1.1, B2-A, B2-B, B3); Block B Integrated
+Evidence Checkpoint = `PARTIAL_EVIDENCE` with
+`next_allowed_phase = Phase 11C.1C-C-B-B-B-E-A`,
+`phase_12_forbidden = True`, `auto_tuning_allowed = False`,
+`known_blockers = []`. Block C1 is therefore allowed.
+**Successor allowed by this phase:** Phase 11C.1C-C-B-B-B-E-B
+*Reflection Extension for 11C Adaptive Events v0*. **No other
+phase is unlocked.**
+
+### What this phase does
+
+Adds a read-only replay extension under `app/replay/` that
+reconstructs the Phase 11C adaptive / discovery / evidence event
+chain into eight deterministic value objects:
+
+  - `ReplayDiscoveryTimeline`
+  - `ReplayCandidateLifecycle`
+  - `ReplayTailOutcome`
+  - `ReplayMoverCoverageCase`
+  - `ReplayPostDiscoveryOutcomeCase`
+  - `ReplayRejectAttributionCase`
+  - `ReplaySevereMissCase`
+  - `ReplayDiscoveryQualityCase`
+
+The supported event groups are `LABEL_*`, `TAIL_LABEL_*`,
+`MISSED_TAIL_*`, `FAKE_BREAKOUT_*`, `STRATEGY_VALIDATION_*`,
+`PAPER_ALPHA_*`, `REGIME_CLUSTER_*`, `MOVER_CAPTURE_*`,
+`HISTORICAL_MOVER_COVERAGE_*`, `POST_DISCOVERY_OUTCOME_*`,
+`REJECT_TO_OUTCOME_*`, `SEVERE_MISSED_TAIL_*`, and
+`DISCOVERY_QUALITY_*`.
+
+### What this phase does NOT do
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise auto-tuning. The replay extension
+    explicitly carries `auto_tuning_allowed=False` where applicable
+    and never produces a `runtime_config_patch`.
+  - It does **NOT** close out cloud evidence.
+  - It does **NOT** start Reflection (Phase 11C.1C-C-B-B-B-E-B).
+  - It does **NOT** wire in DeepSeek.
+  - It does **NOT** unlock Phase 12. Phase 12 remains **FORBIDDEN**.
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+### Forbidden modifications (held end-to-end)
+
+  - no edit under `app/risk/**`
+  - no edit under `app/execution/**`
+  - no edit under `app/exchanges/**`
+  - no edit under `app/llm/**`
+  - no edit under `app/telegram/**`
+  - no edit under `app/config/**`
+  - no change to `symbol_limit`
+  - no change to anomaly thresholds
+  - no change to `candidate_pool`
+  - no change to regime weights
+  - no `runtime_config_patch` produced
+  - no buy / sell / long / short / position_size / leverage /
+    stop / target / risk_budget produced
+
+### Acceptance signal
+
+The implementation PR ships:
+
+  - `app/replay/adaptive_replay_11c.py` (new module)
+  - `tests/unit/test_replay_11c_adaptive_events.py` (new test
+    module covering the brief's 10 numbered checks)
+  - `docs/PHASE_11C_1C_C_B_B_B_E_A_REPLAY_EXTENSION_11C_EVENTS.md`
+    (this phase's design + acceptance doc)
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` updates
+
+The phase is marked **IN_REVIEW** here. Maintainer-led review of
+the implementation PR is the only path to **ACCEPTED**.
