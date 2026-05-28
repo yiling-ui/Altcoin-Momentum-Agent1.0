@@ -7,6 +7,136 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C — Offline Rule Sandbox Replay v0
+> (*离线规则沙箱回放 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+>
+> Block A is complete. Block B is complete and the Block B
+> Integrated Evidence Checkpoint is `PARTIAL_EVIDENCE`. Block
+> C is complete and the Block C Integrated Checkpoint produced
+> `status=EVIDENCE_GENERATED`. The Phase AI-1 → AI-6 chain is
+> merged and the AI Integrated Checkpoint produced
+> `status=PARTIAL_EVIDENCE` with `known_blockers=[]`,
+> `phase_12_forbidden=true`, `auto_tuning_allowed=false`,
+> `trade_authority=false`,
+> `next_allowed_phase = Offline Rule Sandbox Replay
+> preparation / AI operator evidence run`. The project is
+> therefore allowed to enter the **Offline Rule Sandbox
+> Replay v0** — the deterministic offline counterfactual
+> layer that lets an operator project the likely impact of
+> a hypothetical rule change on **discovery quality** over a
+> frozen historical reference window — but only as
+> commentary substrate that an auditor can review. The
+> project is still **paper only** and Phase 12 remains
+> **FORBIDDEN**.
+>
+> This slice ships the **Offline Rule Sandbox Replay v0** —
+> one new package `app/sandbox/` with the
+> :class:`OfflineRuleSandboxScenario` /
+> :class:`HypotheticalRuleChange` /
+> :class:`OfflineRuleSandboxInput` /
+> :class:`OfflineRuleSandboxResult` /
+> :class:`OfflineRuleSandboxReport` /
+> :class:`OfflineRuleSandboxEngine` value objects and engine,
+> one runner `scripts/run_offline_rule_sandbox_replay.py`,
+> one unit-test module
+> `tests/unit/test_offline_rule_sandbox_replay.py` covering
+> the brief's fifteen numbered checks, and one phase doc
+> `docs/PHASE_11C_OFFLINE_RULE_SANDBOX_REPLAY.md`. The
+> engine reads only frozen JSON files supplied by the
+> runner (Block B / Block C / AI integrated checkpoint
+> reports plus optional baseline / outcome / reject /
+> severe-miss / replay / reflection summaries) plus a
+> scenario file describing one or more hypothetical rule
+> changes, projects each rule change onto the baseline
+> metrics through a closed deterministic impact table, and
+> emits one descriptive
+> `offline_rule_sandbox_report.json` (plus its Markdown
+> twin) carrying baseline / sandbox / delta metrics,
+> likely_benefits / likely_risks / overfit_warnings /
+> data_gap_warnings, and one of five closed
+> recommendation levels (`REVIEW_ONLY` / `INCONCLUSIVE` /
+> `PROMISING_FOR_PAPER_SHADOW` / `RISKY` /
+> `REJECTED_BY_EVIDENCE`). The recommendation vocabulary
+> intentionally **excludes** `APPLY` / `DEPLOY` /
+> `ENABLE_LIVE` / `TRADE` / `BUY` / `SELL` and the
+> recursive `_assert_no_forbidden_keys` guard refuses to
+> emit any payload that carries one of the
+> `FORBIDDEN_SANDBOX_PAYLOAD_KEYS` at any nesting depth.
+>
+> The runner imports only `app.sandbox.offline_rule_sandbox`.
+> It does **NOT** import `app.risk`, `app.execution`,
+> `app.exchanges`, `app.telegram`, or `app.config`. It does
+> **NOT** import any HTTP / network library (`openai`,
+> `anthropic`, `deepseek`, `httpx`, `requests`, `aiohttp`,
+> `urllib3`, `websocket`, `websockets`, `grpc`, `boto3`,
+> `socket`). A unit test additionally monkeypatches
+> `socket.socket` to refuse-on-call and runs the full
+> runner path to prove no socket is opened. Every emitted
+> payload re-pins the project-wide invariants at the
+> serialisation boundary (`mode=paper`,
+> `live_trading=False`, `exchange_live_orders=False`,
+> `right_tail=False`, `llm=False`,
+> `llm_outbound_enabled=False`, `sandbox_only=True`,
+> `allow_trade_decision=False`,
+> `allow_runtime_config_change=False`,
+> `auto_tuning_allowed=False`,
+> `telegram_outbound_enabled=False`,
+> `binance_private_api_enabled=False`,
+> `trade_authority=False`,
+> `writes_runtime_config=False`,
+> `phase_12_forbidden=True`,
+> `ai_output_can_be_truth=False`,
+> `ai_output_can_be_training_label=False`,
+> `ai_output_can_be_tail_label=False`,
+> `ai_output_can_be_strategy_sample=False`).
+>
+> The hypothetical-rule-change dataclass is named
+> `HypotheticalRuleChange` (NOT `runtime_config_patch` /
+> `threshold_patch`) and additionally pins
+> `is_runtime_patch=False`,
+> `writes_runtime_config=False`,
+> `auto_tuning_allowed=False` so a downstream consumer
+> cannot misread it as a patch. The closed
+> `change_type` vocabulary is restricted to
+> `loosen` / `tighten` / `no_change`.
+>
+> Per-scenario status taxonomy (intentionally **not**
+> `ACCEPTED`):
+>
+>   - `EVALUATED` — the engine projected at least one
+>     rule change against a non-empty baseline.
+>   - `INCONCLUSIVE` — no rule change could be projected
+>     (e.g. every change was `no_change`).
+>   - `INSUFFICIENT_EVIDENCE` — neither baseline metrics
+>     nor rule changes were usable.
+>
+> Closed recommendation-level vocabulary:
+> `REVIEW_ONLY`, `INCONCLUSIVE`,
+> `PROMISING_FOR_PAPER_SHADOW`, `RISKY`,
+> `REJECTED_BY_EVIDENCE`.
+>
+> A successful sandbox scenario
+> (`recommendation_level = PROMISING_FOR_PAPER_SHADOW`)
+> only authorises the **Paper Shadow Strategy Validation
+> preparation** work (paper / read-only). It does **NOT**
+> authorise live trading. It does **NOT** authorise
+> auto-tuning. It does **NOT** authorise runtime-config
+> writeback. It does **NOT** authorise the DeepSeek hot
+> path. It does **NOT** authorise Telegram live outbound.
+> It does **NOT** open Phase 12. **Phase 12 remains
+> FORBIDDEN.**
+>
+> Files shipped: `app/sandbox/__init__.py`,
+> `app/sandbox/offline_rule_sandbox.py`,
+> `scripts/run_offline_rule_sandbox_replay.py`,
+> `tests/unit/test_offline_rule_sandbox_replay.py`,
+> `docs/PHASE_11C_OFFLINE_RULE_SANDBOX_REPLAY.md`.
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase AI-CHECKPOINT — AI Integrated Checkpoint v0
 > (*AI 综合检查点 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not
