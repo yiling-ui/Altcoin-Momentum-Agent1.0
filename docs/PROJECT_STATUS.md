@@ -7,6 +7,211 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-E — Block B Integrated Evidence
+> Checkpoint v0 (*Block B 综合证据检查点 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until evidence closeout).**
+>
+> Block B (the D-A → D-B → B1.1 → B2-A → B2-B → B3 sequence)
+> has shipped six paper / report / evidence-only slices: D-A
+> Historical 60D Mover Coverage Backfill Audit
+> (`ACCEPTED / PARTIAL_QUALITY / TOOLCHAIN_CLOSEOUT_ONLY`),
+> D-B Post-Discovery Outcome Metrics
+> (`ACCEPTED_TOOLCHAIN / PARTIAL_QUALITY / PRICE_PATH_INSUFFICIENT`),
+> B1.1 Historical Price Path / Kline Path Adapter
+> (`ACCEPTED_TOOLCHAIN / PARTIAL_DATA_COVERAGE / DAILY_BUCKET_ONLY`),
+> B2-A Reject-to-Outcome Attribution (IN_REVIEW), B2-B Severe
+> Missed Tail Triage (IN_REVIEW), and B3 Discovery Quality
+> Scorecard (IN_REVIEW). The project still lacked a single
+> descriptive aggregated report that an operator can read at-
+> a-glance to answer: "Is Block B *as a whole* in a state where
+> it is sane to open the Block C Replay / Reflection extension
+> for 11C Adaptive Events, or do we need more operator evidence
+> first?". This slice ships that aggregation as a paper /
+> report / evidence-only Block B Integrated Evidence Checkpoint
+> v0.
+>
+> The checkpoint reads only local artefacts under
+> `data/reports/`, `data/reports/exports/`, and
+> `data/reports/post_discovery_outcome/`. It connects to no
+> network, calls no LLM / DeepSeek, and opens no Telegram
+> socket. It produces one
+> `block_b_integrated_evidence_report.json` and one
+> `block_b_integrated_evidence_report.md` under
+> `data/reports/block_b_integrated_evidence/`.
+>
+> Status taxonomy is intentionally **not** `ACCEPTED`:
+> `INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` /
+> `EVIDENCE_GENERATED`. `next_allowed_phase` is either
+> `Phase 11C.1C-C-B-B-B-E-A Replay Extension for 11C Adaptive
+> Events v0` (paper / evidence only) or
+> `NEEDS_OPERATOR_EVIDENCE`. The runner **never** authorises
+> Phase 12 and **never** authorises auto-tuning;
+> `phase_12_forbidden = true` and `auto_tuning_allowed = false`
+> are hard-pinned on every emitted payload.
+>
+> **NOT** live trading. **NOT** AI Learning. **NOT**
+> automatic parameter optimisation. **NOT** reinforcement
+> learning. **NOT** rule relaxation based on the integrated
+> status. **NOT** automatic `symbol_limit` expansion.
+> **NOT** automatic anomaly threshold changes. **NOT**
+> automatic candidate-pool capacity changes. **NOT**
+> automatic Regime weight changes. **NOT** a Risk Engine
+> change. **NOT** an Execution FSM change. **NOT** a
+> direction call (long / short / entry / exit / stop /
+> target / position size / leverage). **NOT** a per-phase
+> `ACCEPTED` gate (per-phase closeouts retain their own
+> `ACCEPTED_TOOLCHAIN` / `PARTIAL_QUALITY` /
+> `BLOCK_B_CHECKPOINT_ONLY` labels). **NOT** evidence
+> closeout (separate later PR). **NOT** the Block C Replay /
+> Reflection extension implementation (that is the
+> *next-allowed* phase, not part of this PR). **NOT** the
+> DeepSeek integration. **NOT** Phase 12. The Risk Engine
+> remains the single trade-decision gate.
+>
+> ### What this PR ships
+>
+>   - New runner
+>     `scripts/run_block_b_integrated_evidence_checkpoint.py`
+>     (paper / report / evidence only):
+>       - reads existing `events.jsonl` / `*.jsonl` files
+>         under `--reports-dir` / `--exports-dir` /
+>         `--post-discovery-dir`;
+>       - reads the most recent
+>         `post_discovery_outcome_report.json`;
+>       - aggregates the simplified D-A / D-B / B1.1 / B2-A /
+>         B2-B / B3 outputs into one descriptive
+>         `block_b_integrated_evidence_report.json` (and
+>         matching `.md` summary);
+>       - emits one of the three closed statuses
+>         (`INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` /
+>         `EVIDENCE_GENERATED`);
+>       - emits the corresponding `next_allowed_phase`
+>         (Block C Replay / Reflection extension or
+>         `NEEDS_OPERATOR_EVIDENCE`);
+>       - never imports `app.risk` / `app.execution` /
+>         `app.exchanges` / `app.llm` / `app.telegram`;
+>       - reuses the existing
+>         `app.adaptive.discovery_quality_scorecard`
+>         engine + the recursive
+>         `assert_payload_has_no_forbidden_keys` guard.
+>   - New unit-test module
+>     `tests/unit/test_block_b_integrated_evidence_checkpoint.py`
+>     (13 cases) covering every brief-mandated acceptance
+>     test: `INSUFFICIENT_EVIDENCE` on empty workspace,
+>     `PARTIAL_EVIDENCE` when D-B post-discovery is missing
+>     OR data-gap is high, `EVIDENCE_GENERATED` when every
+>     component is present, `next_allowed_phase` correct,
+>     `phase_12_forbidden = true` on every payload,
+>     `auto_tuning_allowed = false` on every payload, no
+>     forbidden trade-authority / runtime-tuning keys on any
+>     payload, no banned imports
+>     (`app.risk` / `app.execution` / `app.exchanges` /
+>     `app.llm` / `app.telegram`), CLI exit-codes correct.
+>   - New phase doc
+>     `docs/PHASE_11C_1C_C_B_B_B_D_E_BLOCK_B_INTEGRATED_EVIDENCE_CHECKPOINT.md`.
+>
+> ### What this PR does NOT ship
+>
+>   - No change to `app/risk/`, `app/execution/`,
+>     `app/exchanges/`, `app/llm/`, `app/telegram/`,
+>     `app/config/`.
+>   - No change to `symbol_limit`, anomaly thresholds,
+>     candidate-pool capacity, Regime weights, or any
+>     other runtime knob.
+>   - No new private API surface, no signed endpoint, no
+>     `listenKey`, no real Telegram outbound, no DeepSeek
+>     trade decision.
+>   - No automatic parameter tuning. No "looking at the
+>     answer key" against the post-hoc D-A reference set.
+>   - No new `app/adaptive/` engine. The runner reuses the
+>     existing `build_discovery_quality_scorecard` builder
+>     and the existing
+>     `assert_payload_has_no_forbidden_keys` guard.
+>   - No new strategy. No new trading module. No new
+>     direction classification. No new sizing rule.
+>   - No real evidence closeout.
+>   - No Block C Replay / Reflection extension
+>     implementation (the *next-allowed* phase, not part of
+>     this PR).
+>   - No DeepSeek integration.
+>   - **No Phase 12.**
+>
+> ### Safety boundary (held end-to-end)
+>
+>   - `mode = paper`
+>   - `live_trading = False`
+>   - `exchange_live_orders = False`
+>   - `right_tail = False`
+>   - `llm = False`
+>   - `telegram_outbound_enabled = False`
+>   - `binance_private_api_enabled = False`
+>   - no Binance API key / secret
+>   - no signed endpoint
+>   - no private websocket
+>   - no `listenKey`
+>   - no real Telegram outbound
+>   - no DeepSeek trade decision
+>   - **Phase 12 = FORBIDDEN**
+>
+> **The Risk Engine remains the single trade-decision
+> gate.**
+>
+> ### Tests
+>
+>   - `tests/unit/test_block_b_integrated_evidence_checkpoint.py` —
+>     13/13 PASS.
+>   - Full `tests/unit` suite — 2600/2600 PASS (no
+>     regression vs. post-PR-#75 main 2587 baseline; +13
+>     new tests on the new module).
+>
+> ### Why the integrated checkpoint does NOT authorise live trading
+>
+> The checkpoint answers a *coverage / capture / outcome /
+> attribution / triage / discovery-quality* question at the
+> **evidence aggregation level**. It does **not** simulate
+> PnL, never reproduces a Risk Engine decision, never runs
+> an Execution FSM. A `status = EVIDENCE_GENERATED` does
+> **not** mean live trading is approved. A
+> `status = INSUFFICIENT_EVIDENCE` does **not** mean live
+> trading is *disapproved* either; live-trading approval is
+> a Phase 12 concern that requires the Spec §41 Go/No-Go
+> checklist, and the checklist has **not** been initiated.
+>
+> ### Why the integrated checkpoint does NOT authorise auto-tuning
+>
+> Every emitted checkpoint carries
+> `auto_tuning_allowed = false`. The constant is hard-pinned
+> in the runner source, the recursive forbidden-keys guard
+> refuses to emit any payload that contains a `*_patch`
+> key, and the runner never imports `app.risk` /
+> `app.execution` / `app.exchanges` / `app.llm` /
+> `app.telegram` / `app.config`. A `data_gap_count` counter
+> or a `false_negative_reject_count` counter does **not**
+> authorise the Risk Engine, the Execution FSM,
+> `symbol_limit`, the candidate pool, anomaly thresholds, or
+> Regime weights to be changed. Routing a case to the
+> operator review queue is a *human* decision, not an
+> automated one.
+>
+> ### Why a successful checkpoint authorises only Block C Replay / Reflection
+>
+> `status = EVIDENCE_GENERATED` (or `PARTIAL_EVIDENCE`)
+> opens **only** `Phase 11C.1C-C-B-B-B-E-A Replay
+> Extension for 11C Adaptive Events v0`. That phase is
+> itself paper / report / evidence-only. It extends the
+> existing Replay engine to play back the Block B adaptive
+> events (D-A / D-B / B1.1 / B2-A / B2-B / B3) over
+> previously captured event streams. It does **not** open
+> Phase 12, does **not** open DeepSeek trade decisions,
+> and does **not** open auto-tuning.
+> `status = INSUFFICIENT_EVIDENCE` opens nothing
+> automatically — the operator must collect more Block B
+> evidence before any later phase is reachable.
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-D — Discovery Quality
 > Scorecard v0 (*发现质量评分板 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not
