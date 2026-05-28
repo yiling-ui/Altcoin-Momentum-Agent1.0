@@ -7,6 +7,194 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-D-C-B — Severe Missed Tail Triage v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence only).
+**Runtime effect:** **none on real trading.** A new pure /
+deterministic engine in `app/adaptive/` and three new typed
+events in `app/core/events.py` are added. No file under
+`app/risk/`, `app/execution/`, `app/exchanges/`, `app/llm/`,
+`app/telegram/`, `app/config/`, or any database schema /
+migration is touched. No runtime knob (`symbol_limit`, anomaly
+threshold, candidate pool capacity, Regime weights) is changed.
+**Phase ledger effect:** opens Phase 11C.1C-C-B-B-B-D-C-B as
+**`IN_REVIEW`** (not `ACCEPTED` until evidence closeout).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `right_tail=False`, `llm=False`,
+`exchange_live_orders=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False` remain unchanged.
+**Trade authority granted:** **none.**
+**Phase 12:** **FORBIDDEN.**
+
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until evidence closeout).** Phase
+> 11C.1C-C-B-B-B-D-A described the *discovery* layer (did we
+> see the mover, when, how deep). Phase 11C.1C-C-B-B-B-D-B /
+> B.1 described the *post-discovery outcome* (how much room
+> remained after first sighting, with the daily-bucket
+> price-path adapter). Phase 11C.1C-C-B-B-B-D-C-A closed the
+> loop between candidate-level reject decisions and the
+> post-discovery outcome ("was the reject the right call?").
+> The project still lacked one piece: when a meaningful
+> mover such as `RAVEUSDT` or `STOUSDT` shows up in the
+> historical 60D mover reference set but not in the radar's
+> captured set, **why** did we miss it? This slice ships that
+> root-cause triage as a paper / report / evidence layer.
+> The triage emits, per audited severe miss, a closed
+> `SevereMissRootCause` (`UNIVERSE_GAP` / `SYMBOL_LIMIT_GAP`
+> / `CANDIDATE_POOL_EVICTED` / `THRESHOLD_TOO_STRICT` /
+> `PRE_ANOMALY_WEAK` / `ANOMALY_TOO_LATE` / `WS_DATA_GAP` /
+> `REST_REFERENCE_GAP` / `EVENT_HISTORY_MISSING` /
+> `PRICE_PATH_MISSING` / `PRICE_PATH_INSUFFICIENT` /
+> `NO_TOP_MOVER_ROW_COVERING_FIRST_SEEN_TIME` /
+> `RISK_REJECTED_PROTECTIVE` /
+> `RISK_REJECTED_FALSE_NEGATIVE` /
+> `STRATEGY_MODE_FALSE_NEGATIVE` / `LABEL_WINDOW_TOO_SHORT` /
+> `TRUE_DISCOVERY_FAILURE` / `INSUFFICIENT_EVIDENCE` /
+> `UNKNOWN`) plus a closed `SevereMissSeverity` (`LOW` /
+> `MEDIUM` / `HIGH` / `SEVERE` / `CRITICAL` /
+> `INSUFFICIENT_EVIDENCE`). Every record / report carries
+> `auto_tuning_allowed=False`. **Phase 12 remains FORBIDDEN.**
+
+#### Added
+
+  - `app/adaptive/severe_missed_tail_triage.py` (paper / pure /
+    deterministic):
+      - `SevereMissTriageInput`, `SevereMissTriageRecord`,
+        `SevereMissTriageReport`,
+        `SevereMissedTailTriageEngine`,
+        `SevereMissedTailTriageEngineConfig`.
+      - `SevereMissRootCause` closed string-constant taxonomy:
+        `UNIVERSE_GAP`, `SYMBOL_LIMIT_GAP`,
+        `CANDIDATE_POOL_EVICTED`, `THRESHOLD_TOO_STRICT`,
+        `PRE_ANOMALY_WEAK`, `ANOMALY_TOO_LATE`, `WS_DATA_GAP`,
+        `REST_REFERENCE_GAP`, `EVENT_HISTORY_MISSING`,
+        `PRICE_PATH_MISSING`, `PRICE_PATH_INSUFFICIENT`,
+        `NO_TOP_MOVER_ROW_COVERING_FIRST_SEEN_TIME`,
+        `RISK_REJECTED_PROTECTIVE`,
+        `RISK_REJECTED_FALSE_NEGATIVE`,
+        `STRATEGY_MODE_FALSE_NEGATIVE`,
+        `LABEL_WINDOW_TOO_SHORT`, `TRUE_DISCOVERY_FAILURE`,
+        `INSUFFICIENT_EVIDENCE`, `UNKNOWN`.
+      - `SevereMissSeverity` closed string-constant taxonomy:
+        `LOW`, `MEDIUM`, `HIGH`, `SEVERE`, `CRITICAL`,
+        `INSUFFICIENT_EVIDENCE`.
+      - Default severity map (`ROOT_CAUSE_DEFAULT_SEVERITY`)
+        binding each root cause to its triage routing severity.
+      - `assert_payload_has_no_forbidden_keys` recursive guard
+        against any trade-authority / runtime-tuning field
+        landing in a payload.
+      - Hard-pinned `auto_tuning_allowed=False` on every
+        emitted record / report.
+      - Triage decision-flow priority: insufficient_evidence →
+        universe_gap → symbol_limit_gap →
+        candidate_pool_evicted → price_path_missing →
+        risk_protective → risk_false_negative →
+        strategy_mode_false_negative → true_discovery_failure →
+        unknown.
+  - Three new typed events in `app/core/events.py` (paper /
+    report / evidence only):
+      - `EventType.SEVERE_MISSED_TAIL_TRIAGE_GENERATED`
+      - `EventType.SEVERE_MISSED_TAIL_ROOT_CAUSE_ASSIGNED`
+      - `EventType.SEVERE_MISS_ESCALATION_REQUIRED`
+  - Public exports added to `app/adaptive/__init__.py`.
+  - `tests/unit/test_severe_missed_tail_triage.py` — 22 cases
+    covering every brief-mandated acceptance test (price path
+    missing RAVE / STO style routes to data-recovery without
+    asserting threshold problem, candidate pool evicted,
+    symbol limit gap with `needs_rule_review=True` and
+    `auto_tuning_allowed=False`, universe gap, risk rejected
+    protective parametrised over 5 protective verdicts, risk
+    rejected false negative with severity `CRITICAL` and
+    `auto_tuning_allowed=False`, strategy mode false negative,
+    true discovery failure on positive MFE, insufficient
+    evidence refuses to fabricate, forbidden fields absent on
+    every record / report payload, no forbidden imports of
+    `app.risk` / `app.execution` / `app.exchanges` /
+    `app.llm` / `app.telegram`).
+  - Phase doc
+    `docs/PHASE_11C_1C_C_B_B_B_D_C_B_SEVERE_MISSED_TAIL_TRIAGE.md`.
+  - Phase status entry in `docs/PROJECT_STATUS.md`,
+    `docs/PHASE_GATE.md` Open / Reserved phases table, and
+    this changelog.
+
+#### Tests
+
+  - `python -m pytest tests/unit/test_severe_missed_tail_triage.py -q`
+    → **22 passed**.
+  - `python -m pytest tests/unit -q` → **2565 passed** (+22
+    vs. post-PR-#74 main 2543 baseline; no regression).
+
+#### Forbidden surface (verbatim)
+
+  - `app/risk/**`, `app/execution/**`, `app/exchanges/**`,
+    `app/llm/**`, `app/telegram/**`, `app/config/**`.
+  - `symbol_limit` / `candidate_pool` / anomaly threshold /
+    Regime-weight runtime knobs.
+  - Binance private API (no API key, no API secret, no signed
+    endpoint, no `listenKey`, no private WS).
+  - Live orders.
+  - Real Telegram outbound.
+  - DeepSeek / LLM trade decisions (direction, position size,
+    leverage, stop-loss, target price, execution command,
+    runtime config patch).
+  - Automatic parameter tuning (incl. `symbol_limit`
+    expansion, anomaly threshold change, candidate pool
+    capacity change, Regime weight change).
+  - Phase 12 (real money / live trading).
+
+#### Why this PR does NOT authorise auto-tuning
+
+A `RISK_REJECTED_FALSE_NEGATIVE` verdict (severity
+`CRITICAL`) is the strongest signal the layer can emit — and
+even there, the verdict reflects ONE candidate's outcome,
+not a portfolio of cases. Outcome volatility is high in
+altcoin momentum; rule changes affect every future
+candidate, not just the one in front of the reviewer.
+Touching the rule itself is **out of scope** for this
+phase. `auto_tuning_allowed` is hard-pinned to `False` on
+every emitted record and on every emitted report; the
+recursive `assert_payload_has_no_forbidden_keys` guard
+defends every emission point against a planted
+trade-authority / runtime-tuning field.
+
+#### Why `RAVEUSDT` / `STOUSDT` cannot yet be classified as parameter errors
+
+Under the B1 / B1.1 closeout, both symbols carry
+`price_path_loaded=false`, `source=absent`,
+`missing_reason=no_top_mover_row_covering_first_seen_time`.
+From that fact alone the layer cannot distinguish a true
+discovery failure, a risk-rejected false negative, a
+strategy-mode false negative, or a data gap. Asserting "the
+threshold is too strict" against a single coin from this
+evidence base would be **looking at the answer key** — the
+auto-tuning failure mode the brief explicitly forbids. Both
+symbols are therefore classified as
+`NO_TOP_MOVER_ROW_COVERING_FIRST_SEEN_TIME` /
+`MEDIUM` / `needs_data_recovery=True` /
+`needs_rule_review=False` / `auto_tuning_allowed=False` —
+data-gap triage candidates only.
+
+#### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
 ### Phase 11C.1C-C-B-B-B-D-C-A — Reject-to-Outcome Attribution v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence only).
