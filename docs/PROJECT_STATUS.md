@@ -7,6 +7,116 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-E-D — Block C Integrated Checkpoint v0
+> (*Block C 综合检查点 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until the eventual whole-block Block C closeout).**
+>
+> Block C (the C1 → C2 → C3 sequence) has shipped three paper /
+> report / evidence-only slices: C1 *Replay Extension for 11C
+> Adaptive Events v0* (merged), C2 *Reflection Extension for 11C
+> Adaptive Events v0* (merged), and C3 *Evidence Contract Baseline
+> v0* (merged). The project still lacked a single descriptive
+> aggregated report that an operator can read at-a-glance to
+> answer: *"Are Replay + Reflection + Evidence Contract chained
+> together end-to-end well enough to start the AI read-only
+> evidence-bundle prep, or do we need more operator evidence
+> first?"*. This slice ships that aggregation as a paper /
+> report / evidence-only Block C Integrated Checkpoint v0.
+>
+> The checkpoint reads only local artefacts under
+> `data/reports/`, `data/reports/exports/`, and
+> `data/reports/block_b_integrated_evidence/`. It connects to no
+> network, calls no LLM / DeepSeek, and opens no Telegram socket.
+> It produces one
+> `block_c_integrated_checkpoint_report.json` and one
+> `block_c_integrated_checkpoint_report.md` under
+> `data/reports/block_c_integrated_checkpoint/`.
+>
+> Status taxonomy is intentionally **not** `ACCEPTED`:
+> `INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` /
+> `EVIDENCE_GENERATED`. `next_allowed_phase` is either
+> `Phase AI-0 / AI Evidence Bundle preparation (paper / read-only)`
+> or `NEEDS_OPERATOR_EVIDENCE`. The runner **never** authorises
+> Phase 12 and **never** authorises auto-tuning;
+> `phase_12_forbidden = true` and `auto_tuning_allowed = false`
+> are hard-pinned on every emitted payload, asserted recursively
+> at the serialisation boundary alongside a closed forbidden-key
+> vocabulary.
+>
+> **NOT** live trading. **NOT** AI Learning. **NOT** automatic
+> parameter optimisation. **NOT** reinforcement learning. **NOT**
+> rule relaxation based on the integrated status. **NOT** automatic
+> `symbol_limit` expansion. **NOT** automatic anomaly threshold
+> changes. **NOT** automatic candidate-pool capacity changes.
+> **NOT** automatic Regime weight changes. **NOT** a Risk Engine
+> change. **NOT** an Execution FSM change. **NOT** a direction
+> call (long / short / entry / exit / stop / target / position
+> size / leverage). **NOT** the AI Evidence Bundle build itself
+> (that is the *next-allowed* phase, not part of this PR).
+> **NOT** Paper Shadow. **NOT** Rule Sandbox. **NOT** the
+> DeepSeek integration. **NOT** Phase 12. The Risk Engine
+> remains the single trade-decision gate.
+>
+> ### What this PR ships
+>
+>   - New runner
+>     `scripts/run_block_c_integrated_checkpoint.py`
+>     (paper / report / evidence only):
+>       - reads existing `events.jsonl` / `*.jsonl` files under
+>         `--reports-dir` / `--exports-dir`;
+>       - reads the most recent
+>         `block_b_integrated_evidence_report.json` under
+>         `--block-b-dir`;
+>       - drives the C1 replay builders, the C2
+>         `Reflection11CAdaptiveEngine`, and the C3
+>         `EvidenceContractValidator` on the loaded events;
+>       - emits one descriptive
+>         `block_c_integrated_checkpoint_report.json` (and
+>         matching `.md` summary);
+>       - emits one of the three closed statuses
+>         (`INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` /
+>         `EVIDENCE_GENERATED`);
+>       - emits the corresponding `next_allowed_phase`
+>         (AI Evidence Bundle preparation or
+>         `NEEDS_OPERATOR_EVIDENCE`);
+>       - never imports `app.risk` / `app.execution` /
+>         `app.exchanges` / `app.llm` / `app.telegram` /
+>         `app.config`;
+>       - reuses the already-merged C1 / C2 / C3 surfaces.
+>   - New unit-test module
+>     `tests/unit/test_block_c_integrated_checkpoint.py` (15
+>     cases) covering every brief-mandated acceptance point
+>     (no input → `INSUFFICIENT_EVIDENCE`, partial →
+>     `PARTIAL_EVIDENCE`, valid → `EVIDENCE_GENERATED`,
+>     `next_allowed_phase` mapping, `phase_12_forbidden=true`,
+>     `auto_tuning_allowed=false`, no forbidden trade-authority
+>     / runtime-tuning fields, no banned imports, evidence
+>     contract degraded-claim count, deterministic output)
+>     plus runner output paths, CLI exit codes, and event-group
+>     surfacing.
+>   - New design / acceptance doc
+>     `docs/PHASE_11C_1C_C_B_B_B_E_D_BLOCK_C_INTEGRATED_CHECKPOINT.md`.
+>
+> ### Successor allowed by this phase
+>
+> Only the upcoming **Block C closeout** (whole-block, after the
+> integrated checkpoint is reviewed) **OR** the eventual **AI
+> Evidence Bundle preparation** (paper / read-only) is unlocked
+> by a successful Block C checkpoint. No other phase is
+> unlocked. **Phase 12 remains FORBIDDEN.**
+>
+> ### Tests
+>
+> `python -m pytest tests/unit/test_block_c_integrated_checkpoint.py -q`
+> ships **15 PASSING** tests; `python -m pytest tests/unit -q`
+> reports **2726 PASSING** tests, 0 failures (was 2711 before
+> this phase; +15 from this phase).
+
+---
+
+## Previous phase
+
 > **Phase 11C.1C-C-B-B-B-D-E — Block B Integrated Evidence
 > Checkpoint v0 (*Block B 综合证据检查点 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not

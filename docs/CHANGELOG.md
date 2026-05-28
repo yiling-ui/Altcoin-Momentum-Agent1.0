@@ -7,6 +7,63 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-E-D — Block C Integrated Checkpoint v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence only).
+**Runtime effect:** **none on real trading.** A new runner
+`scripts/run_block_c_integrated_checkpoint.py` is added together
+with a matching unit-test module under
+`tests/unit/test_block_c_integrated_checkpoint.py` (15 tests). No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/llm/`, `app/telegram/`, `app/config/`, or any database schema
+/ migration is touched. The runner is read-only: it never appends,
+mutates, or reorders rows in `events.db`; it never produces
+direction, sizing, leverage, stop, target, or risk-budget fields;
+it never produces a `runtime_config_patch`; and it never calls an
+LLM / DeepSeek / Telegram outbound. No runtime knob (`symbol_limit`,
+anomaly threshold, candidate pool capacity, Regime weights) is
+changed. The runner is a thin file-based aggregator that walks
+`events.jsonl` / `*.jsonl` files under `--reports-dir` /
+`--exports-dir`, loads the most recent
+`block_b_integrated_evidence_report.json` under `--block-b-dir`,
+drives the already-merged C1 replay builders, the C2
+`Reflection11CAdaptiveEngine`, and the C3
+`EvidenceContractValidator`, and emits one descriptive
+`block_c_integrated_checkpoint_report.json` (plus matching `.md`
+summary) under `--output-dir`. The status taxonomy is
+intentionally **not** `ACCEPTED`: `INSUFFICIENT_EVIDENCE` /
+`PARTIAL_EVIDENCE` / `EVIDENCE_GENERATED`. `next_allowed_phase`
+is one of `Phase AI-0 / AI Evidence Bundle preparation (paper /
+read-only)` or `NEEDS_OPERATOR_EVIDENCE` — neither string
+references Phase 12, "live", or "trading-approved" wording. This
+phase does NOT retrofit existing C1 / C2 / C3 surfaces — they
+continue to ship exactly as before.
+**Phase ledger effect:** opens Phase 11C.1C-C-B-B-B-E-D as
+**`IN_REVIEW`** (not `ACCEPTED` until maintainer review of the PR
+plus the eventual whole-block Block C closeout).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`,
+no DeepSeek trade decision, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Auto-tuning effect:** **none.** `auto_tuning_allowed=False` is
+hard-pinned on every emitted Block C checkpoint payload; the
+runner asserts the value at the serialisation boundary alongside
+a closed forbidden-key vocabulary (direction / sizing /
+risk-budget / runtime-config patch keys plus the defensive
+aliases `trading_approved`, `live_ready`, `live_trading_allowed`).
+**Successor allowed:** only the upcoming **Block C closeout**
+(whole-block, after the integrated checkpoint is reviewed) **OR**
+the eventual **Phase AI-0 / AI Evidence Bundle preparation**
+(paper / read-only). No other phase is unlocked.
+**Tests:**
+`python -m pytest tests/unit/test_block_c_integrated_checkpoint.py -q`
+ships 15 tests, all PASS;
+`python -m pytest tests/unit -q` reports 2726 PASS, 0 failures
+(was 2711 before this phase; +15 from this phase).
+
 ### Phase 11C.1C-C-B-B-B-E-C — Evidence Contract Baseline v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence only).
