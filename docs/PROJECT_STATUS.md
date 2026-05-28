@@ -3788,3 +3788,90 @@ Only **Phase 11C.1C-C-B-B-B-E-B Reflection Extension for 11C
 Adaptive Events v0** is unlocked by a successful Phase
 11C.1C-C-B-B-B-E-A. No other phase is unlocked. Phase 12 remains
 **FORBIDDEN**.
+
+
+
+
+## Phase 11C.1C-C-B-B-B-E-C — Evidence Contract Baseline v0 (IN_REVIEW)
+
+Phase 11C.1C-C-B-B-B-E-C *Evidence Contract Baseline v0* opens as
+**IN_REVIEW** with this implementation PR. The phase is the third
+block of Block C (Block C3) and is the only phase the merged Block
+C1 + Block C2 implementations authorised next.
+
+### What changed
+
+  - Added `app/evidence/` (new package) with
+    `app/evidence/evidence_contract.py`. The module ships:
+    `EvidenceRefType` (closed enum), `ClaimStatus` (closed enum),
+    `EvidenceRef`, `EvidenceClaimInput`, `EvidenceClaim`,
+    `EvidenceContractResult` value objects,
+    `parse_evidence_ref(raw)`, `EvidenceContractValidator`,
+    `validate_claims(claims)` convenience wrapper, and a
+    recursive `FORBIDDEN_EVIDENCE_PAYLOAD_KEYS` guard invoked from
+    every `to_dict()` boundary.
+  - `app/core/events.py` — added three descriptive event types:
+    `EVIDENCE_CONTRACT_VALIDATED`, `EVIDENCE_CLAIM_DEGRADED`,
+    `EVIDENCE_CLAIM_REJECTED`. No trade-action / position /
+    sizing / risk-budget event was added.
+  - Added `tests/unit/test_evidence_contract_baseline.py` covering
+    the brief's ten required tests (event ref parses, symbol /
+    opportunity / report ref parses, claim without refs degraded,
+    invalid ref rejected / degraded, multi-ref preserved,
+    no-hallucinated-refs, summary counts correct, forbidden
+    fields absent, forbidden imports, deterministic output) plus
+    closed-vocabulary integrity and Mapping-input compatibility.
+    The new test module ships **31 PASSING** tests.
+  - Added
+    `docs/PHASE_11C_1C_C_B_B_B_E_C_EVIDENCE_CONTRACT_BASELINE.md`
+    as the phase design / acceptance doc.
+
+### Forbidden / not done in this phase
+
+  - Block C closeout is **not** done. Closeout is done per-block,
+    not per-PR.
+  - DeepSeek is **not** wired in.
+  - Phase 12 is **not** entered. **Phase 12 remains FORBIDDEN.**
+  - Auto-tuning is **not** enabled. Every emitted
+    `EvidenceContractResult` carries `auto_tuning_allowed=False`;
+    `to_dict()` hard-pins the value to `False` even if a caller
+    overrides it.
+  - LLM / natural-language reasoning is **not** produced. Statuses
+    are drawn from a closed enum only.
+  - The validator does **not** depend on chat history or external
+    state.
+  - No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+    `app/llm/`, `app/telegram/`, or `app/config/` is touched.
+  - No change to `symbol_limit`, anomaly thresholds,
+    `candidate_pool`, or regime weights.
+  - No `runtime_config_patch` is produced.
+  - No `buy` / `sell` / `long` / `short` / `position_size` /
+    `leverage` / `stop` / `target` / `risk_budget` field is
+    produced.
+  - This phase does **NOT** retrofit existing Block A / Block B
+    surfaces. Their `evidence_refs: tuple[str, ...]` fields
+    continue to ship as before.
+
+### Safety boundary (held)
+
+`mode=paper`, `live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`, no Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`, no
+real Telegram outbound, no DeepSeek trade decision. The Risk Engine
+remains the single trade-decision gate.
+
+### Tests
+
+`python -m pytest tests/unit/test_evidence_contract_baseline.py -q`
+ships **31 PASSING** tests; `python -m pytest tests/unit -q`
+reports **2711 PASSING** tests, 0 failures (was 2680 before this
+phase; +31 from this phase).
+
+### Successor allowed by this phase
+
+Only the upcoming **Block C closeout** (whole-block, after C1 + C2
++ C3 are merged and reviewed) **OR** the eventual **AI Evidence
+Bundle preparation** is unlocked by a successful Phase
+11C.1C-C-B-B-B-E-C. No other phase is unlocked. Phase 12 remains
+**FORBIDDEN**.
