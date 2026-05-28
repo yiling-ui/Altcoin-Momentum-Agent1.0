@@ -5342,3 +5342,118 @@ Only the upcoming **Block C closeout** (whole-block, after C1 + C2
 Bundle preparation** is unlocked by a successful Phase
 11C.1C-C-B-B-B-E-C. No other phase is unlocked. Phase 12 remains
 **FORBIDDEN**.
+
+
+
+---
+
+## Phase 11C / Offline Rule Sandbox Replay v0 — IN_REVIEW
+
+> **Status: IN_REVIEW** (after this implementation PR; not `ACCEPTED`
+> until maintainer review).
+> **Mode: paper only.** **Phase 12: FORBIDDEN.**
+> **Trade authority: false. Writes runtime config: false. Auto-tuning:
+> disabled. Telegram outbound: disabled. Binance private API: disabled.
+> LLM / DeepSeek: not invoked.**
+
+### Summary
+
+This slice ships the **Offline Rule Sandbox Replay v0** — a strictly
+offline, deterministic "what-if" layer that lets the operator probe
+how hypothetical rule changes would have affected discovery quality
+on historical evidence (Block B / Block C / AI Integrated Checkpoint
+reports). It exists to safely answer questions like:
+
+- If `early_tail_score` threshold were lowered, would severe miss rate fall?
+- If candidate score cutoff were adjusted, would late chase rise?
+- If a reject rule were relaxed, would false-negative rejects fall?
+- Does a rule change introduce more fake breakouts than it prevents
+  severe misses?
+
+Every answer is paper-only / report-only / evidence-only. The sandbox
+**cannot** apply changes anywhere and **cannot** authorise trades.
+
+### Files added in this PR
+
+- `app/sandbox/__init__.py`
+- `app/sandbox/offline_rule_sandbox.py`
+  - `OfflineRuleSandboxScenario`, `HypotheticalRuleChange`,
+    `OfflineRuleSandboxInput`, `OfflineRuleSandboxResult`,
+    `OfflineRuleSandboxReport`, `OfflineRuleSandboxEngine`
+  - `RecommendationLevel` (`REVIEW_ONLY`, `INCONCLUSIVE`,
+    `PROMISING_FOR_PAPER_SHADOW`, `RISKY`, `REJECTED_BY_EVIDENCE`)
+  - `SandboxEvent` (`OFFLINE_RULE_SANDBOX_REPLAY_RUN`,
+    `OFFLINE_RULE_SANDBOX_SCENARIO_EVALUATED`,
+    `OFFLINE_RULE_SANDBOX_REPORT_GENERATED`)
+  - Recursive `assert_no_forbidden_fields` guard
+  - Markdown renderer `render_report_markdown`
+  - Frozen `SAFETY_CONTRACT`
+- `scripts/run_offline_rule_sandbox_replay.py`
+- `tests/unit/test_offline_rule_sandbox_replay.py` (19 tests)
+- `docs/PHASE_11C_OFFLINE_RULE_SANDBOX_REPLAY.md`
+
+### Files explicitly NOT touched
+
+- `app/risk/**`
+- `app/execution/**`
+- `app/exchanges/**`
+- `app/telegram/**`
+- `app/config/**`
+- runtime config files
+- `symbol_limit`, anomaly thresholds, `candidate_pool`, Regime weights
+
+### Hard safety boundary (Phase 11C / Offline Rule Sandbox Replay v0)
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `writes_runtime_config` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `trade_authority` | `False` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `right_tail` | `False` |
+| `llm` | `False` (default) |
+| `llm_outbound_enabled` | `False` (default) |
+| `telegram_outbound_enabled` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+These flags are mirrored in
+`app.sandbox.offline_rule_sandbox.SAFETY_CONTRACT` and asserted by
+`tests/unit/test_offline_rule_sandbox_replay.py::test_safety_contract_shape`.
+
+### Forbidden output fields (rejected at serialization time)
+
+`buy`, `sell`, `long`, `short`, `direction`, `entry`, `exit`,
+`position_size`, `leverage`, `stop`, `stop_loss`, `target`,
+`take_profit`, `risk_budget`, `order`, `execution_command`,
+`runtime_config_patch`, `symbol_limit_patch`, `threshold_patch`,
+`candidate_pool_patch`, `regime_weight_patch`,
+`strategy_parameter_patch`, `signal_to_trade`, `should_buy`,
+`should_short`, `apply_change`, `deploy_change`, `enable_live`.
+
+### Forbidden recommendation labels
+
+`APPLY`, `DEPLOY`, `ENABLE_LIVE`, `TRADE`, `BUY`, `SELL`, `GO_LIVE`,
+`AUTO_APPLY`. Construction of an `OfflineRuleSandboxResult` with any
+of these raises `ValueError`.
+
+### Tests
+
+```
+python -m pytest tests/unit/test_offline_rule_sandbox_replay.py -q
+# 19 PASSED
+python -m pytest tests/unit -q
+# 3346 PASSED, 0 failures (no regressions vs. prior baseline)
+```
+
+### Successor allowed by this phase
+
+A successful sandbox run (e.g. `recommendation_level=
+PROMISING_FOR_PAPER_SHADOW`) only unlocks **Paper Shadow Strategy
+Validation preparation**. It does NOT unlock Phase 12, does NOT
+authorise live trading, does NOT authorise auto-tuning, does NOT
+authorise rule application, does NOT authorise runtime config write.
+The Risk Engine remains the single trade-decision gate.

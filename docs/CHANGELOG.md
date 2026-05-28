@@ -12871,3 +12871,119 @@ network, no LLM, no Telegram client. Phase 1 safety lock unchanged.
 - Issue #9: full Execution FSM with reconciliation against an exchange.
 - Issue #10: LLM Interpreter, Telegram outbound, Replay diff reports,
   Reflection.
+
+
+
+### Phase 11C / Offline Rule Sandbox Replay v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence-only).
+**Runtime effect:** **none on real trading.** Strictly offline,
+deterministic replay over historical evidence reports. No file under
+`app/risk/`, `app/execution/`, `app/exchanges/`, `app/telegram/`, or
+`app/config/` is modified. No runtime config is written. No event
+type is wired into the runtime hot path. No database schema /
+migration is touched.
+
+#### Added
+
+- `app/sandbox/__init__.py` — public re-exports for the new sandbox
+  package.
+- `app/sandbox/offline_rule_sandbox.py` — strictly offline,
+  deterministic replay engine. Provides:
+  - dataclasses `OfflineRuleSandboxScenario`,
+    `HypotheticalRuleChange` (a *hypothetical*, NOT a runtime
+    patch — the constructor refuses any `rule_name` containing
+    runtime-patch tokens such as `runtime_config_patch`,
+    `threshold_patch`, `symbol_limit_patch`,
+    `candidate_pool_patch`, `regime_weight_patch`, or
+    `strategy_parameter_patch`),
+    `OfflineRuleSandboxInput`, `OfflineRuleSandboxResult`,
+    `OfflineRuleSandboxReport`;
+  - `OfflineRuleSandboxEngine` with deterministic
+    `evaluate_scenario` and `build_report`;
+  - the `RecommendationLevel` taxonomy `REVIEW_ONLY`,
+    `INCONCLUSIVE`, `PROMISING_FOR_PAPER_SHADOW`, `RISKY`,
+    `REJECTED_BY_EVIDENCE` (and explicit refusal of `APPLY`,
+    `DEPLOY`, `ENABLE_LIVE`, `TRADE`, `BUY`, `SELL`, `GO_LIVE`,
+    `AUTO_APPLY`);
+  - the `SandboxEvent` taxonomy `OFFLINE_RULE_SANDBOX_REPLAY_RUN`,
+    `OFFLINE_RULE_SANDBOX_SCENARIO_EVALUATED`,
+    `OFFLINE_RULE_SANDBOX_REPORT_GENERATED` (all
+    report/export/replay-scope; NO trade-action events);
+  - a recursive `assert_no_forbidden_fields` guard run on every
+    output payload before serialization, rejecting any payload that
+    contains `buy`, `sell`, `long`, `short`, `direction`, `entry`,
+    `exit`, `position_size`, `leverage`, `stop`, `stop_loss`,
+    `target`, `take_profit`, `risk_budget`, `order`,
+    `execution_command`, `runtime_config_patch`,
+    `symbol_limit_patch`, `threshold_patch`,
+    `candidate_pool_patch`, `regime_weight_patch`,
+    `strategy_parameter_patch`, `signal_to_trade`, `should_buy`,
+    `should_short`, `apply_change`, `deploy_change`, or
+    `enable_live`;
+  - a deterministic, auditable first-order sensitivity table
+    `_BASE_VECTORS` mapping each `change_type` to a vector over 9
+    delta metrics (`coverage_rate_delta`,
+    `usable_discovery_rate_delta`, `severe_miss_rate_delta`,
+    `false_negative_reject_rate_delta`, `late_chase_rate_delta`,
+    `fake_breakout_rate_delta`, `data_gap_rate_delta`,
+    `median_mfe_delta`, `median_mae_delta`);
+  - `render_report_markdown`, `parse_scenario_dict`,
+    `build_input_from_reports`, `example_fixture_scenario`;
+  - the frozen `SAFETY_CONTRACT` mirroring every Phase 11C safety
+    flag.
+- `scripts/run_offline_rule_sandbox_replay.py` — CLI runner producing
+  `data/reports/rule_sandbox/offline_rule_sandbox_report.json` and
+  `.md`. Imports only `app.sandbox`. Falls back to a deterministic
+  `source=example_fixture` scenario when no `--scenario-file` is
+  supplied; the fixture is explicitly NOT operator-approved. Emits
+  only the three allowed event types.
+- `tests/unit/test_offline_rule_sandbox_replay.py` — 19 PASSING tests
+  covering: builds scenario without writing runtime config;
+  hypothetical rule change is not a runtime patch; deterministic
+  delta metrics; missing evidence -> `INSUFFICIENT_EVIDENCE` /
+  `INCONCLUSIVE`; data-gap warnings preserved; recommendation level
+  never `APPLY` / `DEPLOY` / `TRADE`; `auto_tuning_allowed=False`;
+  `writes_runtime_config=False`; `trade_authority=False`;
+  `phase_12_forbidden=True`; forbidden fields absent from every
+  payload (recursive AST + on-disk check); runner does not import
+  `app.risk` / `app.execution` / `app.exchanges` / `app.telegram` /
+  `app.config` (AST-based, ignoring docstrings/comments); no
+  DeepSeek / LLM / network call path (AST-based); JSON output
+  serializable; deterministic output; runner writes both files and
+  marks the example fixture; scenario-file parse round-trip;
+  `build_input_from_reports` tolerates missing reports;
+  `SAFETY_CONTRACT` shape.
+- `docs/PHASE_11C_OFFLINE_RULE_SANDBOX_REPLAY.md` — phase rationale,
+  schemas, recommendation levels, and explicit "why this is not
+  auto-tuning / does not write runtime config / does not authorize
+  live trading / does not enter Phase 12" sections.
+
+#### Hard safety boundary (this release)
+
+`mode=paper`, `sandbox_only=True`, `writes_runtime_config=False`,
+`auto_tuning_allowed=False`, `trade_authority=False`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False` (default),
+`llm_outbound_enabled=False` (default),
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`,
+`phase_12_forbidden=True`.
+
+#### Tests
+
+```
+python -m pytest tests/unit/test_offline_rule_sandbox_replay.py -q
+# 19 PASSED
+python -m pytest tests/unit -q
+# 3346 PASSED, 0 failures (no regressions vs. prior baseline)
+```
+
+#### Successor allowed by this phase
+
+A successful sandbox run (`recommendation_level=
+PROMISING_FOR_PAPER_SHADOW`) only unlocks **Paper Shadow Strategy
+Validation preparation**. It does NOT unlock Phase 12, does NOT
+authorise live trading, does NOT authorise auto-tuning, does NOT
+authorise rule application, does NOT authorise runtime config write.
+The Risk Engine remains the single trade-decision gate.
