@@ -66,6 +66,16 @@ Each of those parts will land in a separate PR with its own boundary
 audit. Issue #10 will be closed by Part 10D.
 """
 
+from app.replay.ai_replay import (
+    AI_REPLAY_CASE_RECONSTRUCTED,
+    AI_REPLAY_SUMMARY_GENERATED,
+    AIReplayBuilder,
+    AIReplayCase,
+    AIReplaySourceKind,
+    AIReplaySummary,
+    build_ai_replay_case,
+    build_ai_replay_summary,
+)
 from app.replay.adaptive_replay_11c import (
     ADAPTIVE_REPLAY_EVENT_TYPES,
     AdaptiveEventReplayExtension,
@@ -204,4 +214,13 @@ __all__ = [
     "PAPER_ALPHA_EVENT_TYPES",
     "REGIME_CLUSTER_EVENT_TYPES",
     "FORBIDDEN_REPLAY_PAYLOAD_KEYS",
+    # Phase AI-6 - AI Replay Integration v0
+    "AI_REPLAY_CASE_RECONSTRUCTED",
+    "AI_REPLAY_SUMMARY_GENERATED",
+    "AIReplayBuilder",
+    "AIReplayCase",
+    "AIReplaySourceKind",
+    "AIReplaySummary",
+    "build_ai_replay_case",
+    "build_ai_replay_summary",
 ]
