@@ -5607,3 +5607,148 @@ The implementation PR ships:
 
 The phase is marked **IN_REVIEW** here. Maintainer-led review of
 the implementation PR is the only path to **ACCEPTED**.
+
+
+
+## Phase 11C.1C-C-B-B-B-E-D — Block C Integrated Checkpoint v0 (IN_REVIEW)
+
+**Status:** IN_REVIEW (implementation PR; awaits maintainer review).
+**Block:** Block C wrap-up checkpoint.
+**Predecessors:** Block A complete; Block B complete and Block B
+Integrated Evidence Checkpoint = `PARTIAL_EVIDENCE` (advance
+allowed); Block C1
+(Phase 11C.1C-C-B-B-B-E-A *Replay Extension for 11C Adaptive Events
+v0*) merged; Block C2 (Phase 11C.1C-C-B-B-B-E-B *Reflection
+Extension for 11C Adaptive Events v0*) merged; Block C3
+(Phase 11C.1C-C-B-B-B-E-C *Evidence Contract Baseline v0*) merged.
+**Successor allowed by this phase:** Block C closeout (whole-block,
+**not** per-PR) **OR** the AI **read-only** Evidence Bundle
+preparation (Phase AI-0). **No other phase is unlocked.**
+
+### What this phase does
+
+Adds a paper / report / evidence-only Block C integrated
+checkpoint v0 under `scripts/run_block_c_integrated_checkpoint.py`
+that aggregates the simplified outputs of:
+
+  - C1 *Replay Extension for 11C Adaptive Events v0*
+    (`app/replay/adaptive_replay_11c.py`),
+  - C2 *Reflection Extension for 11C Adaptive Events v0*
+    (`app/reflection/adaptive_11c.py`), and
+  - C3 *Evidence Contract Baseline v0*
+    (`app/evidence/evidence_contract.py`),
+
+into one descriptive `block_c_integrated_checkpoint_report.json`
+(plus matching `.md` summary) under
+`data/reports/block_c_integrated_checkpoint/`. The checkpoint is
+the input to the Block C / Block D decision: did the C1 + C2 + C3
+triplet produce enough evidence to authorise the next-allowed
+phase (the Phase AI-0 / AI Evidence Bundle preparation)?
+
+The runner is a thin file-based aggregator. It reads only local
+files under `--reports-dir` / `--exports-dir` / `--block-b-dir`
+and writes only files under `--output-dir`. It runs the C1 pure
+builder functions (`build_discovery_timelines`,
+`build_candidate_lifecycles`, `build_tail_outcomes`,
+`build_mover_coverage_cases`, `build_post_discovery_outcome_cases`,
+`build_reject_attribution_cases`, `build_severe_miss_cases`,
+`build_discovery_quality_cases`), the C2
+`Reflection11CAdaptiveEngine`, and the C3
+`EvidenceContractValidator` against the events it parses out of
+the JSONL streams. It NEVER opens a socket. It NEVER imports
+`app.risk` / `app.execution` / `app.exchanges` / `app.llm` /
+`app.telegram` / `app.config`.
+
+The status taxonomy is intentionally **not** `ACCEPTED`:
+
+  - `INSUFFICIENT_EVIDENCE` — no usable input (no adaptive events
+    AND no Block B report); `next_allowed_phase =
+    NEEDS_OPERATOR_EVIDENCE`.
+  - `PARTIAL_EVIDENCE` — Replay / Reflection / Evidence Contract
+    are at least partially runnable but missing evidence /
+    degraded claims / a `known_blockers` entry remains;
+    `next_allowed_phase = Phase AI-0 / AI Evidence Bundle
+    preparation (paper / read-only)`.
+  - `EVIDENCE_GENERATED` — Replay, Reflection and the Evidence
+    Contract all produce valid output and no blocker remains;
+    `next_allowed_phase = Phase AI-0 / AI Evidence Bundle
+    preparation (paper / read-only)`.
+
+`phase_12_forbidden = true` and `auto_tuning_allowed = false` are
+hard-pinned on every emitted payload, asserted recursively at the
+serialisation boundary alongside a closed forbidden-key
+vocabulary (direction / sizing / risk-budget / runtime-config
+patch keys plus the defensive aliases `trading_approved`,
+`live_ready`, `live_trading_allowed`).
+
+### What this phase does NOT do
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise auto-tuning.
+  - It does **NOT** call DeepSeek / any LLM.
+  - It does **NOT** build the AI Evidence Bundle (that is the
+    *next-allowed* phase).
+  - It does **NOT** ship Paper Shadow / Rule Sandbox.
+  - It does **NOT** modify any runtime knob (`symbol_limit`,
+    anomaly thresholds, `candidate_pool`, Regime weights).
+  - It does **NOT** retrofit existing C1 / C2 / C3 surfaces.
+  - It does **NOT** close out cloud evidence (closeout is done
+    per-block, not per-PR).
+  - It does **NOT** start Phase 12. **Phase 12 remains
+    FORBIDDEN.**
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+### Forbidden modifications (held end-to-end)
+
+  - no edit under `app/risk/**`
+  - no edit under `app/execution/**`
+  - no edit under `app/exchanges/**`
+  - no edit under `app/llm/**`
+  - no edit under `app/telegram/**`
+  - no edit under `app/config/**`
+  - no change to `symbol_limit`
+  - no change to anomaly thresholds
+  - no change to `candidate_pool`
+  - no change to regime weights
+  - no `runtime_config_patch` produced
+  - no buy / sell / long / short / position_size / leverage /
+    stop / target / risk_budget produced
+
+### Acceptance signal
+
+The implementation PR ships:
+
+  - `scripts/run_block_c_integrated_checkpoint.py` (new runner)
+  - `tests/unit/test_block_c_integrated_checkpoint.py` (15 tests
+    covering the brief's 10 numbered checks plus output-path /
+    CLI exit-code / event-group surfacing)
+  - `docs/PHASE_11C_1C_C_B_B_B_E_D_BLOCK_C_INTEGRATED_CHECKPOINT.md`
+    (this phase's design + acceptance doc)
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` updates
+
+Test commands:
+`python -m pytest tests/unit/test_block_c_integrated_checkpoint.py -q`
+ships 15 tests, all PASS;
+`python -m pytest tests/unit -q` reports 2726 PASS, 0 failures
+(was 2711 before this phase; +15 from this phase).
+
+The phase is marked **IN_REVIEW** here. Maintainer-led review of
+the implementation PR plus the eventual whole-block Block C
+closeout PR are the only paths to **ACCEPTED**.
