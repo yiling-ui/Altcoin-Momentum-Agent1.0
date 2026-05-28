@@ -5610,6 +5610,215 @@ the implementation PR is the only path to **ACCEPTED**.
 
 
 
+## Phase AI-1 — AI Evidence Bundle Builder v0 (IN_REVIEW)
+
+**Status:** IN_REVIEW (implementation PR; awaits maintainer review).
+**Block:** AI Layer kickoff. First runtime artefact gated by
+`docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md`.
+**Predecessors:** Block A complete; Block B complete and Block B
+Integrated Evidence Checkpoint = `PARTIAL_EVIDENCE`; Block C
+complete (C1 *Replay Extension for 11C Adaptive Events v0* merged,
+C2 *Reflection Extension for 11C Adaptive Events v0* merged, C3
+*Evidence Contract Baseline v0* merged); Block C Integrated
+Checkpoint driven on the operator server with
+`status=EVIDENCE_GENERATED`,
+`replay_status=EVIDENCE_GENERATED`,
+`reflection_status=EVIDENCE_GENERATED`,
+`evidence_contract_status=EVIDENCE_GENERATED`,
+`accepted_claim_count=2704`,
+`degraded/rejected/missing/invalid=0`,
+`phase_12_forbidden=true`, `auto_tuning_allowed=false`,
+`known_blockers=[]`.
+**Successor allowed by this phase:** later (separately gated)
+**offline AI / operator-briefing report generation** that
+consumes the bundle as a frozen input **OR** the eventual **AI
+Reality Check** layer that verifies AI commentary against the
+Truth Layer cited in the bundle. **No other phase is unlocked.**
+**NOT** DeepSeek trade decisions. **NOT** the AI Layer's
+involvement in the Risk Engine. **NOT** the AI Layer's
+involvement in the Execution FSM. **NOT** auto-tuning. **NOT**
+real Telegram outbound. **NOT** Phase 12.
+
+### What this phase does
+
+Adds the AI Layer's only allowed read surface as a closed
+schema, a deterministic builder, a paranoid intake guard, and a
+55-test unit harness. The builder constructs frozen,
+evidence-cited, deterministic, JSON-serializable
+`AIEvidenceBundle` objects from Truth-Layer facts at call time:
+
+  - `AIEvidenceBundleTaskType` closed enum (10 values:
+    `OPERATOR_BRIEFING`, `MARKET_INTELLIGENCE_SUMMARY`,
+    `COVERAGE_AUDIT_INTERPRETATION`,
+    `POST_DISCOVERY_OUTCOME_SUMMARY`,
+    `REJECT_TO_OUTCOME_SUMMARY`, `SEVERE_MISS_SUMMARY`,
+    `REPLAY_REFLECTION_SUMMARY`, `EVIDENCE_COMPRESSION`,
+    `CONTRADICTION_SUMMARY`, `EVIDENCE_QUALITY_ASSESSMENT`).
+  - `AIEvidenceBundleBuildStatus` closed enum
+    (`EVIDENCE_BUNDLE_BUILT` / `EVIDENCE_BUNDLE_DEGRADED` /
+    `EVIDENCE_BUNDLE_INSUFFICIENT_EVIDENCE`).
+  - `AIEvidenceBundleFactInput` / `AIEvidenceBundleFact`
+    frozen dataclasses preserving `fact_id`, `fact_type`,
+    `content`, `evidence_refs`, `source_report`, `status`,
+    `degradation_reason`, `schema_version`.
+  - `AIEvidenceBundle` frozen dataclass carrying the six
+    accepted-only `*_facts` collections, the
+    `degraded_facts` collection, the deduplicated
+    `evidence_refs` and `source_reports` lists, the pinned
+    `forbidden_fields` / `lookahead_policy` /
+    `consumer_contract` blocks, the `warnings` list, the
+    `build_status`, the `accepted_fact_count` /
+    `degraded_fact_count` counters, and the hard-pinned
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_training_label=False`,
+    `phase_12_forbidden=true`, `auto_tuning_allowed=false`
+    flags.
+  - `AIEvidenceBundleBuilder` (and the
+    `build_ai_evidence_bundle` convenience wrapper)
+    deterministically coerces every input to a
+    JSON-serializable form, rejects forbidden input keys
+    with `ForbiddenAIInputError` (a `ValueError` subclass),
+    demotes facts without `evidence_refs`, deduplicates
+    `evidence_refs` / `source_reports` in first-seen order,
+    and runs the recursive `_assert_no_forbidden_fields`
+    guard at the serialisation boundary.
+
+### AI four root constraints (enforced in code + tests)
+
+  1. **Responsibility Isolation.** The bundle's
+     `forbidden_fields` block is a sorted tuple of every
+     trade-action / runtime-config-patch field name (`buy`,
+     `sell`, `long`, `short`, `direction`, `side`, `entry`,
+     `exit`, `position_size`, `leverage`, `stop`, `stop_loss`,
+     `stop_price`, `target`, `target_price`, `take_profit`,
+     `risk_budget`, `order`, `order_type`, `execution_command`,
+     `runtime_config_patch`, `symbol_limit_patch`,
+     `threshold_patch`, `candidate_pool_patch`,
+     `regime_weight_patch`, `strategy_parameter_patch`,
+     `signal_to_trade`, `should_buy`, `should_short`, plus
+     defensive aliases `trading_approved`, `live_ready`,
+     `live_trading_allowed`). The recursive
+     `_assert_no_forbidden_fields` guard refuses to emit any
+     payload carrying any of these keys at any nesting depth,
+     both on intake and at the serialisation boundary.
+  2. **Stateless Inference.** The
+     `_scan_for_forbidden_input` guard rejects
+     `previous_ai_answer`, `prior_ai_answer`,
+     `last_ai_answer`, `ai_session_history`,
+     `ai_chat_history`, `chat_history`,
+     `conversation_history`, `assistant_history`,
+     `previous_briefing`, `previous_summary`,
+     `previous_reflection`, `private_account_state`,
+     `account_state`, `account_balance`, `account_balances`,
+     `account_positions`, `account_orders`,
+     `account_leverage`, `account_margin`, `wallet_balance`,
+     `binance_account_state`,
+     `binance_private_account_state`, `listen_key`,
+     `listenkey`, `signed_endpoint_payload` and any
+     credential-shaped key (substring tokens `api_key`,
+     `api_secret`, `private_key`, `secret_key`,
+     `auth_token`, `bearer_token`, `access_token`,
+     `refresh_token`, `credential`, `password`,
+     `passphrase`, `deepseek_api`, `binance_secret`,
+     `telegram_token`, `telegram_bot_token` plus the
+     bare-token names `secret`, `secrets`, `token`) at any
+     nesting depth in any input mapping.
+     `ForbiddenAIInputError` is raised on the first hit; the
+     builder fails *closed*, never silently strips or
+     transforms a forbidden input.
+  3. **Hard Rule Anchoring.** Facts without `evidence_refs`
+     are demoted to `degraded_facts` with
+     `degradation_reason="no_evidence_refs_supplied"` and a
+     matching warning entry; such facts NEVER appear in the
+     accepted `*_facts` collections.
+  4. **Feedback Isolation.** `ai_output_is_commentary_only`
+     is hard-pinned to `True` and
+     `ai_output_can_be_training_label` is hard-pinned to
+     `False`; both are re-emitted at every `to_dict()`
+     boundary, even if a downstream caller flips the
+     dataclass field.
+
+### Hard-pinned invariants on every emitted bundle
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - `phase_12_forbidden = true`
+  - `auto_tuning_allowed = false`
+  - `ai_output_is_commentary_only = true`
+  - `ai_output_can_be_training_label = false`
+
+### Consumer contract
+
+  - `allowed_consumers`: `human_operator`, `export_bundle`,
+    `replay_annotation`, `reflection_annotation`,
+    `operator_briefing_report`.
+  - `forbidden_consumers`: `RiskEngine`, `ExecutionFSM`,
+    `StrategyEngine`, `ExchangeGateway`, `RuntimeConfig`,
+    `TelegramLiveCommand`, `CapitalFlow`, `PositionManager`.
+
+The two lists are *disjoint*. The runtime trade-authority and
+runtime-config surfaces are explicitly named as *forbidden*
+consumers - even structurally, the bundle MUST NEVER be wired
+into the Risk Engine, the Execution FSM, or any
+runtime-config-patch path.
+
+### Lookahead policy (every flag pinned True)
+
+  - `frozen_evidence_only`
+  - `no_future_market_data`
+  - `no_training_from_ai_output`
+  - `no_runtime_feedback`
+  - `post_hoc_analysis_only_when_window_closed`
+
+### Forbidden imports
+
+`app/ai/__init__.py` and `app/ai/evidence_bundle.py` import
+nothing from `app.risk`, `app.execution`, `app.exchanges`,
+`app.llm`, `app.telegram`, or `app.config`. They do not import
+`openai`, `anthropic`, `deepseek`, `httpx`, `requests`,
+`aiohttp`, `urllib3`, `websocket`, `websockets`, `grpc`, or
+`boto3`. Both invariants are AST-asserted in the test suite on
+every CI run.
+
+### What this phase does NOT do
+
+  - **NOT** call DeepSeek; **NOT** call any LLM; **NOT** open
+    any network socket; **NOT** authorise live trading;
+    **NOT** authorise auto-tuning; **NOT** modify
+    `app.risk` / `app.execution` / `app.exchanges` /
+    `app.telegram` / `app.config`; **NOT** add any event
+    type or database migration; **NOT** ship Operator
+    Briefing; **NOT** ship Reality Check; **NOT** ship Rule
+    Sandbox; **NOT** ship any trading logic; **NOT** open
+    Phase 12.
+
+### Files shipped
+
+  - `app/ai/__init__.py`
+  - `app/ai/evidence_bundle.py`
+  - `tests/unit/test_ai_evidence_bundle_builder.py` (55
+    cases)
+  - `docs/PHASE_AI_1_EVIDENCE_BUNDLE_BUILDER.md`
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` updates
+
+### Tests
+
+`python -m pytest tests/unit/test_ai_evidence_bundle_builder.py -q`
+ships 55 PASS / 0 fail;
+`python -m pytest tests/unit -q` reports 2781 PASS / 0 fail
+(was 2726 before this phase; +55 from this phase).
+
+The phase is marked **IN_REVIEW** here. Maintainer-led review of
+the implementation PR is the only path to **ACCEPTED**.
+
+
+
 ## Phase 11C.1C-C-B-B-B-E-D — Block C Integrated Checkpoint v0 (IN_REVIEW)
 
 **Status:** IN_REVIEW (implementation PR; awaits maintainer review).
