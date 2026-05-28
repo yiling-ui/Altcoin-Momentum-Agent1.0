@@ -49,6 +49,7 @@ Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 | ---------- | -------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
 | 11C.1C-C-B-B-B-D-E | Block B Integrated Evidence Checkpoint v0 (*Block B 综合证据检查点 v0*; paper / report / evidence-only Block B aggregation checkpoint that rolls up the simplified outputs of D-A / D-B / B1.1 / B2-A / B2-B / B3 into one descriptive integrated evidence report; **NOT** a per-phase `ACCEPTED` gate, **NOT** Replay / Reflection extension, **NOT** strategy profitability proof) | **IN_REVIEW (after this implementation PR; not `ACCEPTED` until evidence closeout)** | Phase 11C.1C-C-B-B-B-D-E is **`IN_REVIEW`** after the implementation PR. The PR ships `scripts/run_block_b_integrated_evidence_checkpoint.py` (paper / report / evidence-only runner; reads only local `events.jsonl` / `*.jsonl` files under `--reports-dir` / `--exports-dir` / `--post-discovery-dir`; reads the most recent `post_discovery_outcome_report.json` under `--post-discovery-dir`; aggregates the simplified D-A / D-B / B1.1 / B2-A / B2-B / B3 outputs into one descriptive `block_b_integrated_evidence_report.json` plus matching `.md` summary; emits one of three closed statuses (`INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` / `EVIDENCE_GENERATED`) and the corresponding `next_allowed_phase` (`Phase 11C.1C-C-B-B-B-E-A Replay Extension for 11C Adaptive Events v0` or `NEEDS_OPERATOR_EVIDENCE`); reuses the existing `app.adaptive.discovery_quality_scorecard.build_discovery_quality_scorecard` builder + recursive `assert_payload_has_no_forbidden_keys` guard; never imports `app.risk` / `app.execution` / `app.exchanges` / `app.llm` / `app.telegram` / `app.config`; hard-pins `phase_12_forbidden = true` and `auto_tuning_allowed = false` on every emitted payload), the `tests/unit/test_block_b_integrated_evidence_checkpoint.py` unit-test module covering every brief-mandated acceptance test (`INSUFFICIENT_EVIDENCE` on empty workspace, `PARTIAL_EVIDENCE` when D-B post-discovery is missing OR data-gap is high, `EVIDENCE_GENERATED` when every component is present, `next_allowed_phase` correct, `phase_12_forbidden = true` on every payload, `auto_tuning_allowed = false` on every payload, no forbidden trade-authority / runtime-tuning keys on any payload, no banned imports, CLI exit-codes correct), and the new phase doc `docs/PHASE_11C_1C_C_B_B_B_D_E_BLOCK_B_INTEGRATED_EVIDENCE_CHECKPOINT.md`. **Status taxonomy is intentionally NOT `ACCEPTED`.** Per-phase closeout PRs (D-A, D-B, B1.1) retain their own `ACCEPTED_TOOLCHAIN` / `PARTIAL_QUALITY` / `BLOCK_B_CHECKPOINT_ONLY` labels — the integrated checkpoint defers to those labels and never overrides them. The runner connects to no network, calls no LLM / DeepSeek, opens no Telegram socket, signs no request, never modifies `app.config`, and never reads a private API. **NOT live trading. NOT AI Learning. NOT automatic parameter optimisation. NOT reinforcement learning. NOT a per-phase `ACCEPTED` gate. NOT a strategy profitability proof. NOT a direction call. NOT the Block C Replay / Reflection extension implementation (that is the *next-allowed* phase, not part of this PR). NOT the DeepSeek integration. NOT Phase 12.** A `status = EVIDENCE_GENERATED` does **not** mean live trading is approved. A `status = INSUFFICIENT_EVIDENCE` does **not** mean live trading is disapproved either; live-trading approval is a Phase 12 concern that requires the Spec §41 Go/No-Go checklist, and the checklist has not been initiated. Every emitted checkpoint carries `auto_tuning_allowed = false`; the constant is hard-pinned in the runner source. The Risk Engine remains the single trade-decision gate. Tests on this PR: `tests/unit/test_block_b_integrated_evidence_checkpoint.py` 13/13 PASS; full `tests/unit` 2600/2600 PASS. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-E-A | Replay Extension for 11C Adaptive Events v0 (*11C 自适应事件 Replay 扩展 v0*; paper / report / evidence-only next-allowed phase opened by a Phase 11C.1C-C-B-B-B-D-E Block B Integrated Evidence Checkpoint with `status ∈ {EVIDENCE_GENERATED, PARTIAL_EVIDENCE}`) | **NEXT_ALLOWED / NOT_STARTED** | Reserved phase. Will extend the existing Replay engine to play back the Block B adaptive events (D-A / D-B / B1.1 / B2-A / B2-B / B3) over previously captured event streams. Paper / report / evidence-only. **NOT live trading. NOT auto-tuning. NOT DeepSeek trade decisions. NOT Phase 12.** Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A / 11C.1C-C-B-B-B-A / 11C.1C-C-B-B-B-B / 11C.1C-C-B-B-B-C / 11C.1C-C-B-B-B-D / 11C.1C-C-B-B-B-D-A / 11C.1C-C-B-B-B-D-B / 11C.1C-C-B-B-B-D-B.1 / 11C.1C-C-B-B-B-D-C-A / 11C.1C-C-B-B-B-D-C-B / 11C.1C-C-B-B-B-D-D / 11C.1C-C-B-B-B-D-E forbidden item verbatim. Will require its own kickoff PR with brief, scope, boundary table, forbidden list, and acceptance evidence. Phase 12 remains **FORBIDDEN**. |
+| 11C.1C-C-B-B-B-E-B | Reflection Extension for 11C Adaptive Events v0 (*11C 自适应事件 Reflection 扩展 v0*; paper / report-only Block C2 child slice opened by Phase 11C.1C-C-B-B-B-E-A Replay Extension acceptance via PR #78) | **IN_REVIEW (after this implementation PR; not `ACCEPTED` until maintainer review)** | Phase 11C.1C-C-B-B-B-E-B is **`IN_REVIEW`** after the implementation PR. The PR ships `app/reflection/adaptive_11c.py` (read-only reflection extension; `Reflection11CAdaptiveEngine`, `AdaptiveReflectionTag` closed enum of the 18 brief-mandated tags + `late_discovery`, `AdaptiveReflectionSeverity` closed enum, `AdaptiveReflectionInput` / `AdaptiveReflectionCase` / `AdaptiveReflectionSummary` frozen dataclasses with `to_payload()` plus a recursive `_assert_no_forbidden_keys` guard; `auto_tuning_allowed=False` hard-pinned on every emitted payload; never imports `app.risk` / `app.execution` / `app.exchanges` / `app.llm` / `app.telegram`; never produces `buy` / `sell` / `long` / `short` / `position_size` / `leverage` / `stop` / `target` / `risk_budget` / `runtime_config_patch`), the `tests/unit/test_reflection_11c_adaptive_events.py` unit-test module covering every brief-mandated test (POST_DISCOVERY_OUTCOME → `late_top_chase` / `early_discovery` / `post_discovery_no_edge`; REJECT_TO_OUTCOME → `false_negative_reject` / `correct_protective_reject` / `data_gap`; SEVERE_MISSED_TAIL → `severe_miss` / `needs_data_recovery`; DISCOVERY_QUALITY DEGRADED → `degraded_discovery_quality`; HISTORICAL_MOVER_COVERAGE missed → `missed_tail`; missing-fields-do-not-crash → `insufficient_evidence`; evidence_refs preserved with `event_id` fallback; `auto_tuning_allowed=False` everywhere; forbidden-imports static check; forbidden-fields-absent guard; deterministic ordering), and the new phase doc `docs/PHASE_11C_1C_C_B_B_B_E_B_REFLECTION_EXTENSION_11C_EVENTS.md`. Reflection only emits structured tags / summaries / counts / warnings — **NOT** trade advice, **NOT** AI / DeepSeek output, **NOT** runtime config patches, **NOT** auto-tuning. Tests on this PR: `tests/unit/test_reflection_11c_adaptive_events.py` 42/42 PASS; full `tests/unit` 2680/2680 PASS. **NOT live trading. NOT AI Learning. NOT automatic parameter optimisation. NOT reinforcement learning. NOT DeepSeek integration. NOT Phase 12.** Successful Phase 11C.1C-C-B-B-B-E-B only authorises Phase 11C.1C-C-B-B-B-E-C *C3 Evidence Contract Baseline* to start; no other phase is unlocked. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B | Strategy Validation Lab (deeper) & richer Cluster Exposure Control follow-up (parent; unchanged definition) | **NEXT_ALLOWED / NOT_STARTED** | Phase 11C.1C-C-B-B-A (PR #44) merged into `main` on 2026-05-23 (mergeCommit `3ecfc3b`) and is the gating predecessor; Phase 11C.1C-C-B-B-B is reserved for the deeper Strategy Validation Lab follow-up (richer cohort comparisons, extended cluster heuristics, longer-window correlations, dataset-driven retrospective audits). The parent phase is **not** renamed by Paper Alpha Gate v0; the Paper Alpha Gate v0 is one *child slice* under this parent (Phase 11C.1C-C-B-B-B-A), not the parent itself. NOT authorised by Phase 11C.1C-C-B-B-A acceptance bypassing the standard gate; will require its own kickoff PRs (one per child slice), brief, scope, boundary table, forbidden list, and acceptance evidence. Inherits every Phase 1 / 11C.1B / 11C.1C-A / 11C.1C-B / 11C.1C-C-A / 11C.1C-C-B-A / 11C.1C-C-B-B-A forbidden item verbatim. |
 | 11C.1C-C-B-B-B-A | Paper Alpha Gate v0 (paper / report-only first child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #52 + PR #54 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-A is now `ACCEPTED` (PR #52 merged into `main` on 2026-05-24, mergeCommit `f8ba315`; this docs-only closeout PR #54 records the operator-VPS paper evidence). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript, the Paper Alpha Gate daily-report excerpt, the four `PAPER_ALPHA_*` event counts, the Phase 8.5 export bundle reference, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-A (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-A acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `paper_alpha_gate_status=INCONCLUSIVE` was an **expected and accepted** result for this smoke window because `completed_tail_label_count=0<10`; the Paper Alpha Gate correctly refused to overfit or force a `PASS`. `INCONCLUSIVE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise live trading, does NOT authorise Phase 12. Paper Alpha Gate verdicts remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
 | 11C.1C-C-B-B-B-B | Regime & Cluster Cohort Evidence Pack v0 (paper / report / evidence-only second child slice under Phase 11C.1C-C-B-B-B; ACCEPTED via PR #56 implementation + PR #57 docs-only closeout) | **ACCEPTED — see Closed phases table above** | Phase 11C.1C-C-B-B-B-B is now `ACCEPTED` (PR #56 merged into `main` on 2026-05-24, mergeCommit `1a9abe2`; this docs-only closeout PR #57 records the operator-VPS paper evidence). The full closeout — including the verbatim operator-VPS 10 min WS paper smoke transcript, the Regime & Cluster Cohort Evidence Pack daily-report excerpt, the two `REGIME_CLUSTER_*` event counts, the Phase 8.5 export bundle reference, and the safety-flag invariants — is recorded under "Closed phase: Phase 11C.1C-C-B-B-B-B (ACCEPTED)" and "Phase 11C.1C-C-B-B-B-B acceptance evidence (operator-VPS 10 min WS paper smoke PASSED)" below. `regime_cluster_evidence_status=INSUFFICIENT_SAMPLE` was an **expected and accepted** result for this smoke window because `sample_count=14<20` and `completed_tail_label_count=0<10`; the Regime & Cluster Evidence Pack correctly refused to overfit or force a regime / cluster conclusion when structural samples were insufficient. `INSUFFICIENT_SAMPLE` does NOT mean runtime failure, does NOT authorise strategy changes, does NOT authorise rule relaxation, does NOT authorise live trading, does NOT authorise Phase 12. Regime & Cluster Evidence Pack outputs remain paper-only / report-only / evidence-only and cannot trigger orders, leverage, position sizing, stop changes, target changes, Risk Engine changes, or Execution FSM changes. Phase 12 remains **FORBIDDEN**. |
@@ -5283,6 +5284,122 @@ The Risk Engine remains the single trade-decision gate.
     invoked.**
   - **No real API contacted.**
 
+
+
+
+## Phase 11C.1C-C-B-B-B-E-B — Reflection Extension for 11C Adaptive Events v0 (IN_REVIEW)
+
+**Status:** IN_REVIEW (implementation PR; awaits maintainer review).
+**Block:** Block C2 (Reflection Extension v0).
+**Predecessors:** Phase 11C.1C-C-B-B-B-E-A *Replay Extension for 11C
+Adaptive Events v0* merged via PR #78. Block C2 is therefore allowed
+to start.
+**Successor allowed by this phase:** Phase 11C.1C-C-B-B-B-E-C *C3
+Evidence Contract Baseline* only. **No other phase is unlocked.**
+
+### What this phase does
+
+Adds a read-only reflection extension under `app/reflection/` that
+turns every supported Phase 11C adaptive event into one
+deterministic `AdaptiveReflectionCase` and aggregates them into one
+`AdaptiveReflectionSummary`. Public surface:
+
+  - `AdaptiveReflectionTag` — closed enum of 19 tags including the
+    18 brief-mandated tags (`early_discovery`, `late_discovery`,
+    `missed_tail`, `severe_miss`, `candidate_evicted_before_tail`,
+    `risk_rejected_then_moved`, `false_negative_reject`,
+    `correct_protective_reject`, `weak_pre_anomaly`,
+    `fake_breakout_detected`, `late_top_chase`,
+    `post_discovery_no_edge`, `data_gap`, `insufficient_history`,
+    `degraded_discovery_quality`, `insufficient_evidence`,
+    `needs_operator_review`, `needs_data_recovery`,
+    `needs_rule_review`).
+  - `AdaptiveReflectionSeverity` — closed severity enum
+    (`info` / `low` / `medium` / `high` / `severe` / `unknown`).
+  - `AdaptiveReflectionInput`, `AdaptiveReflectionCase`,
+    `AdaptiveReflectionSummary` — frozen dataclasses with
+    deterministic `to_payload()` and a recursive
+    `_assert_no_forbidden_keys` guard.
+  - `Reflection11CAdaptiveEngine` — pure stateless engine with
+    `reflect_event(ev)` and `reflect_events(events)`.
+
+The supported event groups are `LABEL_*`, `TAIL_LABEL_*`,
+`MISSED_TAIL_*`, `FAKE_BREAKOUT_*`, `STRATEGY_VALIDATION_*`,
+`PAPER_ALPHA_*`, `REGIME_CLUSTER_*`, `MOVER_CAPTURE_*`,
+`HISTORICAL_MOVER_COVERAGE_*`, `POST_DISCOVERY_OUTCOME_*`,
+`REJECT_TO_OUTCOME_*`, `SEVERE_MISSED_TAIL_*`, and
+`DISCOVERY_QUALITY_*`. No new event types are introduced.
+
+### What this phase does NOT do
+
+  - Reflection only emits **structured tags / summaries / counts /
+    warnings**. No trade advice, no AI / DeepSeek text, no
+    natural-language hallucination.
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise auto-tuning.
+    `auto_tuning_allowed=False` is hard-pinned on every emitted
+    case + summary; even a malicious caller that overrides the
+    field gets `False` back from `to_payload()`.
+  - It does **NOT** call an LLM, DeepSeek, or any natural-language
+    model.
+  - It does **NOT** depend on chat history.
+  - It does **NOT** mutate `events.db` or any runtime knob.
+  - It does **NOT** close out cloud evidence.
+  - It does **NOT** start C3 Evidence Contract Baseline.
+  - It does **NOT** unlock Phase 12. Phase 12 remains **FORBIDDEN**.
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - **Phase 12 = FORBIDDEN**
+
+### Forbidden modifications (held end-to-end)
+
+  - no edit under `app/risk/**`
+  - no edit under `app/execution/**`
+  - no edit under `app/exchanges/**`
+  - no edit under `app/llm/**`
+  - no edit under `app/telegram/**`
+  - no edit under `app/config/**`
+  - no change to `symbol_limit`
+  - no change to anomaly thresholds
+  - no change to `candidate_pool`
+  - no change to regime weights
+  - no `runtime_config_patch` produced
+  - no `buy` / `sell` / `long` / `short` / `position_size` /
+    `leverage` / `stop` / `target` / `risk_budget` produced
+
+### Acceptance signal
+
+The implementation PR ships:
+
+  - `app/reflection/adaptive_11c.py` (new module)
+  - `app/reflection/__init__.py` (re-export of new symbols)
+  - `tests/unit/test_reflection_11c_adaptive_events.py` (new
+    test module covering the brief's required test surface)
+  - `docs/PHASE_11C_1C_C_B_B_B_E_B_REFLECTION_EXTENSION_11C_EVENTS.md`
+    (this phase's design + acceptance doc)
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` updates
+
+Tests on this PR:
+`tests/unit/test_reflection_11c_adaptive_events.py` 42/42 PASS;
+full `tests/unit` 2680/2680 PASS.
+
+The phase is marked **IN_REVIEW** here. Maintainer-led review of
+the implementation PR is the only path to **ACCEPTED**.
 
 
 

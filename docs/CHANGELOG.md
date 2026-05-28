@@ -7,6 +7,44 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1C-C-B-B-B-E-B — Reflection Extension for 11C Adaptive Events v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report-only).
+**Runtime effect:** **none on real trading.** A new read-only
+module `app/reflection/adaptive_11c.py` is added and re-exported
+from `app/reflection/__init__.py`. A matching unit-test module
+under `tests/unit/test_reflection_11c_adaptive_events.py` is added.
+No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/llm/`, `app/telegram/`, `app/config/`, or any database schema
+/ migration is touched. The reflection extension is read-only:
+it never appends, mutates, or reorders rows in `events.db`; it
+never produces direction, sizing, leverage, stop, target, or
+risk-budget fields; it never produces a `runtime_config_patch`;
+and it never calls an LLM / DeepSeek / Telegram outbound. No
+runtime knob (`symbol_limit`, anomaly threshold, candidate pool
+capacity, Regime weights) is changed. Reflection only emits
+structured tags / summaries / counts / warnings; it never emits
+free-form natural-language reflection.
+**Phase ledger effect:** opens Phase 11C.1C-C-B-B-B-E-B as
+**`IN_REVIEW`** (not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`,
+no DeepSeek trade decision, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Auto-tuning effect:** **none.** `auto_tuning_allowed=False` is
+hard-pinned on every emitted case + summary; the value is
+re-emitted as `False` from `to_payload()` even if a caller
+overrides the dataclass field.
+**Successor allowed:** only Phase 11C.1C-C-B-B-B-E-C *C3 Evidence
+Contract Baseline*. No other phase is unlocked.
+**Tests:**
+`python -m pytest tests/unit/test_reflection_11c_adaptive_events.py -q`
+ships 42 tests, all PASS;
+`python -m pytest tests/unit -q` reports 2680 PASS, 0 failures.
+
 ### Phase 11C.1C-C-B-B-B-E-A — Replay Extension for 11C Adaptive Events v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / replay / report-only).

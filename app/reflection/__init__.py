@@ -53,6 +53,17 @@ Part 10B intentionally does NOT ship:
   - Any free-form natural-language reflection (Issue brief: 禁止)
 """
 
+from app.reflection.adaptive_11c import (
+    ADAPTIVE_REFLECTION_EVENT_TYPES,
+    FORBIDDEN_REFLECTION_PAYLOAD_KEYS,
+    AdaptiveReflectionCase,
+    AdaptiveReflectionForbiddenFieldError,
+    AdaptiveReflectionInput,
+    AdaptiveReflectionSeverity,
+    AdaptiveReflectionSummary,
+    AdaptiveReflectionTag,
+    Reflection11CAdaptiveEngine,
+)
 from app.reflection.engine import ReflectionConfig, ReflectionEngine
 from app.reflection.metrics import (
     MetricResult,
@@ -94,4 +105,14 @@ __all__ = [
     "compute_mae",
     "compute_tail_contribution",
     "realized_pnl_for",
+    # Phase 11C.1C-C-B-B-B-E-B Reflection Extension
+    "Reflection11CAdaptiveEngine",
+    "AdaptiveReflectionTag",
+    "AdaptiveReflectionSeverity",
+    "AdaptiveReflectionInput",
+    "AdaptiveReflectionCase",
+    "AdaptiveReflectionSummary",
+    "AdaptiveReflectionForbiddenFieldError",
+    "ADAPTIVE_REFLECTION_EVENT_TYPES",
+    "FORBIDDEN_REFLECTION_PAYLOAD_KEYS",
 ]
