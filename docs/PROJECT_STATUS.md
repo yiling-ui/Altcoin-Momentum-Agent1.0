@@ -3653,6 +3653,82 @@ outbound.
 
 
 
+## Phase 11C.1C-C-B-B-B-E-B — Reflection Extension for 11C Adaptive Events v0 (IN_REVIEW)
+
+Phase 11C.1C-C-B-B-B-E-B *Reflection Extension for 11C Adaptive
+Events v0* opens as **IN_REVIEW** with this implementation PR. The
+phase is the second block of Block C (Block C2 — Reflection
+Extension) and is the only phase the C1 Replay Extension PR (PR #78)
+authorised.
+
+### What changed
+
+  - Added `app/reflection/adaptive_11c.py`, a read-only reflection
+    extension that turns every supported Phase 11C adaptive event
+    into one deterministic `AdaptiveReflectionCase` (and aggregates
+    them into one `AdaptiveReflectionSummary`). Public surface:
+    `AdaptiveReflectionTag` (closed enum of 19 tags including the
+    18 brief-mandated tags + `late_discovery`),
+    `AdaptiveReflectionSeverity` (closed enum), `Reflection11CAdaptiveEngine`
+    (pure stateless engine), `AdaptiveReflectionInput` /
+    `AdaptiveReflectionCase` / `AdaptiveReflectionSummary`
+    (frozen dataclasses with `to_payload()` plus a recursive
+    forbidden-key guard).
+  - Wired the new symbols through `app/reflection/__init__.py`.
+  - Added `tests/unit/test_reflection_11c_adaptive_events.py`
+    covering the brief's required test surface (POST_DISCOVERY_OUTCOME
+    tags, REJECT_TO_OUTCOME tags, SEVERE_MISSED_TAIL tags,
+    DISCOVERY_QUALITY DEGRADED tag, HISTORICAL_MOVER_COVERAGE missed
+    tag, missing-fields-do-not-crash, evidence_refs-preserved,
+    auto_tuning_allowed=false on every payload, forbidden-imports
+    static check, forbidden-fields-absent guard, deterministic ordering).
+  - Added `docs/PHASE_11C_1C_C_B_B_B_E_B_REFLECTION_EXTENSION_11C_EVENTS.md`
+    as the phase design / acceptance doc.
+
+### Forbidden / not done in this phase
+
+  - Stage closeout is **not** done.
+  - DeepSeek is **not** wired in.
+  - Phase 12 is **not** entered.
+  - Auto-tuning is **not** enabled. Every emitted case + summary
+    carries `auto_tuning_allowed=False`. `to_payload()` hard-pins
+    the value to `False` even if a caller overrides it.
+  - LLM / natural-language reflection is **not** produced. Tags are
+    drawn from a closed enum only.
+  - Reflection does **not** depend on chat history or external state.
+  - No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+    `app/llm/`, `app/telegram/`, or `app/config/` is touched.
+  - No change to `symbol_limit`, anomaly thresholds,
+    `candidate_pool`, or regime weights.
+  - No `runtime_config_patch` is produced.
+  - No `buy` / `sell` / `long` / `short` / `position_size` /
+    `leverage` / `stop` / `target` / `risk_budget` field is produced.
+  - **Phase 12 remains FORBIDDEN.**
+
+### Safety boundary (held)
+
+`mode=paper`, `live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`, no Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`, no
+real Telegram outbound, no DeepSeek trade decision. The Risk Engine
+remains the single trade-decision gate.
+
+### Tests
+
+`python -m pytest tests/unit/test_reflection_11c_adaptive_events.py -q`
+ships 42 PASSING tests; `python -m pytest tests/unit -q` reports
+2680 PASSING tests, 0 failures.
+
+### Successor allowed by this phase
+
+Only **Phase 11C.1C-C-B-B-B-E-C "C3 Evidence Contract Baseline"**
+is unlocked by a successful Phase 11C.1C-C-B-B-B-E-B. No other
+phase is unlocked. Phase 12 remains **FORBIDDEN**.
+
+
+
+
 ## Phase 11C.1C-C-B-B-B-E-A — Replay Extension for 11C Adaptive Events v0 (IN_REVIEW)
 
 Phase 11C.1C-C-B-B-B-E-A *Replay Extension for 11C Adaptive Events
