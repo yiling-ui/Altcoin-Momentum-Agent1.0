@@ -690,6 +690,73 @@ class EventType(str, Enum):
         "POST_DISCOVERY_OUTCOME_REPORT_GENERATED"
     )
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-C-A - Reject-to-Outcome Attribution v0
+    # (*拒绝决策到结果归因 v0*).
+    #
+    # The Reject-to-Outcome Attribution v0 layer closes the loop
+    # between:
+    #
+    #     opportunity_id
+    #         -> risk_reject_reason / no_trade_reason / strategy_mode
+    #         -> tail_label / post_discovery_outcome
+    #         -> reject correctness verdict
+    #
+    # For every audited candidate the runtime emits a closed
+    # ``RejectAttributionVerdict`` (CORRECT_PROTECTIVE_REJECT /
+    # FALSE_NEGATIVE_REJECT / DATA_QUALITY_REJECT /
+    # LIQUIDITY_PROTECTIVE_REJECT / MANIPULATION_PROTECTIVE_REJECT /
+    # STOP_SAFETY_REJECT / REBASE_PROTECTIVE_REJECT /
+    # SYSTEM_SAFETY_REJECT / STRATEGY_MODE_FALSE_NEGATIVE /
+    # NO_REJECT_FOUND / INSUFFICIENT_EVIDENCE / UNKNOWN).
+    #
+    # Phase 11C.1C-C-B-B-B-D-C-A boundary:
+    # - Every event below is paper / report / evidence only. None
+    #   of them authorises a real trade, modifies a real position,
+    #   or flips a Phase 1 safety flag.
+    # - The ``verdict`` carried by every payload is *descriptive* -
+    #   it is NEVER an input to a trade-decision pipeline; the Risk
+    #   Engine remains the single trade-decision gate.
+    # - The attribution MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution
+    #   FSM, ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - The payload MUST NOT include any of:
+    #   buy / sell / long / short / direction / entry / exit /
+    #   position_size / leverage / stop / stop_loss / target /
+    #   take_profit / risk_budget / order / execution_command /
+    #   runtime_config_patch / symbol_limit_patch /
+    #   threshold_patch / candidate_pool_patch /
+    #   regime_weight_patch.
+    # - Every payload MUST carry ``auto_tuning_allowed=False`` and
+    #   ``evidence_refs``.
+    # - A ``FALSE_NEGATIVE_REJECT`` verdict does **NOT** authorise
+    #   the Risk Engine to be loosened. It routes the case to a
+    #   human reviewer.
+    #
+    #   REJECT_TO_OUTCOME_ATTRIBUTION_GENERATED - one
+    #     :class:`RejectAttributionReport` was assembled across
+    #     many records. Carries the aggregate counts, the verdict
+    #     / reason summaries, and the operator-review / rule-review
+    #     / data-recovery symbol lists.
+    #   REJECT_TO_OUTCOME_CASE_ATTRIBUTED        - one
+    #     :class:`RejectAttributionRecord` was emitted for one
+    #     audited candidate. Carries the descriptive verdict +
+    #     primary / secondary reasons + ``evidence_refs``.
+    #   FALSE_NEGATIVE_REJECT_DETECTED           - shorthand event
+    #     for the operator-review queue: one record was attributed
+    #     ``FALSE_NEGATIVE_REJECT`` or ``STRATEGY_MODE_FALSE_NEGATIVE``.
+    #   CORRECT_PROTECTIVE_REJECT_CONFIRMED      - shorthand event
+    #     for the closed-out queue: one record was attributed as
+    #     a correct protective reject (CORRECT_PROTECTIVE_REJECT
+    #     or any of the hard-safety protective verdicts).
+    REJECT_TO_OUTCOME_ATTRIBUTION_GENERATED = (
+        "REJECT_TO_OUTCOME_ATTRIBUTION_GENERATED"
+    )
+    REJECT_TO_OUTCOME_CASE_ATTRIBUTED = "REJECT_TO_OUTCOME_CASE_ATTRIBUTED"
+    FALSE_NEGATIVE_REJECT_DETECTED = "FALSE_NEGATIVE_REJECT_DETECTED"
+    CORRECT_PROTECTIVE_REJECT_CONFIRMED = "CORRECT_PROTECTIVE_REJECT_CONFIRMED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(

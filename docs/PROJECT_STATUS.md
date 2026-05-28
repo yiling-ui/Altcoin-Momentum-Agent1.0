@@ -7,6 +7,196 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-C-A — Reject-to-Outcome
+> Attribution v0 (*拒绝决策到结果归因 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until evidence closeout).**
+>
+> Phase 11C.1C-C-B-B-B-D-A described the *discovery* layer
+> (did we see the mover, when, how deep). Phase
+> 11C.1C-C-B-B-B-D-B / B.1 described the *post-discovery
+> outcome* (how much room remained after first sighting,
+> with the daily-bucket price-path adapter). The project
+> still lacked a closed loop linking **candidate-level
+> reject decisions** to those **outcome labels**.
+>
+> This slice ships that closure as a paper / report /
+> evidence attribution layer:
+>
+> ```
+> opportunity_id
+>     -> risk_reject_reason / no_trade_reason / strategy_mode
+>     -> tail_label / post_discovery_outcome
+>     -> reject correctness verdict
+> ```
+>
+> For every audited candidate the runtime emits a closed
+> `RejectAttributionVerdict`
+> (`CORRECT_PROTECTIVE_REJECT` /
+> `FALSE_NEGATIVE_REJECT` /
+> `DATA_QUALITY_REJECT` /
+> `LIQUIDITY_PROTECTIVE_REJECT` /
+> `MANIPULATION_PROTECTIVE_REJECT` /
+> `STOP_SAFETY_REJECT` /
+> `REBASE_PROTECTIVE_REJECT` /
+> `SYSTEM_SAFETY_REJECT` /
+> `STRATEGY_MODE_FALSE_NEGATIVE` /
+> `NO_REJECT_FOUND` /
+> `INSUFFICIENT_EVIDENCE` /
+> `UNKNOWN`). The verdict is descriptive only.
+>
+> **NOT** live trading. **NOT** AI Learning. **NOT**
+> automatic parameter optimisation. **NOT** reinforcement
+> learning. **NOT** rule relaxation based on outcome
+> labels. **NOT** automatic `symbol_limit` expansion.
+> **NOT** automatic anomaly threshold changes. **NOT**
+> automatic candidate-pool capacity changes. **NOT**
+> automatic Regime weight changes. **NOT** a Risk Engine
+> change. **NOT** an Execution FSM change. **NOT** a
+> direction call (long / short / entry / exit / stop /
+> target / position size / leverage). **NOT** Severe
+> Missed Tail Triage (B2; later slice). **NOT** Replay /
+> Reflection extension (later slice). **NOT** the DeepSeek
+> integration. **NOT** Phase 12. The Risk Engine remains
+> the single trade-decision gate.
+>
+> ### What this PR ships
+>
+>   - New module
+>     `app/adaptive/reject_to_outcome_attribution.py`
+>     (paper / pure / deterministic):
+>       - `RejectAttributionInput`,
+>         `RejectAttributionRecord`,
+>         `RejectAttributionReport`,
+>         `RejectToOutcomeAttributionEngine`,
+>         `RejectAttributionEngineConfig`.
+>       - `RejectAttributionVerdict` closed string-constant
+>         taxonomy (12 verdict labels + `PROTECTIVE` /
+>         `FALSE_NEGATIVE` groupings).
+>       - Reason / flag substring taxonomies for stop
+>         safety, system safety, data quality, liquidity,
+>         manipulation, and rebase rejects.
+>       - `assert_payload_has_no_forbidden_keys` recursive
+>         guard against any trade-authority / runtime-tuning
+>         field landing in a payload.
+>       - Hard-pinned `auto_tuning_allowed=False` on every
+>         emitted record / report.
+>   - Four new typed events in `app/core/events.py`
+>     (paper / report / evidence only):
+>       - `EventType.REJECT_TO_OUTCOME_ATTRIBUTION_GENERATED`
+>       - `EventType.REJECT_TO_OUTCOME_CASE_ATTRIBUTED`
+>       - `EventType.FALSE_NEGATIVE_REJECT_DETECTED`
+>       - `EventType.CORRECT_PROTECTIVE_REJECT_CONFIRMED`
+>   - Public exports added to
+>     `app/adaptive/__init__.py`.
+>   - New unit-test module
+>     `tests/unit/test_reject_to_outcome_attribution.py`
+>     covering every brief-mandated acceptance test (stop
+>     safety reject remains protective, data quality
+>     reject, liquidity protective reject, manipulation
+>     protective reject, false negative reject, strategy
+>     mode false negative, no reject found, insufficient
+>     evidence, forbidden fields absent, no forbidden
+>     imports).
+>   - New phase doc
+>     `docs/PHASE_11C_1C_C_B_B_B_D_C_A_REJECT_TO_OUTCOME_ATTRIBUTION.md`.
+>
+> ### What this PR does NOT ship
+>
+>   - No change to `app/risk/`, `app/execution/`,
+>     `app/exchanges/`, `app/llm/`, `app/telegram/`,
+>     `app/config/`.
+>   - No change to live trading flag, runtime config,
+>     thresholds, `symbol_limit`, `candidate_pool`, Regime
+>     weights, the DeepSeek transport, or the Telegram
+>     outbound transport.
+>   - No new private API surface, no signed endpoint, no
+>     `listenKey`, no real Telegram outbound, no DeepSeek
+>     trade decision.
+>   - No automatic parameter tuning. No "looking at the
+>     answer key" against the post-hoc reference set.
+>   - No new strategy. No new trading module. No new
+>     direction classification. No new sizing rule.
+>   - No Severe Missed Tail Triage slice (B2 — separate
+>     slice).
+>   - No real evidence closeout. No real-data run is
+>     performed by this PR; the implementation is
+>     evidence-ready but the closeout is a separate later
+>     PR.
+>   - No Replay / Reflection extension for the new events
+>     (separate slice).
+>   - No DeepSeek integration (separate phase).
+>   - No Phase 12.
+>
+> ### Forbidden surface (verbatim)
+>
+>   - `app/risk/**`, `app/execution/**`,
+>     `app/exchanges/**`, `app/llm/**`, `app/telegram/**`,
+>     `app/config/**`.
+>   - Binance private API (no API key, no API secret, no
+>     signed endpoint, no `listenKey`, no private WS).
+>   - Live orders.
+>   - Real Telegram outbound.
+>   - DeepSeek / LLM trade decisions (direction, position
+>     size, leverage, stop-loss, target price, execution
+>     command, runtime config patch).
+>   - Automatic parameter tuning (incl. `symbol_limit`
+>     expansion, anomaly threshold change, candidate pool
+>     capacity change, Regime weight change).
+>   - Phase 12 (real money / live trading).
+>
+> ### Safety boundary (held end-to-end)
+>
+>   - `mode = paper`
+>   - `live_trading = False`
+>   - `exchange_live_orders = False`
+>   - `right_tail = False`
+>   - `llm = False`
+>   - `telegram_outbound_enabled = False`
+>   - `binance_private_api_enabled = False`
+>   - no Binance API key
+>   - no Binance API secret
+>   - no signed endpoint
+>   - no account / order / position / leverage / margin
+>     endpoint
+>   - no private websocket
+>   - no `listenKey`
+>   - no real Telegram outbound
+>   - no DeepSeek trade decision
+>   - **Phase 12 = FORBIDDEN**
+>
+> **The Risk Engine remains the single trade-decision
+> gate.**
+>
+> ### Tests
+>
+>   - `tests/unit/test_reject_to_outcome_attribution.py` —
+>     43 / 43 PASS.
+>   - Full `tests/unit` suite — 2543 / 2543 PASS (no
+>     regression vs. post-PR-#71 main 2531 baseline; +12
+>     new tests on the new module).
+>
+> ### Why a `FALSE_NEGATIVE_REJECT` does NOT mean "loosen the Risk Engine"
+>
+> A false-negative verdict is a single-case observation:
+> at least one candidate ran upside after a non-hard-safety
+> reject. It does **NOT** mean the Risk Engine's *policy*
+> is wrong. It does **NOT** account for the cases the same
+> rule prevented from going wrong — those are also
+> non-trades, and they are also part of the rule's value.
+> It does **NOT** guarantee a similar outcome on the next
+> candidate; outcome volatility is high in altcoin
+> momentum. It MUST be reviewed by a human, against a
+> portfolio of cases, before any rule is touched. The
+> rule-touching itself is **out of scope** for this phase.
+> Every emitted record carries `auto_tuning_allowed=False`
+> regardless of the verdict; the aggregate
+> `RejectAttributionReport.auto_tuning_allowed` is also
+> hard-pinned to `False`.
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-B.1 — Historical Price Path
 > Completeness / Kline Path Adapter v0 (*历史价格路径完整性 /
 > K线路径适配器 v0*).**
