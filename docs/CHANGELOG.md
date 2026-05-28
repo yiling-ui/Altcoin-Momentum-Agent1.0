@@ -7,6 +7,207 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase AI-2 — Truth Layer / AI Evidence Citation Contract v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / read-only).
+**Runtime effect:** **none on real trading.** A new read-only
+module `app/ai/claim_contract.py` is added alongside the existing
+`app/ai/evidence_bundle.py` (Phase AI-1), with `app/ai/__init__.py`
+extended to re-export the Phase AI-2 public surface, and a
+matching unit-test module under
+`tests/unit/test_ai_evidence_citation_contract.py` (70 tests). No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, no event type, no database schema
+/ migration is touched. The module is read-only: it never appends,
+mutates, or reorders rows in `events.db`; it never produces
+direction, sizing, leverage, stop, target, or risk-budget fields;
+it never produces a `runtime_config_patch`; and it never calls an
+LLM / DeepSeek / Telegram outbound. No runtime knob (`symbol_limit`,
+anomaly threshold, candidate pool capacity, Regime weights) is
+changed.
+**Phase ledger effect:** opens Phase AI-2 as **`IN_REVIEW`**
+(not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`,
+no DeepSeek trade decision, no real Telegram outbound. **Phase 12
+remains FORBIDDEN.**
+**Auto-tuning effect:** **none.** `auto_tuning_allowed=false` is
+hard-pinned at every `to_dict()` boundary even if a caller flips
+the dataclass field. The recursive `_assert_no_forbidden_fields`
+guard refuses to emit any payload carrying a `*_patch` key.
+**Successor allowed:** later (separately gated) **AI Reality Check
+Layer** that cross-verifies an AI claim's `claim_text` against the
+Phase AI-1 Evidence Bundle cited in `evidence_refs`, **OR** later
+offline AI / operator-briefing report generation that consumes
+`AIClaimCitationResult` as a frozen input, **OR** the eventual
+**Operator Briefing** layer. No other phase is unlocked.
+
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).** This slice ships the
+> AI Layer's *claim-level* citation contract: every AI claim
+> MUST cite Truth-Layer evidence via `evidence_refs`. Claims
+> without `evidence_refs` are demoted; claims with malformed
+> `evidence_refs` are rejected (strict mode) or demoted
+> (non-strict mode); commentary-only claims stay
+> commentary-only; trade-action / runtime-config-patch field
+> names smuggled into a claim are rejected by schema. The
+> maximum authority any claim can reach is
+> `SUPPORTED_INTELLIGENCE`, which is *commentary substrate*
+> only - **no member of `AIClaimAuthorityLevel` grants trade
+> authority**. The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced in
+> code AND in tests. **Phase 12 remains FORBIDDEN.** The Risk
+> Engine remains the single trade-decision gate.
+
+#### Added
+
+- `app/ai/claim_contract.py` — paper / pure / deterministic
+  schema, validator, and recursive guards. Ships:
+  - `AIClaimAuthorityLevel` closed enum with 6 values:
+    `COMMENTARY_ONLY`, `SUPPORTED_INTELLIGENCE`,
+    `UNSUPPORTED_INTELLIGENCE`, `DEGRADED_NO_EVIDENCE`,
+    `REJECTED_BY_SCHEMA`, `REJECTED_INVALID_EVIDENCE`. **No
+    member grants trade authority.** `UNSUPPORTED_INTELLIGENCE`
+    is reserved for the later Reality Check Layer; the v0
+    validator never produces it.
+  - `AIClaimType` closed enum with 10 values: `REGIME`,
+    `NARRATIVE`, `LIQUIDITY`, `RISK`, `COVERAGE`, `OUTCOME`,
+    `CONTRADICTION`, `REPLAY_SUMMARY`, `REFLECTION_SUMMARY`,
+    `EVIDENCE_QUALITY`.
+  - `AIClaimInput` / `AIClaim` frozen dataclasses preserving
+    `claim_id`, `claim_type`, `claim_text`, `evidence_refs`,
+    `truth_layer_fields_used`, `confidence_raw`, `warnings`,
+    `authority_level` (final, set by validator),
+    `intended_authority_level` (producer intent, on input
+    only), `schema_version`.
+  - `AIClaimCitationResult` frozen dataclass carrying
+    `claims`, `accepted_claim_count`, `degraded_claim_count`,
+    `rejected_claim_count`, `missing_evidence_count`,
+    `invalid_evidence_count`, `warnings`, `strict`, plus the
+    hard-pinned `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_training_label=False`,
+    `phase_12_forbidden=true`, `auto_tuning_allowed=false`
+    flags, the `safety_flags` block, the
+    `supported_evidence_ref_formats` /
+    `supported_evidence_ref_prefixes` lists, and the
+    sorted `forbidden_fields` list. Re-pinned at every
+    `to_dict()` boundary even if the dataclass field is
+    mutated.
+  - `AIClaimCitationValidator` (and the `validate_ai_claims`
+    convenience wrapper) — deterministic; coerces every input
+    to a JSON-serializable form; rejects unknown
+    `claim_type` / missing `claim_id` / missing `claim_text` /
+    forbidden-field smuggling via
+    `AIClaimAuthorityLevel.REJECTED_BY_SCHEMA`; demotes
+    claims without `evidence_refs` via
+    `AIClaimAuthorityLevel.DEGRADED_NO_EVIDENCE` (NEVER
+    inventing a substitute citation); rejects (strict mode)
+    or demotes (non-strict mode) claims with malformed
+    `evidence_refs`; preserves `evidence_refs` and
+    `truth_layer_fields_used` verbatim in input order; runs
+    the recursive `_assert_no_forbidden_fields` guard at the
+    serialisation boundary.
+  - Closed evidence-ref grammar:
+    `event:<EVENT_TYPE>:<event_id>`, `symbol:<SYMBOL>`,
+    `opportunity:<opportunity_id>`,
+    `scan_batch:<scan_batch_id>`,
+    `metric:<metric_name>:<window>`, `report:<report_id>`.
+    Compiled regex per prefix; total validity check is
+    available via `_is_valid_evidence_ref`.
+  - `_find_forbidden_field_in_claim` per-claim guard that
+    rejects claims whose `claim_id` / `claim_type` /
+    `claim_text` / `evidence_refs` /
+    `truth_layer_fields_used` contains a forbidden
+    trade-action / runtime-config-patch field name verbatim.
+    Whole-string match — does NOT do substring scanning of
+    free-form prose, so a legitimate narrative containing
+    the word `buy` in a sentence is NOT rejected.
+  - Re-uses the recursive `_assert_no_forbidden_fields`
+    output guard from `app.ai.evidence_bundle` against
+    `buy`, `sell`, `long`, `short`, `direction`, `side`,
+    `entry`, `exit`, `position_size`, `leverage`, `stop`,
+    `stop_loss`, `stop_price`, `target`, `target_price`,
+    `take_profit`, `risk_budget`, `order`, `order_type`,
+    `execution_command`, `runtime_config_patch`,
+    `symbol_limit_patch`, `threshold_patch`,
+    `candidate_pool_patch`, `regime_weight_patch`,
+    `strategy_parameter_patch`, `signal_to_trade`,
+    `should_buy`, `should_short`, plus defensive aliases
+    `trading_approved`, `live_ready`, `live_trading_allowed`.
+    Re-exported as `FORBIDDEN_CLAIM_FIELDS`.
+  - Does NOT import `app.risk`, `app.execution`,
+    `app.exchanges`, `app.llm`, `app.telegram`, or
+    `app.config` (AST-checked). Does NOT import `openai`,
+    `anthropic`, `deepseek`, `httpx`, `requests`, `aiohttp`,
+    `urllib3`, `websocket`, `websockets`, `grpc`, or `boto3`
+    (AST-checked).
+- `app/ai/__init__.py` — extended to re-export the Phase AI-2
+  public API alongside the Phase AI-1 surface:
+  `AIClaimAuthorityLevel`, `AIClaimType`, `AIClaimInput`,
+  `AIClaim`, `AIClaimCitationResult`,
+  `AIClaimCitationValidator`, `validate_ai_claims`,
+  `FORBIDDEN_CLAIM_FIELDS`, `SUPPORTED_EVIDENCE_REF_FORMATS`,
+  `SUPPORTED_EVIDENCE_REF_PREFIXES`,
+  `AI_CLAIM_CONTRACT_SCHEMA_VERSION`,
+  `AI_CLAIM_CONTRACT_SOURCE_PHASE`,
+  `AI_CLAIM_CONTRACT_SOURCE_MODULE`.
+- `tests/unit/test_ai_evidence_citation_contract.py` (70
+  cases) covering every brief-mandated scenario:
+  supported-with-valid-refs → `SUPPORTED_INTELLIGENCE`,
+  no-refs → `DEGRADED_NO_EVIDENCE`, invalid-ref →
+  `REJECTED_INVALID_EVIDENCE` (strict) or degraded
+  (non-strict), commentary-only stays commentary-only,
+  multiple `evidence_refs` preserved verbatim,
+  `truth_layer_fields_used` preserved verbatim, validator
+  never invents missing `evidence_refs`, forbidden trade
+  fields rejected / stripped / absent (parametrised over 25
+  fields), result summary counts correct, deterministic
+  output, JSON-serializable output, forbidden imports
+  (`app.risk`/`app.execution`/`app.exchanges`/`app.llm`/
+  `app.telegram`/`app.config`) absent, no LLM / DeepSeek /
+  HTTP call path (AST + public-callable check), defensive
+  companions (closed enum coverage, strict-mode default,
+  Mapping-input coercion, prefix coverage, phase-12
+  invariants smoke).
+- `docs/PHASE_AI_2_TRUTH_LAYER_EVIDENCE_CITATION_CONTRACT.md` —
+  new phase doc.
+
+#### Changed
+
+- `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+  `docs/CHANGELOG.md` (this entry) updated to reflect Phase
+  AI-2 = **IN_REVIEW**.
+
+#### Tests
+
+- `python -m pytest tests/unit/test_ai_evidence_citation_contract.py -q`:
+  70 PASS / 0 fail.
+- `python -m pytest tests/unit -q`: 2851 PASS / 0 fail (was
+  2781 before this phase; +70 from this phase).
+
+#### Safety boundary (held end-to-end)
+
+- `mode = paper`
+- `live_trading = False`
+- `exchange_live_orders = False`
+- `right_tail = False`
+- `llm = False`
+- `telegram_outbound_enabled = False`
+- `binance_private_api_enabled = False`
+- no Binance API key / secret
+- no signed endpoint
+- no private WebSocket
+- no `listenKey`
+- no real Telegram outbound
+- no DeepSeek trade decision
+- **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
 ### Phase AI-1 — AI Evidence Bundle Builder v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / read-only).

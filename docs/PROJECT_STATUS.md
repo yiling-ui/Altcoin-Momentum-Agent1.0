@@ -7,80 +7,76 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
-> **Phase AI-1 — AI Evidence Bundle Builder v0
-> (*AI 证据包构建器 v0*).**
+> **Phase AI-2 — Truth Layer / AI Evidence Citation Contract v0
+> (*真相层 / AI 证据引用契约 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not
 > `ACCEPTED` until maintainer review).**
 >
 > Block A is complete. Block B is complete and the Block B
 > Integrated Evidence Checkpoint is `PARTIAL_EVIDENCE` (advance
-> allowed). Block C is complete: C1 *Replay Extension for 11C
-> Adaptive Events v0* merged, C2 *Reflection Extension for 11C
-> Adaptive Events v0* merged, C3 *Evidence Contract Baseline v0*
-> merged. The Block C Integrated Checkpoint has been driven on
-> the operator server and produced
-> `status=EVIDENCE_GENERATED`, `replay_status=EVIDENCE_GENERATED`,
+> allowed). Block C is complete: C1 / C2 / C3 merged. The Block C
+> Integrated Checkpoint produced
+> `status=EVIDENCE_GENERATED`,
+> `replay_status=EVIDENCE_GENERATED`,
 > `reflection_status=EVIDENCE_GENERATED`,
 > `evidence_contract_status=EVIDENCE_GENERATED`,
 > `accepted_claim_count=2704`,
 > `degraded/rejected/missing/invalid=0`,
 > `phase_12_forbidden=true`, `auto_tuning_allowed=false`,
-> `known_blockers=[]`. The project is therefore allowed to
-> enter AI **read-only** Evidence Bundle preparation. The
-> project is still **paper only** and Phase 12 remains
-> **FORBIDDEN**.
+> `known_blockers=[]`. Phase AI-1 (the AI Evidence Bundle
+> Builder v0) is `IN_REVIEW` after PR #82 was merged. The
+> project is therefore allowed to enter the AI **claim-level**
+> citation contract. The project is still **paper only** and
+> Phase 12 remains **FORBIDDEN**.
 >
-> This slice ships the AI Evidence Bundle Builder v0 - the AI
-> Layer's only allowed read surface - as a closed schema, a
-> deterministic builder, a paranoid intake guard, and a
-> 55-test unit harness. The builder constructs frozen,
-> evidence-cited, deterministic, JSON-serializable
-> `AIEvidenceBundle` objects from Truth-Layer facts at call
-> time. The bundle is the substrate any later AI / DeepSeek /
-> LLM call MUST receive *as the only input* and infer *only*
-> from. Without this substrate, a downstream AI integration
-> would be tempted to pull from `events.db`, the runtime
-> config, the Telegram channel, the Binance private API, or
-> its own previous answers - every one of which violates the
-> AI four root constraints in
-> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md`.
+> This slice ships the **AI Evidence Citation Contract v0** —
+> the AI Layer's claim-level rule that *every* AI claim MUST
+> cite Truth-Layer evidence via `evidence_refs`. Without this
+> contract a downstream AI / DeepSeek integration could emit
+> free-form prose and have it consumed as truth. The citation
+> contract makes the producer's evidence the *only* path to
+> commentary authority, demotes claims that fail to cite, and
+> rejects claims that cite malformed references.
 >
-> The four AI root constraints are enforced *in code* and *in
-> tests*:
+> The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced *in
+> code* and *in tests*:
 >
->   1. **Responsibility Isolation** - the bundle's
->      `forbidden_fields` block is a sorted tuple of every
->      trade-action / runtime-config-patch field name; the
->      recursive `_assert_no_forbidden_fields` guard refuses
->      to emit any payload carrying such a key at any nesting
->      depth, both on intake (so a caller cannot smuggle a
->      `buy` key through a fact's `content`) and at the
->      serialisation boundary.
->   2. **Stateless Inference** - the
->      `_scan_for_forbidden_input` guard rejects
->      `previous_ai_answer`, `chat_history`,
->      `private_account_state`, and credential-shaped key
->      names at any nesting depth in any input mapping.
->      `ForbiddenAIInputError` is raised on the first hit;
->      the builder fails *closed*, never silently strips or
->      transforms a forbidden input.
->   3. **Hard Rule Anchoring** - facts without
->      `evidence_refs` are demoted to `degraded_facts` with
->      `degradation_reason="no_evidence_refs_supplied"` and
->      a matching warning entry; such facts NEVER appear in
->      the accepted `*_facts` collections.
->   4. **Feedback Isolation** - the hard-pinned
->      `ai_output_is_commentary_only=True` and
->      `ai_output_can_be_training_label=False` flags are
->      re-emitted at every `to_dict()` boundary, even if a
->      downstream caller flips the dataclass field.
+>   1. **Responsibility Isolation** — claims and result
+>      payloads are scrubbed of every forbidden trade-action /
+>      runtime-config-patch field via the recursive
+>      `_assert_no_forbidden_fields` guard re-used from the
+>      Phase AI-1 module, plus the per-claim
+>      `_find_forbidden_field_in_claim` check that rejects
+>      claims smuggling forbidden field names into a
+>      citation-grammar slot.
+>   2. **Stateless Inference** — each
+>      `AIClaimCitationValidator.validate(...)` call is
+>      independent; no instance state is mutated between
+>      calls; the validator never reads previous AI answers,
+>      chat history, `listenKey` payloads, signed-endpoint
+>      payloads, or any private exchange / account state.
+>   3. **Hard Rule Anchoring** — *no `evidence_refs` => no
+>      accepted AI conclusion*. Claims without
+>      `evidence_refs` are demoted to
+>      `AIClaimAuthorityLevel.DEGRADED_NO_EVIDENCE`; claims
+>      with malformed `evidence_refs` are rejected
+>      (`REJECTED_INVALID_EVIDENCE`) in strict mode or demoted
+>      in non-strict mode. The validator NEVER invents a
+>      missing `evidence_refs` entry.
+>   4. **Feedback Isolation** — every emitted result re-pins
+>      `ai_output_is_commentary_only=True`,
+>      `ai_output_can_be_training_label=False`,
+>      `phase_12_forbidden=true`, `auto_tuning_allowed=false`
+>      so AI text can never become a training label or a
+>      runtime fact, even if a downstream caller flips the
+>      dataclass field.
 >
-> The bundle additionally pins the project-wide invariants:
+> The result additionally pins the project-wide invariants:
 > `mode=paper`, `live_trading=False`,
 > `exchange_live_orders=False`, `right_tail=False`,
 > `llm=False`, `telegram_outbound_enabled=False`,
-> `binance_private_api_enabled=False`,
-> `phase_12_forbidden=true`, `auto_tuning_allowed=false`.
+> `binance_private_api_enabled=False`.
 >
 > **NOT** live trading. **NOT** AI Learning. **NOT**
 > automatic parameter optimisation. **NOT** reinforcement
@@ -93,80 +89,84 @@ intentionally short. The full phase-gate ledger lives in
 > exit / stop / target / position size / leverage).
 > **NOT** a runtime-config patch. **NOT** the DeepSeek
 > integration (this phase does not call DeepSeek and does
-> not call any LLM). **NOT** Operator Briefing (separate
-> later phase). **NOT** Reality Check (separate later
-> phase). **NOT** Rule Sandbox. **NOT** any trading logic.
-> **NOT** Phase 12. The Risk Engine remains the single
-> trade-decision gate.
+> not call any LLM). **NOT** the Reality Check Layer (a
+> separate later phase). **NOT** Operator Briefing. **NOT**
+> Rule Sandbox. **NOT** any trading logic. **NOT** Phase 12.
+> The Risk Engine remains the single trade-decision gate.
 >
 > ### What this PR ships
 >
->   - New read-only package `app/ai/`:
->       - `app/ai/__init__.py` - re-exports the public API.
->       - `app/ai/evidence_bundle.py` - the schema, the
->         builder, the recursive forbidden-input guard, and
->         the recursive forbidden-output guard.
->   - `AIEvidenceBundleTaskType` closed enum (10 values:
->     `OPERATOR_BRIEFING`, `MARKET_INTELLIGENCE_SUMMARY`,
->     `COVERAGE_AUDIT_INTERPRETATION`,
->     `POST_DISCOVERY_OUTCOME_SUMMARY`,
->     `REJECT_TO_OUTCOME_SUMMARY`, `SEVERE_MISS_SUMMARY`,
->     `REPLAY_REFLECTION_SUMMARY`, `EVIDENCE_COMPRESSION`,
->     `CONTRADICTION_SUMMARY`,
->     `EVIDENCE_QUALITY_ASSESSMENT`).
->   - `AIEvidenceBundleBuildStatus` closed enum
->     (`EVIDENCE_BUNDLE_BUILT` /
->     `EVIDENCE_BUNDLE_DEGRADED` /
->     `EVIDENCE_BUNDLE_INSUFFICIENT_EVIDENCE`).
->   - `AIEvidenceBundleFactInput` /
->     `AIEvidenceBundleFact` frozen dataclasses preserving
->     `fact_id`, `fact_type`, `content`, `evidence_refs`,
->     `source_report`, `status`, `degradation_reason`,
->     `schema_version`.
->   - `AIEvidenceBundle` frozen dataclass carrying
->     `bundle_id`, `created_at_utc`, `task_type`,
->     `phase_context`, `reference_window`, the six
->     accepted-only `*_facts` collections, the
->     `degraded_facts` collection, the deduplicated
->     `evidence_refs` and `source_reports` lists, the
->     pinned `forbidden_fields` / `lookahead_policy` /
->     `consumer_contract` blocks, the `warnings` list, the
->     `build_status`, the `accepted_fact_count` /
->     `degraded_fact_count` counters, and the hard-pinned
+>   - `app/ai/claim_contract.py` — the schema, validator,
+>     forbidden-field guards, and supported evidence-ref
+>     grammar.
+>   - `app/ai/__init__.py` — extended re-exports for the
+>     Phase AI-2 public API.
+>   - `AIClaimAuthorityLevel` closed enum (6 values:
+>     `COMMENTARY_ONLY`, `SUPPORTED_INTELLIGENCE`,
+>     `UNSUPPORTED_INTELLIGENCE`, `DEGRADED_NO_EVIDENCE`,
+>     `REJECTED_BY_SCHEMA`, `REJECTED_INVALID_EVIDENCE`).
+>     **No member grants trade authority.** The maximum any
+>     claim can reach is `SUPPORTED_INTELLIGENCE`, which is
+>     *commentary substrate* only.
+>   - `AIClaimType` closed enum (10 values: `REGIME`,
+>     `NARRATIVE`, `LIQUIDITY`, `RISK`, `COVERAGE`,
+>     `OUTCOME`, `CONTRADICTION`, `REPLAY_SUMMARY`,
+>     `REFLECTION_SUMMARY`, `EVIDENCE_QUALITY`).
+>   - `AIClaimInput` / `AIClaim` frozen dataclasses
+>     preserving `claim_id`, `claim_type`, `claim_text`,
+>     `evidence_refs`, `truth_layer_fields_used`,
+>     `authority_level`, `confidence_raw`, `warnings`,
+>     `schema_version`. The validator NEVER paraphrases
+>     `claim_text`, NEVER invents a missing
+>     `evidence_refs`, NEVER fabricates a
+>     `truth_layer_fields_used` entry.
+>   - `AIClaimCitationResult` frozen dataclass carrying
+>     `claims`, `accepted_claim_count`,
+>     `degraded_claim_count`, `rejected_claim_count`,
+>     `missing_evidence_count`, `invalid_evidence_count`,
+>     `warnings`, `strict`, plus the hard-pinned
 >     `ai_output_is_commentary_only=True`,
 >     `ai_output_can_be_training_label=False`,
 >     `phase_12_forbidden=true`,
 >     `auto_tuning_allowed=false` flags.
->   - `AIEvidenceBundleBuilder` (and the
->     `build_ai_evidence_bundle` convenience wrapper) -
+>   - `AIClaimCitationValidator` (and the
+>     `validate_ai_claims` convenience wrapper) —
 >     deterministic; coerces every input to a
->     JSON-serializable form; rejects forbidden input keys
->     with `ForbiddenAIInputError` (a `ValueError`
->     subclass); demotes facts without `evidence_refs`;
->     deduplicates `evidence_refs` / `source_reports` in
->     first-seen order; runs the recursive
->     `_assert_no_forbidden_fields` guard at the
->     serialisation boundary.
+>     JSON-serializable form; rejects unknown `claim_type` /
+>     missing `claim_id` / missing `claim_text` /
+>     forbidden-field smuggling via `REJECTED_BY_SCHEMA`;
+>     demotes claims without `evidence_refs` via
+>     `DEGRADED_NO_EVIDENCE`; rejects (strict) or demotes
+>     (non-strict) claims with malformed `evidence_refs`;
+>     runs the recursive `_assert_no_forbidden_fields`
+>     guard at the serialisation boundary.
+>   - Closed evidence-ref grammar:
+>     `event:<EVENT_TYPE>:<event_id>`, `symbol:<SYMBOL>`,
+>     `opportunity:<opportunity_id>`,
+>     `scan_batch:<scan_batch_id>`,
+>     `metric:<metric_name>:<window>`,
+>     `report:<report_id>`. Adding a new prefix is a
+>     deliberate code change AND a brief amendment.
 >   - New unit-test module
->     `tests/unit/test_ai_evidence_bundle_builder.py` (55
->     cases) covering every brief-mandated scenario:
->     builds bundle from valid evidence-cited facts,
->     drops/degrades facts without `evidence_refs`,
->     preserves `evidence_refs`, injects `forbidden_fields`
->     / `lookahead_policy` / `consumer_contract`, rejects
->     `previous_ai_answer` / `chat_history` /
->     `private_account_state` / credential-like inputs at
->     any nesting depth, no forbidden output fields as
->     actionable decisions (parametrised over 18 fields),
->     deterministic output, JSON-serializable output,
->     forbidden imports
+>     `tests/unit/test_ai_evidence_citation_contract.py`
+>     (70 cases) covering every brief-mandated scenario:
+>     supported-with-valid-refs → `SUPPORTED_INTELLIGENCE`,
+>     no-refs → `DEGRADED_NO_EVIDENCE`, invalid-ref →
+>     `REJECTED_INVALID_EVIDENCE` (strict) or degraded
+>     (non-strict), commentary-only stays commentary-only,
+>     multiple `evidence_refs` preserved verbatim,
+>     `truth_layer_fields_used` preserved verbatim,
+>     validator never invents missing `evidence_refs`,
+>     forbidden trade fields rejected / stripped / absent
+>     (parametrised over 25 fields), result summary counts
+>     correct, deterministic output, JSON-serializable
+>     output, forbidden imports
 >     (`app.risk`/`app.execution`/`app.exchanges`/`app.llm`/
 >     `app.telegram`/`app.config`) absent, no LLM /
 >     DeepSeek / HTTP call path (AST + public-callable
->     check), AI output cannot become truth / training
->     label field.
+>     check).
 >   - New phase doc
->     `docs/PHASE_AI_1_EVIDENCE_BUNDLE_BUILDER.md`.
+>     `docs/PHASE_AI_2_TRUTH_LAYER_EVIDENCE_CITATION_CONTRACT.md`.
 >
 > ### What this PR does NOT ship
 >
@@ -182,8 +182,8 @@ intentionally short. The full phase-gate ledger lives in
 >     migration.
 >   - No new strategy. No new trading module. No new
 >     direction classification. No new sizing rule.
->   - No Operator Briefing. No Reality Check. No Rule
->     Sandbox. No trading logic.
+>   - No Operator Briefing. No Reality Check engine. No
+>     Rule Sandbox. No trading logic.
 >   - No automatic parameter tuning.
 >   - **No Phase 12.**
 >
@@ -209,159 +209,86 @@ intentionally short. The full phase-gate ledger lives in
 >
 > ### Tests
 >
->   - `tests/unit/test_ai_evidence_bundle_builder.py` —
->     55/55 PASS.
->   - Full `tests/unit` suite — 2781/2781 PASS (no
->     regression vs. post-PR-#81 main 2726 baseline; +55
+>   - `tests/unit/test_ai_evidence_citation_contract.py` —
+>     70/70 PASS.
+>   - Full `tests/unit` suite — 2851/2851 PASS (no
+>     regression vs. post-PR-#82 main 2781 baseline; +70
 >     new tests on the new module).
 >
-> ### Why Phase AI-1 does NOT authorise live trading
+> ### Why Phase AI-2 does NOT authorise live trading
 >
-> Phase AI-1 builds the *substrate* a later AI integration
-> will read. It does not call DeepSeek, does not call any
-> LLM, does not open any network socket, and does not
-> produce any direction / sizing / leverage / stop / target
-> / risk-budget / order / runtime-config-patch field. The
-> bundle's `safety_flags` block re-pins
+> No member of `AIClaimAuthorityLevel` grants trade
+> authority. Even `SUPPORTED_INTELLIGENCE` is *commentary
+> substrate* only — it does NOT direct the Risk Engine, the
+> Execution FSM, the Capital Flow Engine, the Reconciler, or
+> any other trade-authority surface. The result's
+> `safety_flags` block re-pins
 > `mode=paper` / `live_trading=False` /
 > `exchange_live_orders=False` / `llm=False` etc. on every
 > emission. Live-trading approval is a Phase 12 concern
 > that requires the Spec §41 Go/No-Go checklist, and the
 > checklist has **not** been initiated.
 >
-> ### Why Phase AI-1 does NOT authorise auto-tuning
+> ### Why Phase AI-2 does NOT authorise auto-tuning
 >
-> Every emitted bundle carries `auto_tuning_allowed=false`.
+> Every emitted result carries `auto_tuning_allowed=false`.
 > The constant is hard-pinned at every `to_dict()` boundary
-> even if a caller flips the dataclass field. The
-> recursive `_assert_no_forbidden_fields` guard refuses to
-> emit any payload that contains a `*_patch` key
+> even if a caller flips the dataclass field. The recursive
+> `_assert_no_forbidden_fields` guard refuses to emit any
+> payload that contains a `*_patch` key
 > (`runtime_config_patch`, `symbol_limit_patch`,
 > `threshold_patch`, `candidate_pool_patch`,
-> `regime_weight_patch`, `strategy_parameter_patch`).
-> Routing operator queues is a *human* decision; the
-> bundle never carries an automated runtime-knob change.
+> `regime_weight_patch`, `strategy_parameter_patch`); a
+> claim that smuggles such a field via `claim_id` /
+> `claim_type` / `claim_text` / `evidence_refs` /
+> `truth_layer_fields_used` is rejected via
+> `REJECTED_BY_SCHEMA`.
+>
+> ### Why Phase AI-2 does NOT implement Reality Check
+>
+> Reality Check is a later, separately gated phase. Phase
+> AI-2 only validates the *citation contract*: presence,
+> prefix grammar, schema, forbidden-field absence. It does
+> NOT cross-verify a claim's `claim_text` against the
+> *content* of the cited evidence. The
+> `UNSUPPORTED_INTELLIGENCE` member of
+> `AIClaimAuthorityLevel` is reserved for the Reality Check
+> Layer; the v0 validator never produces it.
 >
 > ### Successor allowed by this phase
 >
-> Only later (separately gated) **offline AI /
-> operator-briefing report generation** that consumes the
-> bundle as a frozen input AND the eventual **AI Reality
-> Check** layer that verifies AI commentary against the
-> Truth Layer. **NOT** DeepSeek trade decisions. **NOT**
+> Only the later (separately gated) **AI Reality Check
+> Layer** that cross-verifies an AI claim's `claim_text`
+> against the Phase AI-1 Evidence Bundle, **OR** later
+> offline AI / operator-briefing report generation that
+> consumes `AIClaimCitationResult` as a frozen input,
+> **OR** the eventual Operator Briefing layer (separate
+> later phase). **NOT** DeepSeek trade decisions. **NOT**
 > the AI Layer's involvement in the Risk Engine. **NOT**
-> the AI Layer's involvement in the Execution FSM.
-> **NOT** auto-tuning. **NOT** real Telegram outbound.
-> **NOT** Phase 12.
+> the AI Layer's involvement in the Execution FSM. **NOT**
+> auto-tuning. **NOT** real Telegram outbound. **NOT**
+> Phase 12.
 >
 > *Prior status (kept for history; superseded by the entry
 > above):*
 >
-> **Phase 11C.1C-C-B-B-B-E-D — Block C Integrated Checkpoint v0
-> (*Block C 综合检查点 v0*).**
-> **Status: IN_REVIEW (after this implementation PR; not
-> `ACCEPTED` until the eventual whole-block Block C closeout).**
->
-> Block C (the C1 → C2 → C3 sequence) has shipped three paper /
-> report / evidence-only slices: C1 *Replay Extension for 11C
-> Adaptive Events v0* (merged), C2 *Reflection Extension for 11C
-> Adaptive Events v0* (merged), and C3 *Evidence Contract Baseline
-> v0* (merged). The project still lacked a single descriptive
-> aggregated report that an operator can read at-a-glance to
-> answer: *"Are Replay + Reflection + Evidence Contract chained
-> together end-to-end well enough to start the AI read-only
-> evidence-bundle prep, or do we need more operator evidence
-> first?"*. This slice ships that aggregation as a paper /
-> report / evidence-only Block C Integrated Checkpoint v0.
->
-> The checkpoint reads only local artefacts under
-> `data/reports/`, `data/reports/exports/`, and
-> `data/reports/block_b_integrated_evidence/`. It connects to no
-> network, calls no LLM / DeepSeek, and opens no Telegram socket.
-> It produces one
-> `block_c_integrated_checkpoint_report.json` and one
-> `block_c_integrated_checkpoint_report.md` under
-> `data/reports/block_c_integrated_checkpoint/`.
->
-> Status taxonomy is intentionally **not** `ACCEPTED`:
-> `INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` /
-> `EVIDENCE_GENERATED`. `next_allowed_phase` is either
-> `Phase AI-0 / AI Evidence Bundle preparation (paper / read-only)`
-> or `NEEDS_OPERATOR_EVIDENCE`. The runner **never** authorises
-> Phase 12 and **never** authorises auto-tuning;
-> `phase_12_forbidden = true` and `auto_tuning_allowed = false`
-> are hard-pinned on every emitted payload, asserted recursively
-> at the serialisation boundary alongside a closed forbidden-key
-> vocabulary.
->
-> **NOT** live trading. **NOT** AI Learning. **NOT** automatic
-> parameter optimisation. **NOT** reinforcement learning. **NOT**
-> rule relaxation based on the integrated status. **NOT** automatic
-> `symbol_limit` expansion. **NOT** automatic anomaly threshold
-> changes. **NOT** automatic candidate-pool capacity changes.
-> **NOT** automatic Regime weight changes. **NOT** a Risk Engine
-> change. **NOT** an Execution FSM change. **NOT** a direction
-> call (long / short / entry / exit / stop / target / position
-> size / leverage). **NOT** the AI Evidence Bundle build itself
-> (that is the *next-allowed* phase, not part of this PR).
-> **NOT** Paper Shadow. **NOT** Rule Sandbox. **NOT** the
-> DeepSeek integration. **NOT** Phase 12. The Risk Engine
-> remains the single trade-decision gate.
->
-> ### What this PR ships
->
->   - New runner
->     `scripts/run_block_c_integrated_checkpoint.py`
->     (paper / report / evidence only):
->       - reads existing `events.jsonl` / `*.jsonl` files under
->         `--reports-dir` / `--exports-dir`;
->       - reads the most recent
->         `block_b_integrated_evidence_report.json` under
->         `--block-b-dir`;
->       - drives the C1 replay builders, the C2
->         `Reflection11CAdaptiveEngine`, and the C3
->         `EvidenceContractValidator` on the loaded events;
->       - emits one descriptive
->         `block_c_integrated_checkpoint_report.json` (and
->         matching `.md` summary);
->       - emits one of the three closed statuses
->         (`INSUFFICIENT_EVIDENCE` / `PARTIAL_EVIDENCE` /
->         `EVIDENCE_GENERATED`);
->       - emits the corresponding `next_allowed_phase`
->         (AI Evidence Bundle preparation or
->         `NEEDS_OPERATOR_EVIDENCE`);
->       - never imports `app.risk` / `app.execution` /
->         `app.exchanges` / `app.llm` / `app.telegram` /
->         `app.config`;
->       - reuses the already-merged C1 / C2 / C3 surfaces.
->   - New unit-test module
->     `tests/unit/test_block_c_integrated_checkpoint.py` (15
->     cases) covering every brief-mandated acceptance point
->     (no input → `INSUFFICIENT_EVIDENCE`, partial →
->     `PARTIAL_EVIDENCE`, valid → `EVIDENCE_GENERATED`,
->     `next_allowed_phase` mapping, `phase_12_forbidden=true`,
->     `auto_tuning_allowed=false`, no forbidden trade-authority
->     / runtime-tuning fields, no banned imports, evidence
->     contract degraded-claim count, deterministic output)
->     plus runner output paths, CLI exit codes, and event-group
->     surfacing.
->   - New design / acceptance doc
->     `docs/PHASE_11C_1C_C_B_B_B_E_D_BLOCK_C_INTEGRATED_CHECKPOINT.md`.
->
-> ### Successor allowed by this phase
->
-> Only the upcoming **Block C closeout** (whole-block, after the
-> integrated checkpoint is reviewed) **OR** the eventual **AI
-> Evidence Bundle preparation** (paper / read-only) is unlocked
-> by a successful Block C checkpoint. No other phase is
-> unlocked. **Phase 12 remains FORBIDDEN.**
->
-> ### Tests
->
-> `python -m pytest tests/unit/test_block_c_integrated_checkpoint.py -q`
-> ships **15 PASSING** tests; `python -m pytest tests/unit -q`
-> reports **2726 PASSING** tests, 0 failures (was 2711 before
-> this phase; +15 from this phase).
+> **Phase AI-1 — AI Evidence Bundle Builder v0
+> (*AI 证据包构建器 v0*).**
+> **Status: IN_REVIEW** (after PR #82 was merged into
+> `main`; not `ACCEPTED` until maintainer review). Phase
+> AI-1 ships the AI Evidence Bundle Builder v0 — the AI
+> Layer's only allowed read surface — as a closed schema, a
+> deterministic builder, a paranoid intake guard, and a
+> 55-test unit harness. The builder constructs frozen,
+> evidence-cited, deterministic, JSON-serializable
+> `AIEvidenceBundle` objects from Truth-Layer facts at call
+> time. The bundle is the substrate any later AI / DeepSeek
+> / LLM call MUST receive *as the only input* and infer
+> *only* from. The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced
+> in code AND in tests. Full deep-dive in
+> `docs/PHASE_AI_1_EVIDENCE_BUNDLE_BUILDER.md`. **Phase 12
+> remains FORBIDDEN.**
 
 ---
 

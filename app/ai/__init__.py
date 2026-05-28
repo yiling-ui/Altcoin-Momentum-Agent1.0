@@ -1,45 +1,74 @@
-"""Phase AI-1 - AI Evidence Bundle Builder v0.
+"""AMA-RT AI Layer - paper / read-only.
 
-The :mod:`app.ai` package exposes the AI Layer's *only* allowed
-read surface: a frozen, evidence-cited, deterministic
-``AIEvidenceBundle`` constructed from Truth Layer artefacts at
-call time.
+The :mod:`app.ai` package exposes the AI Layer's *only*
+allowed read surface and its *only* allowed claim-citation
+contract:
 
-The package implements the four root constraints of
+  - **Phase AI-1** :mod:`app.ai.evidence_bundle` - the
+    deterministic, evidence-cited, JSON-serializable
+    ``AIEvidenceBundle`` constructed from Truth-Layer
+    artefacts at call time. Every later AI / DeepSeek / LLM
+    call MUST receive a freshly built bundle and infer ONLY
+    from that bundle.
+  - **Phase AI-2** :mod:`app.ai.claim_contract` - the
+    claim-level *evidence citation contract*. Every AI claim
+    MUST cite Truth-Layer evidence via
+    :data:`SUPPORTED_EVIDENCE_REF_FORMATS`; claims without
+    ``evidence_refs`` are demoted to
+    :attr:`AIClaimAuthorityLevel.DEGRADED_NO_EVIDENCE`;
+    claims with invalid ``evidence_refs`` are rejected
+    (strict mode) or demoted (non-strict mode); the maximum
+    authority any claim can reach is
+    :attr:`AIClaimAuthorityLevel.SUPPORTED_INTELLIGENCE`,
+    which is *commentary substrate* only.
+
+Both phases enforce the four AI root constraints from
 ``docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md``:
 
-  1. **Responsibility Isolation** - the bundle never carries a
-     trade-action / direction / sizing / risk-budget / runtime-
-     config-patch field.
-  2. **Stateless Inference** - every bundle is built from the
-     supplied frozen Truth Layer inputs only; it never reads
-     previous AI answers, chat history, private account state,
-     or API secrets.
-  3. **Hard Rule Anchoring** - every accepted fact must carry
-     ``evidence_refs``; facts without ``evidence_refs`` are
-     degraded and surfaced as warnings, never accepted as fact.
-  4. **Feedback Isolation** - the bundle pins
-     ``ai_output_is_commentary_only=True`` and
-     ``ai_output_can_be_training_label=False`` so AI output can
-     never become a training label or a runtime fact.
+  1. **Responsibility Isolation** - no trade-action /
+     direction / sizing / risk-budget / runtime-config-patch
+     field is ever emitted.
+  2. **Stateless Inference** - every call is independent;
+     previous AI answers, chat history, private account
+     state, and API secrets are rejected at intake.
+  3. **Hard Rule Anchoring** - no ``evidence_refs`` => no
+     accepted AI conclusion. Claims without citations are
+     demoted; claims with malformed citations are rejected.
+  4. **Feedback Isolation** - AI output is *commentary*,
+     never truth, never a training label.
 
-The package is paper / report / read-only:
+This package is paper / report / read-only:
 
   - It does **NOT** authorise live trading.
   - It does **NOT** authorise auto-tuning.
   - It does **NOT** call DeepSeek / any LLM.
   - It does **NOT** open any network socket.
-  - It does **NOT** read or carry API secrets, private account
-    state, ``listenKey``, signed endpoints, or chat history.
+  - It does **NOT** read or carry API secrets, private
+    account state, ``listenKey``, signed endpoints, or chat
+    history.
   - It does **NOT** mutate ``events.db`` or any runtime knob.
+  - **Phase 12 remains FORBIDDEN.**
 
-The package re-exports the public surface of
-:mod:`app.ai.evidence_bundle`. See that module's docstring for
-the full safety boundary.
+The Risk Engine remains the single trade-decision gate.
 """
 
 from __future__ import annotations
 
+from app.ai.claim_contract import (
+    AI_CLAIM_CONTRACT_SCHEMA_VERSION,
+    AI_CLAIM_CONTRACT_SOURCE_MODULE,
+    AI_CLAIM_CONTRACT_SOURCE_PHASE,
+    FORBIDDEN_CLAIM_FIELDS,
+    SUPPORTED_EVIDENCE_REF_FORMATS,
+    SUPPORTED_EVIDENCE_REF_PREFIXES,
+    AIClaim,
+    AIClaimAuthorityLevel,
+    AIClaimCitationResult,
+    AIClaimCitationValidator,
+    AIClaimInput,
+    AIClaimType,
+    validate_ai_claims,
+)
 from app.ai.evidence_bundle import (
     AI_EVIDENCE_BUNDLE_SCHEMA_VERSION,
     AI_EVIDENCE_BUNDLE_SOURCE_MODULE,
@@ -61,6 +90,7 @@ from app.ai.evidence_bundle import (
 )
 
 __all__ = [
+    # Phase AI-1 - AI Evidence Bundle Builder v0.
     "AI_EVIDENCE_BUNDLE_SCHEMA_VERSION",
     "AI_EVIDENCE_BUNDLE_SOURCE_MODULE",
     "AI_EVIDENCE_BUNDLE_SOURCE_PHASE",
@@ -78,4 +108,18 @@ __all__ = [
     "AIEvidenceBundleTaskType",
     "ForbiddenAIInputError",
     "build_ai_evidence_bundle",
+    # Phase AI-2 - Truth Layer / AI Evidence Citation Contract v0.
+    "AI_CLAIM_CONTRACT_SCHEMA_VERSION",
+    "AI_CLAIM_CONTRACT_SOURCE_MODULE",
+    "AI_CLAIM_CONTRACT_SOURCE_PHASE",
+    "AIClaim",
+    "AIClaimAuthorityLevel",
+    "AIClaimCitationResult",
+    "AIClaimCitationValidator",
+    "AIClaimInput",
+    "AIClaimType",
+    "FORBIDDEN_CLAIM_FIELDS",
+    "SUPPORTED_EVIDENCE_REF_FORMATS",
+    "SUPPORTED_EVIDENCE_REF_PREFIXES",
+    "validate_ai_claims",
 ]
