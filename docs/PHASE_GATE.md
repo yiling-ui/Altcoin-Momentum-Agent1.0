@@ -6307,6 +6307,185 @@ closeout PR are the only paths to **ACCEPTED**.
 
 
 
+## Open phase: Phase AI-5 (IN_REVIEW)
+
+> **Title:** Phase AI-5 — Operator Briefing / Evidence
+> Compression v0 (*操作员简报 / 证据压缩 v0*).
+> **Status:** IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).
+>
+> Block C is complete. PR #82 (Phase AI-1 Evidence Bundle
+> Builder v0), PR #83 (Phase AI-2 Truth Layer / AI Evidence
+> Citation Contract v0), PR #84 (Phase AI-3 Reality Check
+> Layer v0), and PR #85 (Phase AI-4 DeepSeek Offline Sandbox
+> v0) are merged into `main`. Phase AI-5 is the AI Layer's
+> first **human-readable operator briefing** runtime
+> artefact - a deterministic offline builder that consumes
+> the Phase AI-1 evidence bundle JSON, the Phase AI-4
+> sandbox output JSON, and an optional Block C Integrated
+> Checkpoint report JSON, classifies every claim into the
+> closed compression vocabulary, groups findings into the
+> closed :class:`OperatorBriefingSection` vocabulary, and
+> emits two artefacts: :class:`OperatorBriefing` and
+> :class:`EvidenceCompressionReport`. The builder NEVER
+> calls an LLM, NEVER opens a network socket, NEVER imports
+> `app.risk` / `app.execution` / `app.exchanges` /
+> `app.telegram` / `app.config`, NEVER reads private
+> exchange / account state, and NEVER authorises a trade
+> decision or auto-tuning. The project remains **paper
+> only**; **Phase 12 remains FORBIDDEN**.
+
+### What this phase does
+
+  - Ships the closed :class:`OperatorBriefingSection` enum
+    (12 values: `EXECUTIVE_SUMMARY`,
+    `MARKET_INTELLIGENCE`, `DISCOVERY_QUALITY`,
+    `COVERAGE_AUDIT`, `POST_DISCOVERY_OUTCOME`,
+    `REJECT_ATTRIBUTION`, `SEVERE_MISS_TRIAGE`,
+    `REPLAY_REFLECTION`, `CONTRADICTIONS`,
+    `UNSUPPORTED_CLAIMS`, `DATA_GAPS`,
+    `OPERATOR_ACTION_ITEMS`),
+    :class:`OperatorBriefingAuthorityLevel` enum (4 values:
+    `COMMENTARY_SUBSTRATE`, `DEGRADED_PARTIAL_EVIDENCE`,
+    `DEGRADED_NO_EVIDENCE`, `REJECTED`; **no member grants
+    trade authority**), :class:`OperatorBriefingFinding`
+    (with `review_only=True` hard-pinned),
+    :class:`OperatorBriefingSectionRecord`,
+    :class:`OperatorBriefing` dataclass, and
+    :class:`OperatorBriefingBuilder` under
+    `app/ai/operator_briefing.py`.
+  - Ships the closed :class:`CompressedClaim`,
+    :class:`EvidenceCompressionReport`, and
+    :class:`EvidenceCompressionReportBuilder` under
+    `app/ai/evidence_compression.py`, plus the
+    :func:`classify_claim` helper that maps the Phase AI-2
+    citation authority + Phase AI-3 Reality Check status
+    into the closed compression vocabulary
+    (`SUPPORTED` / `UNSUPPORTED` / `DEGRADED_NO_EVIDENCE`
+    / `REJECTED` / `CONTRADICTED` / `COMMENTARY_ONLY`).
+  - Ships the closed event-type constants
+    `AI_OPERATOR_BRIEFING_GENERATED`,
+    `AI_EVIDENCE_COMPRESSION_GENERATED`, and
+    `AI_UNSUPPORTED_CLAIMS_SUMMARIZED`. None are wired into
+    the runtime hot path; they are report / export /
+    replay-shaped only.
+  - Ships the offline CLI runner
+    `scripts/run_ai_operator_briefing.py` that reads the
+    AI-1 evidence bundle JSON, the AI-4 sandbox output
+    JSON, and an optional Block C report JSON; writes
+    `operator_briefing.json` / `operator_briefing.md` /
+    `evidence_compression_report.json` /
+    `evidence_compression_report.md`.
+  - Ships 113 unit tests under
+    `tests/unit/test_ai_operator_briefing.py` covering
+    every brief-mandated scenario (builds operator briefing
+    from evidence bundle + sandbox output, preserves
+    `evidence_refs`, unsupported claims appear ONLY in the
+    `UNSUPPORTED_CLAIMS` section / NEVER in `key_findings`,
+    rejected / contradicted claims do not become supported
+    findings, data gaps surfaced via the `DATA_GAPS`
+    section, operator action items are review-only,
+    forbidden fields stripped (parametrised over 25
+    fields), `trade_authority=False`,
+    `auto_tuning_allowed=False`,
+    `phase_12_forbidden=True`, no Telegram outbound, no
+    Risk / Execution / Strategy / Telegram / Config
+    consumer of `app.ai`, no private account state / API
+    secret leaks, Markdown output generated, JSON output
+    serialisable, deterministic output with fake input,
+    forbidden imports absent, no live LLM call shape).
+  - Ships
+    `docs/PHASE_AI_5_OPERATOR_BRIEFING_EVIDENCE_COMPRESSION.md`.
+
+### What this phase does NOT do
+
+  - It does **NOT** authorise live trading.
+  - It does **NOT** authorise auto-tuning.
+  - It does **NOT** call DeepSeek live.
+  - It does **NOT** publish any briefing to real Telegram
+    outbound (live publishing is gated by Spec §41).
+  - It does **NOT** ship Rule Sandbox or Paper Shadow.
+  - It does **NOT** modify any runtime knob (`symbol_limit`,
+    anomaly thresholds, `candidate_pool`, Regime weights).
+  - It does **NOT** retrofit `app/risk/`, `app/execution/`,
+    `app/exchanges/`, `app/telegram/`, or `app/config/`.
+  - It does **NOT** modify
+    `app/ai/evidence_bundle.py`,
+    `app/ai/claim_contract.py`,
+    `app/ai/reality_check.py`,
+    `app/ai/intelligence_schema.py`, or
+    `app/ai/deepseek_sandbox.py`.
+  - It does **NOT** wire briefing output into any
+    trade-decision surface; the briefing is *commentary
+    substrate* only.
+  - It does **NOT** start Phase 12. **Phase 12 remains
+    FORBIDDEN.**
+
+### Safety boundary (held end-to-end)
+
+  - `mode = paper`
+  - `live_trading = False`
+  - `exchange_live_orders = False`
+  - `right_tail = False`
+  - `llm = False`
+  - `llm_outbound_enabled = False`
+  - `sandbox_only = True`
+  - `allow_trade_decision = False`
+  - `allow_runtime_config_change = False`
+  - `telegram_outbound_enabled = False`
+  - `binance_private_api_enabled = False`
+  - no Binance API key / secret
+  - no signed endpoint
+  - no private websocket
+  - no `listenKey`
+  - no real Telegram outbound
+  - no DeepSeek trade decision
+  - no real DeepSeek HTTP transport
+  - **Phase 12 = FORBIDDEN**
+
+### Forbidden modifications (held end-to-end)
+
+  - no edit under `app/risk/**`
+  - no edit under `app/execution/**`
+  - no edit under `app/exchanges/**`
+  - no edit under `app/telegram/**`
+  - no edit under `app/config/**`
+  - no edit under
+    `app/ai/evidence_bundle.py`,
+    `app/ai/claim_contract.py`,
+    `app/ai/reality_check.py`,
+    `app/ai/intelligence_schema.py`, or
+    `app/ai/deepseek_sandbox.py`
+  - no change to `symbol_limit`
+  - no change to anomaly thresholds
+  - no change to `candidate_pool`
+  - no change to regime weights
+  - no `runtime_config_patch` produced
+  - no buy / sell / long / short / position_size / leverage
+    / stop / target / risk_budget produced
+
+### Tests
+
+`python -m pytest tests/unit/test_ai_operator_briefing.py -q`
+ships 113 tests, all PASS;
+`python -m pytest tests/unit -q` reports 3128 PASS, 0
+failures (was 3015 before this phase; +113 from this
+phase).
+
+### Successor allowed
+
+Successful Phase AI-5 only authorises the later (separately
+gated) **Phase AI-6 — Replay / Reflection Integration of AI
+outputs** that consumes the Phase AI-5
+:class:`OperatorBriefing` artefact and records it in the
+replay / reflection artefacts as an *annotation* (still
+paper / report / sandbox-only). It does **NOT** authorise
+the real DeepSeek HTTP transport, Operator Briefing live
+publishing, the AI Layer's involvement in the Risk Engine /
+Execution FSM / Capital Flow Engine, auto-tuning, real
+Telegram outbound, or **Phase 12**.
+
+
 ## Open phase: Phase AI-4 (IN_REVIEW)
 
 > **Title:** Phase AI-4 — DeepSeek Offline Sandbox v0
