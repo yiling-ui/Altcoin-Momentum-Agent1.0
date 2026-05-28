@@ -7,6 +7,323 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase AI-4 — DeepSeek Offline Sandbox v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / sandbox-only).
+**Runtime effect:** **none on real trading.** Two new read-only
+modules `app/ai/intelligence_schema.py` and
+`app/ai/deepseek_sandbox.py` are added alongside the existing
+`app/ai/evidence_bundle.py` (Phase AI-1),
+`app/ai/claim_contract.py` (Phase AI-2), and
+`app/ai/reality_check.py` (Phase AI-3), with `app/ai/__init__.py`
+extended to re-export the Phase AI-4 public surface, plus a new
+offline CLI runner `scripts/run_deepseek_offline_sandbox.py` and
+a matching unit-test module under
+`tests/unit/test_deepseek_offline_sandbox.py` (94 tests). No file
+under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`,
+`app/ai/evidence_bundle.py`, `app/ai/claim_contract.py`, or
+`app/ai/reality_check.py`, no event type, no database schema /
+migration is touched. The modules are read-only at runtime: they
+never append, mutate, or reorder rows in `events.db`; they never
+produce direction, sizing, leverage, stop, target, or risk-budget
+fields; they never produce a `runtime_config_patch`; and they
+never call the real DeepSeek HTTP transport (the v0 skeleton
+refuses to contact the network even when both safety gates are
+open). No runtime knob (`symbol_limit`, anomaly threshold,
+candidate pool capacity, Regime weights) is changed.
+**Phase ledger effect:** opens Phase AI-4 as **`IN_REVIEW`**
+(not `ACCEPTED` until maintainer review of the PR).
+**Safety flag effect:** **none.** `mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`,
+`llm_outbound_enabled=False`, `sandbox_only=True`,
+`allow_trade_decision=False`,
+`allow_runtime_config_change=False`,
+`telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`. No Binance API key, no API
+secret, no signed endpoint, no private WebSocket, no `listenKey`,
+no DeepSeek trade decision, no real DeepSeek HTTP transport, no
+real Telegram outbound. **Phase 12 remains FORBIDDEN.**
+**Auto-tuning effect:** **none.** `auto_tuning_allowed=False` is
+hard-pinned at every `to_dict()` boundary even if a caller flips
+the dataclass field. The recursive `_assert_no_forbidden_fields`
+guard refuses to emit any payload carrying a `*_patch` key.
+**Successor allowed:** later (separately gated) **Phase AI-5
+Operator Briefing / Evidence Compression** that consumes the
+schema-checked `AIIntelligenceOutput` and produces a redacted,
+operator-facing briefing artefact (still paper / report /
+sandbox-only). **NOT** the real DeepSeek HTTP transport. **NOT**
+DeepSeek trade decisions. **NOT** the AI Layer's involvement in
+the Risk Engine. **NOT** the AI Layer's involvement in the
+Execution FSM. **NOT** auto-tuning. **NOT** real Telegram
+outbound. **NOT** Phase 12.
+
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).** This slice ships
+> the AI Layer's first **outbound-capable** runtime
+> artefact - the DeepSeek Offline Sandbox v0. The runner
+> consumes a frozen Phase AI-1 evidence bundle, validates
+> every model-emitted claim through the Phase AI-2 citation
+> contract, cross-verifies through the Phase AI-3 Reality
+> Check engine, strips forbidden trade-action /
+> runtime-config-patch fields, redacts credential-shaped
+> keys, and emits one schema-checked
+> `AIIntelligenceOutput`. The runner NEVER imports
+> `app.risk` / `app.execution` / `app.exchanges` /
+> `app.telegram` / `app.config`; it NEVER reads private
+> exchange / account state; it NEVER carries an API secret
+> in any logged / exported / serialised payload; it NEVER
+> authorises a trade decision or auto-tuning. The runner is
+> **disabled by default** (`enabled=False`) and **outbound
+> is closed by default** (`outbound_enabled=False`). Even
+> with both gates open the v0
+> `OptionalDeepSeekHTTPProvider` skeleton refuses to contact
+> the network - the real DeepSeek HTTP transport is gated
+> behind a later, separately reviewed PR. The maximum
+> authority any output can reach is `SUPPORTED_INTELLIGENCE`,
+> which is *commentary substrate* only — **no member of
+> `AIIntelligenceAuthorityLevel` grants trade authority**.
+> The four AI root constraints in
+> `docs/AMA_RT_AI_LAYER_ENGINEERING_SPEC.md` are enforced in
+> code AND in tests. **Phase 12 remains FORBIDDEN.** The Risk
+> Engine remains the single trade-decision gate.
+
+#### Added
+
+- `app/ai/intelligence_schema.py` — paper / pure /
+  deterministic schema and helpers. Ships:
+  - `AIIntelligenceTaskType` closed enum with 10 values:
+    `OPERATOR_BRIEFING_DRAFT`, `MARKET_INTELLIGENCE_SUMMARY`,
+    `EVIDENCE_COMPRESSION`, `REPLAY_REFLECTION_SUMMARY`,
+    `CONTRADICTION_SUMMARY`, `EVIDENCE_QUALITY_ASSESSMENT`,
+    `COVERAGE_AUDIT_INTERPRETATION`,
+    `POST_DISCOVERY_OUTCOME_SUMMARY`,
+    `REJECT_TO_OUTCOME_SUMMARY`, `SEVERE_MISS_SUMMARY`.
+  - `AIIntelligenceAuthorityLevel` closed enum with 5 values:
+    `COMMENTARY_ONLY`, `SUPPORTED_INTELLIGENCE`,
+    `DEGRADED_NO_EVIDENCE`, `DEGRADED_REALITY_CHECK`,
+    `REJECTED`. **No member grants trade authority.**
+  - `AIIntelligenceStatus` closed enum with 7 values: `OK`,
+    `DEGRADED_OUTBOUND_DISABLED`, `DEGRADED_PROVIDER_ERROR`,
+    `DEGRADED_REALITY_CHECK`, `DEGRADED_MISSING_EVIDENCE`,
+    `REJECTED_FORBIDDEN_FIELDS`, `REJECTED_INVALID_INPUT`.
+  - `AIIntelligenceClaim` / `AIIntelligenceOutput` frozen
+    dataclasses preserving `claim_id`, `claim_type`,
+    `claim_text`, `evidence_refs`,
+    `truth_layer_fields_used`, `citation_authority_level`,
+    `reality_check_status`,
+    `reality_check_authority_level`, `confidence_raw`,
+    `confidence_reality_checked`, `warnings`, plus the
+    output-level `summary`, `claims`, `contradictions`,
+    `unsupported_claims`, `risk_tags`, `evidence_refs`,
+    `forbidden_fields_stripped`, `redacted_secret_count`,
+    `degraded_reasons`, `safety_flags`, plus the
+    hard-pinned `stateless_inference=True`,
+    `feedback_isolation=True`, `trade_authority=False`,
+    `auto_tuning_allowed=False`, `phase_12_forbidden=True`,
+    `ai_output_is_commentary_only=True`,
+    `ai_output_can_be_training_label=False` flags.
+    Re-pinned at every `to_dict()` boundary even if a
+    caller flips the dataclass field.
+  - `strip_forbidden_fields(payload, *, forbidden=None)` —
+    recursive helper that strips forbidden trade-action /
+    runtime-config-patch fields and returns
+    `(clean_payload, sorted_paths)`. Never mutates the
+    input. Records every stripped path so the audit trail
+    is never silent.
+  - `redact_secrets(payload)` — recursive helper that
+    replaces every credential-shaped key's value with
+    `<REDACTED>`. Returns `(clean_payload, count)`.
+  - `coerce_str_tuple` / `coerce_content` helpers for
+    deterministic JSON coercion.
+  - Re-uses the recursive `_assert_no_forbidden_fields`
+    output guard from `app.ai.evidence_bundle` against
+    `buy`, `sell`, `long`, `short`, `direction`, `side`,
+    `entry`, `exit`, `position_size`, `leverage`, `stop`,
+    `stop_loss`, `stop_price`, `target`, `target_price`,
+    `take_profit`, `risk_budget`, `order`, `order_type`,
+    `execution_command`, `runtime_config_patch`,
+    `symbol_limit_patch`, `threshold_patch`,
+    `candidate_pool_patch`, `regime_weight_patch`,
+    `strategy_parameter_patch`, `signal_to_trade`,
+    `should_buy`, `should_short`, plus defensive aliases
+    `trading_approved`, `live_ready`, `live_trading_allowed`.
+    Re-exported as `FORBIDDEN_INTELLIGENCE_OUTPUT_FIELDS`.
+- `app/ai/deepseek_sandbox.py` — paper / pure /
+  deterministic runner and provider scaffolding. Ships:
+  - `DeepSeekSandboxConfig` closed dataclass with 15
+    disabled-by-default gates: `enabled=False`,
+    `provider="deepseek"`, `outbound_enabled=False`,
+    `sandbox_only=True`, `allow_trade_decision=False`
+    (validated to remain `False`),
+    `allow_runtime_config_change=False` (validated to
+    remain `False`), `require_evidence_refs=True`,
+    `require_reality_check=True`, `stateless_inference=True`,
+    `feedback_isolation=True`, `timeout_seconds=30.0`,
+    `max_tokens=2048`, `model="deepseek-chat"`,
+    `redaction_enabled=True`. Re-pinned at every
+    `to_dict()` boundary.
+  - `DeepSeekSandboxInput` closed dataclass carrying the
+    frozen Phase AI-1 evidence bundle, the closed task
+    type, the operator instruction, the allowed output
+    schema, the additive forbidden-fields tuple, and the
+    `evidence_refs_required` /
+    `reality_check_required` flags.
+  - `DeepSeekProviderProtocol` runtime-checkable Protocol
+    a transport must implement (a closed
+    `generate(prompt, max_tokens, timeout_seconds, model)`
+    surface).
+  - `FakeDeepSeekProvider` — deterministic in-memory
+    provider used by tests AND by every offline run that
+    has `outbound_enabled=False`. Three construction modes
+    (`payload=...`, `payload_fn=...`, `raise_exc=...`) plus
+    a default empty-skeleton response.
+  - `OptionalDeepSeekHTTPProvider` — refusal-only skeleton
+    for the future real DeepSeek HTTP transport. Imports
+    nothing that opens a socket. Reads no process
+    environment for credentials. Refuses to be invoked when
+    `outbound_enabled=False`. Even with
+    `outbound_enabled=True` and
+    `credentials_provided=True` raises
+    `DeepSeekOutboundDisabledError` in v0.
+  - `DeepSeekOfflineSandboxRunner` (and the
+    `run_deepseek_offline_sandbox` convenience wrapper) —
+    deterministic; scans every input for forbidden /
+    credential-shaped keys via the Phase AI-1
+    `_scan_for_forbidden_input` guard; builds a redacted,
+    deterministic prompt payload (the prompt NEVER carries
+    a raw API key, an API secret, a bearer token, a
+    `listenKey`, a chat history, or a previous AI answer);
+    short-circuits to the in-memory provider when
+    `outbound_enabled=False`; calls the configured provider
+    when `outbound_enabled=True` AND
+    `sandbox_only=True`; strips forbidden trade-action /
+    runtime-config-patch fields from the model output;
+    validates every model-emitted claim through the Phase
+    AI-2 `AIClaimCitationValidator`; cross-verifies through
+    the Phase AI-3 `AIRealityCheckEngine`; emits one
+    `AIIntelligenceOutput`; converts every provider
+    timeout / 429 / 5xx / unexpected error into a degraded
+    result, never crashing a hot path.
+  - Closed exception hierarchy: `DeepSeekSandboxError`
+    (base), `DeepSeekOutboundDisabledError`,
+    `DeepSeekProviderTimeoutError`,
+    `DeepSeekProviderRateLimitedError`,
+    `DeepSeekProviderServerError`.
+  - Does NOT import `app.risk`, `app.execution`,
+    `app.exchanges`, `app.telegram`, or `app.config`
+    (AST-checked). Does NOT import `openai`, `anthropic`,
+    `deepseek`, `httpx`, `requests`, `aiohttp`, `urllib3`,
+    `websocket`, `websockets`, `grpc`, `boto3`, `socket`
+    (AST-checked). Source contains no `deepseek.api` /
+    `DeepSeekClient(` / `call_deepseek(` / `requests.get(` /
+    `httpx.post(` / `aiohttp.ClientSession(` /
+    `websocket.create_connection(` shape (string-checked).
+- `app/ai/__init__.py` — extended to re-export the Phase
+  AI-4 public API alongside the Phase AI-1 + AI-2 + AI-3
+  surfaces: `DeepSeekSandboxConfig`,
+  `DeepSeekSandboxInput`, `DeepSeekProviderProtocol`,
+  `FakeDeepSeekProvider`, `OptionalDeepSeekHTTPProvider`,
+  `DeepSeekOfflineSandboxRunner`, `DeepSeekSandboxError`,
+  `DeepSeekOutboundDisabledError`,
+  `DeepSeekProviderTimeoutError`,
+  `DeepSeekProviderRateLimitedError`,
+  `DeepSeekProviderServerError`,
+  `run_deepseek_offline_sandbox`, `AIIntelligenceTaskType`,
+  `AIIntelligenceAuthorityLevel`, `AIIntelligenceStatus`,
+  `AIIntelligenceClaim`, `AIIntelligenceOutput`,
+  `FORBIDDEN_INTELLIGENCE_OUTPUT_FIELDS`,
+  `AI_SECRET_REDACTED_PLACEHOLDER`, `redact_secrets`,
+  `strip_forbidden_fields`,
+  `AI_INTELLIGENCE_OUTPUT_SCHEMA_VERSION`,
+  `AI_INTELLIGENCE_OUTPUT_SOURCE_PHASE`,
+  `AI_INTELLIGENCE_OUTPUT_SOURCE_MODULE`,
+  `DEEPSEEK_SANDBOX_SCHEMA_VERSION`,
+  `DEEPSEEK_SANDBOX_SOURCE_PHASE`,
+  `DEEPSEEK_SANDBOX_SOURCE_MODULE`.
+- `scripts/run_deepseek_offline_sandbox.py` — offline CLI
+  runner. Reads a frozen Phase AI-1 evidence bundle JSON,
+  hands it to the
+  `DeepSeekOfflineSandboxRunner`, and writes
+  `deepseek_sandbox_output.json` /
+  `deepseek_sandbox_output.md` under `--output-dir`.
+  Imports nothing from `app.risk`, `app.execution`,
+  `app.exchanges`, `app.telegram`, or `app.config`. Imports
+  nothing network-shaped.
+- `tests/unit/test_deepseek_offline_sandbox.py` (94 cases)
+  covering every brief-mandated scenario: disabled by
+  default, fake provider works offline, outbound disabled
+  degrades safely (HTTP-shaped provider not invoked),
+  `OptionalDeepSeekHTTPProvider` refuses with
+  `outbound_enabled=False` AND with `outbound_enabled=True`,
+  forbidden trade fields stripped (parametrised over 25
+  fields, both top-level and nested), evidence refs
+  required, reality check required, stateless inference
+  (chat_history / previous_ai_answer rejected at intake),
+  feedback isolation invariants pinned, secret redaction
+  (api_key / api_secret / deepseek_api_key /
+  binance_api_secret / telegram_bot_token / token / secret),
+  provider error degrade (timeout / 429 / 5xx / outbound-
+  disabled / unexpected), no hot-path imports
+  (`app.risk` / `app.execution` / `app.exchanges` /
+  `app.telegram` / `app.config`) absent, no network imports
+  absent, source contains no live-call shape, Risk /
+  Execution / Exchange packages do not import `app.ai`,
+  deterministic output (same input ⇒ identical
+  `to_dict()` and `json.dumps()`), JSON-serializable output
+  (round-trip equals input), output contains no forbidden
+  trade-action key at any nesting depth, output pins
+  `trade_authority=False` / `auto_tuning_allowed=False` /
+  `phase_12_forbidden=True` / safety flags / `mode=paper`,
+  `AIIntelligenceAuthorityLevel` has no trade member
+  (closed enum coverage), defensive companions (unknown
+  task type rejected, non-mapping bundle rejected, non-
+  mapping provider response degrades, outbound enabled
+  without provider degrades safely, init module re-exports
+  the Phase AI-4 surface).
+- `docs/PHASE_AI_4_DEEPSEEK_OFFLINE_SANDBOX.md` — new phase
+  doc.
+- `docs/DEEPSEEK_SANDBOX_RUNBOOK.md` — new operator
+  runbook.
+
+#### Changed
+
+- `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+  `docs/CHANGELOG.md` (this entry) updated to reflect Phase
+  AI-4 = **IN_REVIEW**.
+
+#### Tests
+
+- `python -m pytest tests/unit/test_deepseek_offline_sandbox.py -q`:
+  94 PASS / 0 fail.
+- `python -m pytest tests/unit -q`: 3015 PASS / 0 fail (was
+  2921 before this phase; +94 from this phase).
+
+#### Safety boundary (held end-to-end)
+
+- `mode = paper`
+- `live_trading = False`
+- `exchange_live_orders = False`
+- `right_tail = False`
+- `llm = False`
+- `llm_outbound_enabled = False`
+- `sandbox_only = True`
+- `allow_trade_decision = False`
+- `allow_runtime_config_change = False`
+- `telegram_outbound_enabled = False`
+- `binance_private_api_enabled = False`
+- no Binance API key / secret
+- no signed endpoint
+- no private WebSocket
+- no `listenKey`
+- no real Telegram outbound
+- no DeepSeek trade decision
+- no real DeepSeek HTTP transport
+- **Phase 12 = FORBIDDEN**
+
+The Risk Engine remains the single trade-decision gate.
+
 ### Phase AI-3 — Reality Check Layer v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / read-only).
