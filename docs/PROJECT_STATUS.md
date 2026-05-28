@@ -7,6 +7,182 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1C-C-B-B-B-D-D — Discovery Quality
+> Scorecard v0 (*发现质量评分板 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until evidence closeout).**
+>
+> Phase 11C.1C-C-B-B-B-D-A audited *discovery* (did we see
+> the mover?). Phase 11C.1C-C-B-B-B-D-B audited
+> *post-discovery outcome* (how much room remained after
+> first sighting?). Phase 11C.1C-C-B-B-B-D-C-A closed the
+> loop on *reject correctness*. Phase
+> 11C.1C-C-B-B-B-D-C-B attributed *severe misses* to a
+> closed root-cause taxonomy. The project still lacked a
+> single descriptive number that an operator can read
+> at-a-glance to answer "how healthy was discovery quality
+> on this audit window?".
+>
+> This slice ships that compression layer as a paper /
+> report / evidence-only **Discovery Quality Scorecard v0**.
+> The scorecard takes the simplified outputs of D-A / D-B /
+> B2-A / B2-B and emits, per audit window:
+>
+>   - one descriptive `quality_bucket` (`GOOD` / `PARTIAL` /
+>     `WEAK` / `DEGRADED` / `INSUFFICIENT_EVIDENCE`);
+>   - per-axis rates (coverage / usable / early / late /
+>     severe / insufficient-price-path / false-negative
+>     reject / correct-protective reject / data-gap);
+>   - a preserved `root_cause_summary` from the upstream
+>     Severe Missed Tail Triage report;
+>   - the `needs_operator_review` / `needs_data_recovery` /
+>     `needs_rule_review` operator-routing flags;
+>   - a hard-pinned `auto_tuning_allowed=False` flag on
+>     every payload.
+>
+> The scorecard is intentionally **non-actionable**: it is a
+> routing signal for human operators and **never** a knob
+> the runtime can turn.
+>
+> **NOT** live trading. **NOT** AI Learning. **NOT**
+> automatic parameter optimisation. **NOT** reinforcement
+> learning. **NOT** rule relaxation based on bucket
+> verdicts. **NOT** automatic `symbol_limit` expansion.
+> **NOT** automatic anomaly threshold changes. **NOT**
+> automatic candidate-pool capacity changes. **NOT**
+> automatic Regime weight changes. **NOT** a Risk Engine
+> change. **NOT** an Execution FSM change. **NOT** a
+> direction call (long / short / entry / exit / stop /
+> target / position size / leverage). **NOT** evidence
+> closeout (separate later PR). **NOT** Replay / Reflection
+> extension (later slice). **NOT** the DeepSeek
+> integration. **NOT** Phase 12. The Risk Engine remains
+> the single trade-decision gate.
+>
+> ### What this PR ships
+>
+>   - New module
+>     `app/adaptive/discovery_quality_scorecard.py` (paper
+>     / pure / deterministic):
+>       - `DiscoveryQualityBucket` closed string-constant
+>         taxonomy (5 labels: `GOOD` / `PARTIAL` / `WEAK` /
+>         `DEGRADED` / `INSUFFICIENT_EVIDENCE`).
+>       - `DiscoveryQualityScorecardInput` (frozen
+>         dataclass) bundling the simplified D-A / D-B /
+>         B2-A / B2-B outputs.
+>       - `DiscoveryQualityScorecard` (frozen dataclass)
+>         carrying the descriptive bucket, per-axis rates,
+>         operator-routing flags, preserved
+>         `root_cause_summary`, `notable_warnings`, and
+>         `evidence_refs`.
+>       - `DiscoveryQualityScorecardEngine` /
+>         `DiscoveryQualityScorecardEngineConfig` plus the
+>         `build_discovery_quality_scorecard` convenience
+>         builder.
+>       - `assert_payload_has_no_forbidden_keys` recursive
+>         guard against any trade-authority /
+>         runtime-tuning field landing in a payload.
+>       - Hard-pinned `auto_tuning_allowed=False` on every
+>         emitted scorecard.
+>   - Two new typed events in `app/core/events.py` (paper /
+>     report / evidence only):
+>       - `EventType.DISCOVERY_QUALITY_SCORECARD_GENERATED`
+>       - `EventType.DISCOVERY_QUALITY_BUCKET_EVALUATED`
+>   - Public exports added to `app/adaptive/__init__.py`.
+>   - New unit-test module
+>     `tests/unit/test_discovery_quality_scorecard.py` (22
+>     cases) covering every brief-mandated acceptance test
+>     (insufficient evidence, GOOD / PARTIAL on clean
+>     inputs, PARTIAL / WEAK / DEGRADED with
+>     `needs_data_recovery=True` on data gap or
+>     insufficient-price-path, WEAK / DEGRADED with
+>     `needs_operator_review=True` on severe miss,
+>     `needs_rule_review=True` with
+>     `auto_tuning_allowed=False` on false-negative reject,
+>     `root_cause_summary` preserved on output, forbidden
+>     fields absent on every payload, no forbidden imports
+>     of `app.risk` / `app.execution` / `app.exchanges` /
+>     `app.llm` / `app.telegram`).
+>   - New phase doc
+>     `docs/PHASE_11C_1C_C_B_B_B_D_D_DISCOVERY_QUALITY_SCORECARD.md`.
+>
+> ### What this PR does NOT ship
+>
+>   - No change to `app/risk/`, `app/execution/`,
+>     `app/exchanges/`, `app/llm/`, `app/telegram/`,
+>     `app/config/`.
+>   - No change to `symbol_limit`, anomaly thresholds,
+>     candidate-pool capacity, Regime weights, or any
+>     other runtime knob.
+>   - No new private API surface, no signed endpoint, no
+>     `listenKey`, no real Telegram outbound, no DeepSeek
+>     trade decision.
+>   - No automatic parameter tuning. No "looking at the
+>     answer key" against the post-hoc D-A reference set.
+>   - No new strategy. No new trading module. No new
+>     direction classification. No new sizing rule.
+>   - No real evidence closeout.
+>   - No Replay / Reflection extension for the new events.
+>   - No DeepSeek integration.
+>   - **No Phase 12.**
+>
+> ### Safety boundary (held end-to-end)
+>
+>   - `mode = paper`
+>   - `live_trading = False`
+>   - `exchange_live_orders = False`
+>   - `right_tail = False`
+>   - `llm = False`
+>   - `telegram_outbound_enabled = False`
+>   - `binance_private_api_enabled = False`
+>   - no Binance API key / secret
+>   - no signed endpoint
+>   - no private websocket
+>   - no `listenKey`
+>   - no real Telegram outbound
+>   - no DeepSeek trade decision
+>   - **Phase 12 = FORBIDDEN**
+>
+> **The Risk Engine remains the single trade-decision
+> gate.**
+>
+> ### Tests
+>
+>   - `tests/unit/test_discovery_quality_scorecard.py` —
+>     22/22 PASS.
+>   - Full `tests/unit` suite — 2587/2587 PASS (no
+>     regression vs. post-PR-#74 main 2565 baseline; +22
+>     new tests on the new module).
+>
+> ### Why GOOD / PARTIAL / DEGRADED are discovery-quality labels, not trade-approval labels
+>
+> `GOOD` / `PARTIAL` / `WEAK` / `DEGRADED` describe
+> **discovery health** — how often the discovery pipeline
+> (radar + filter + candidate pool + first-seen detection)
+> saw the moves the historical reference set lists. They do
+> **not** describe *strategy quality*, *risk-decision
+> quality*, *outcome quality*, or *trade-approval quality*.
+> A `GOOD` bucket does **not** mean live trading is
+> approved. A `DEGRADED` bucket does **not** mean live
+> trading is disapproved. Both are diagnostic signals for a
+> human operator, not switches the runtime can flip.
+>
+> ### Why this phase does NOT authorise auto-tuning
+>
+> Every emitted scorecard carries
+> `auto_tuning_allowed=False`. A `DEGRADED` bucket reflects
+> **one audit window**, not a portfolio of cases. Touching
+> `symbol_limit` / anomaly thresholds / candidate-pool
+> capacity / Regime weights / Risk Engine on the basis of a
+> scorecard window is **out of scope**. A high
+> `false_negative_reject_rate` flips
+> `needs_rule_review=True`, but `auto_tuning_allowed` stays
+> `False`; rule review is a *human* decision, not an
+> automated one.
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1C-C-B-B-B-D-C-B — Severe Missed Tail
 > Triage v0 (*严重漏捕右尾归因 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not

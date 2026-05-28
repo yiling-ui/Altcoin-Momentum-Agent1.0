@@ -836,6 +836,78 @@ class EventType(str, Enum):
     )
     SEVERE_MISS_ESCALATION_REQUIRED = "SEVERE_MISS_ESCALATION_REQUIRED"
 
+    # ------------------------------------------------------------------
+    # Phase 11C.1C-C-B-B-B-D-D - Discovery Quality Scorecard v0
+    # (*发现质量评分板 v0*).
+    #
+    # The Discovery Quality Scorecard v0 layer compresses the
+    # simplified outputs of:
+    #
+    #   * Phase 11C.1C-C-B-B-B-D-A  Historical 60D Mover Coverage
+    #     Backfill Audit (capture / miss / data-gap counts),
+    #   * Phase 11C.1C-C-B-B-B-D-B  Post-Discovery Outcome Metrics
+    #     (usable / early / late / severe-miss /
+    #     insufficient-price-path counts),
+    #   * Phase 11C.1C-C-B-B-B-D-C-A Reject-to-Outcome Attribution
+    #     (false-negative reject / correct protective reject
+    #     counts),
+    #   * Phase 11C.1C-C-B-B-B-D-C-B Severe Missed Tail Triage
+    #     (root-cause summary, severity counts),
+    #
+    # into one descriptive ``DiscoveryQualityScorecard`` per audit
+    # window. The scorecard's ``quality_bucket`` is one of
+    # ``GOOD`` / ``PARTIAL`` / ``WEAK`` / ``DEGRADED`` /
+    # ``INSUFFICIENT_EVIDENCE``.
+    #
+    # Phase 11C.1C-C-B-B-B-D-D boundary:
+    # - Every event below is paper / report / evidence only. None
+    #   of them authorises a real trade, modifies a real position,
+    #   or flips a Phase 1 safety flag.
+    # - ``quality_bucket`` is a *descriptive discovery-quality*
+    #   label, NEVER a trade-approval label. The Risk Engine
+    #   remains the single trade-decision gate.
+    # - The scorecard MUST NEVER modify position size, leverage,
+    #   stop-loss, target price, the Risk Engine, the Execution
+    #   FSM, ``symbol_limit``, candidate-pool capacity, anomaly
+    #   thresholds, Regime weights, or any other runtime knob.
+    # - The payload MUST NOT include any of: buy / sell / long /
+    #   short / direction / entry / exit / position_size /
+    #   leverage / stop / stop_loss / target / take_profit /
+    #   risk_budget / order / execution_command /
+    #   runtime_config_patch / symbol_limit_patch /
+    #   threshold_patch / candidate_pool_patch /
+    #   regime_weight_patch.
+    # - Every payload MUST carry ``auto_tuning_allowed=False`` and
+    #   ``evidence_refs``.
+    # - A ``DEGRADED`` bucket does **NOT** authorise the Risk
+    #   Engine to be loosened, the Execution FSM to be changed,
+    #   ``symbol_limit`` to be expanded, or any threshold /
+    #   candidate-pool / Regime-weight runtime knob to be
+    #   touched. It routes the case to operator review +
+    #   data-recovery + rule-review queues only. ``GOOD`` does
+    #   **NOT** mean "the strategy is profitable" or "live
+    #   trading is approved" - it means coverage / capture
+    #   quality on this window cleared the descriptive
+    #   thresholds.
+    #
+    #   DISCOVERY_QUALITY_SCORECARD_GENERATED - the full
+    #     :class:`DiscoveryQualityScorecard` payload was assembled
+    #     and is available for export / replay. Carries the
+    #     descriptive bucket, the per-axis rates, the
+    #     root_cause_summary, the notable_warnings, and the
+    #     operator-review / data-recovery / rule-review flags.
+    #   DISCOVERY_QUALITY_BUCKET_EVALUATED    - shorthand event
+    #     for the operator-review queue: the discovery-quality
+    #     bucket for this audit window was evaluated. Carries the
+    #     ``quality_bucket`` + ``evidence_refs`` and is suitable
+    #     for routing without rehydrating the full scorecard.
+    DISCOVERY_QUALITY_SCORECARD_GENERATED = (
+        "DISCOVERY_QUALITY_SCORECARD_GENERATED"
+    )
+    DISCOVERY_QUALITY_BUCKET_EVALUATED = (
+        "DISCOVERY_QUALITY_BUCKET_EVALUATED"
+    )
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(
