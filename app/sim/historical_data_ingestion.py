@@ -652,7 +652,20 @@ def parse_symbol_status_row(
     default_availability_lag_seconds: float = 0.0,
 ) -> SymbolStatusRecord:
     """Parse one exchangeInfo / symbol-status row into a
-    :class:`SymbolStatusRecord` (no survivorship bias)."""
+    :class:`SymbolStatusRecord` (no survivorship bias).
+
+    Two row shapes are accepted:
+
+      * the full exchangeInfo shape (``symbol`` / ``market_type`` /
+        ``listed_at`` / ``status`` / ``available_at`` + optional
+        tick / step / notional metadata), and
+      * the PR105 symbol-status sidecar shape
+        (``symbol`` / ``status`` / ``event_time`` / ``available_at`` /
+        ``ingested_at`` / ``source``), which carries no explicit
+        ``listed_at``. In that case the listing time is anchored to
+        ``event_time`` (then ``available_at``) - never to
+        ``ingested_at`` and never fabricated.
+    """
     if not isinstance(row, Mapping):
         raise IngestionSchemaError(
             f"symbol-status row must be a Mapping, got {type(row)!r}"
@@ -671,10 +684,21 @@ def parse_symbol_status_row(
         raise IngestionSchemaError(
             f"symbol status {status!r} not in closed taxonomy"
         )
-    listed_at = _parse_time_field(
-        _first_present(row, ("listed_at", "onboardDate", "listedAt")),
-        "listed_at",
+    listed_raw = _first_present(
+        row, ("listed_at", "onboardDate", "listedAt")
     )
+    if listed_raw is None:
+        # PR105 symbol-status sidecar schema is
+        # {symbol, status, event_time, available_at, ingested_at,
+        # source} and carries no explicit listing time. Anchor the
+        # listing timeline to a real observed time by falling back to
+        # event_time, then available_at. This is NEVER derived from
+        # ingested_at and NEVER fabricated: if none of listed_at /
+        # event_time / available_at is present the row is rejected.
+        listed_raw = _first_present(
+            row, ("event_time", "available_at")
+        )
+    listed_at = _parse_time_field(listed_raw, "listed_at")
     delisted_at = _parse_time_field(
         _first_present(row, ("delisted_at", "delistedAt")),
         "delisted_at",
@@ -1396,6 +1420,19 @@ class HistoricalDataIngestion:
             )
             return
 
+        # ----- source-type routing (PR105) -----
+        # A status-only file source (SYMBOL_STATUS_FILE /
+        # EXCHANGE_INFO_FILE) scans ONLY the symbol-status / exchangeInfo
+        # sidecar files and NEVER walks the kline / funding / OI / ticker
+        # trees. This is what makes `--source-type SYMBOL_STATUS_FILE`
+        # produce SYMBOL_STATUS records instead of re-ingesting klines.
+        if cfg.source_type in (
+            HistoricalDataSourceType.SYMBOL_STATUS_FILE,
+            HistoricalDataSourceType.EXCHANGE_INFO_FILE,
+        ):
+            self._load_symbol_status(root)
+            return
+
         symbols = list(cfg.symbols)
         if not symbols:
             symbols = self._discover_symbols(root)
@@ -1433,6 +1470,11 @@ class HistoricalDataIngestion:
                     DataQualityFlag.TICKER_MISSING,
                 )
 
+        # For a kline / funding / OI / ticker source type the
+        # symbol-status sidecar is OPTIONAL: when present it is merged
+        # into the same record set (and therefore into records.jsonl)
+        # alongside the klines (PR105 sidecar merge). A missing sidecar
+        # only warns - it is never fabricated.
         if cfg.include_symbol_status or cfg.include_exchange_info:
             self._load_symbol_status(root)
 
@@ -1626,36 +1668,84 @@ class HistoricalDataIngestion:
                 continue
             self._add_market(rec)
 
-    def _load_symbol_status(self, root: Path) -> None:
-        path = _discover_file(
-            root,
+    def _symbol_status_files(self, root: Path) -> List[Path]:
+        """Collect every symbol-status / exchangeInfo sidecar file.
+
+        Scanned in deterministic order:
+
+          * flat fixture files at the input root
+            (``symbol_status.jsonl`` / ``.json`` /
+            ``exchange_info.jsonl`` / ``.json``), and
+          * every ``symbol_status/`` directory at any depth -
+            ``<input-root>/symbol_status/*.jsonl`` and
+            ``<input-root>/**/symbol_status/*.jsonl`` plus the ``.json``
+            variants. The recursive glob covers the real Binance public
+            dump layout where ``--input-root`` points at
+            ``data/historical_raw`` and the sidecar lives under
+            ``data/historical_raw/binance_um/symbol_status/
+            symbol_status_<from>_<to>.jsonl``.
+
+        Files are de-duplicated by absolute path so a file matched by
+        more than one pattern is only ingested once.
+        """
+        out: List[Path] = []
+        seen: set = set()
+
+        def _add(p: Path) -> None:
+            key = str(p)
+            if key not in seen and p.is_file():
+                seen.add(key)
+                out.append(p)
+
+        for name in (
             "symbol_status.jsonl",
             "symbol_status.json",
             "exchange_info.jsonl",
             "exchange_info.json",
-        )
-        if path is None:
+        ):
+            _add(root / name)
+        for pattern in (
+            "**/symbol_status/*.jsonl",
+            "**/symbol_status/*.json",
+        ):
+            for p in sorted(root.glob(pattern)):
+                _add(p)
+        return out
+
+    def _load_symbol_status(self, root: Path) -> None:
+        files = self._symbol_status_files(root)
+        if not files:
+            # No fabrication: a missing sidecar only warns.
             self._warn("symbol_status_file_missing")
             return
-        self._source_files.append(str(path))
-        try:
-            rows = _load_rows(path)
-        except (json.JSONDecodeError, IngestionSchemaError) as exc:
-            self._record_parse_error("symbol_status", exc)
-            return
-        for idx, row in enumerate(rows):
+        for path in files:
+            self._source_files.append(str(path))
             try:
-                rec = parse_symbol_status_row(
-                    row,
-                    source=self.config.source_type,
-                    default_availability_lag_seconds=(
-                        self.config.default_availability_lag_seconds
-                    ),
+                rows = _load_rows(path)
+            except (json.JSONDecodeError, IngestionSchemaError) as exc:
+                self._record_parse_error(
+                    f"symbol_status:{path.name}", exc
                 )
-            except (IngestionSchemaError, ValueError, TypeError) as exc:
-                self._record_parse_error(f"symbol_status:{idx}", exc)
                 continue
-            self._add_symbol_status(rec)
+            for idx, row in enumerate(rows):
+                try:
+                    rec = parse_symbol_status_row(
+                        row,
+                        source=self.config.source_type,
+                        default_availability_lag_seconds=(
+                            self.config.default_availability_lag_seconds
+                        ),
+                    )
+                except (
+                    IngestionSchemaError,
+                    ValueError,
+                    TypeError,
+                ) as exc:
+                    self._record_parse_error(
+                        f"symbol_status:{path.name}:{idx}", exc
+                    )
+                    continue
+                self._add_symbol_status(rec)
 
     # ----- internals: fixture mode -----
 

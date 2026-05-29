@@ -1555,3 +1555,408 @@ def test_binance_csv_adapter_uses_only_stdlib_csv_no_network():
             assert not low.startswith(bad), (
                 f"forbidden import {mod!r} in CSV adapter"
             )
+
+
+
+# ---------------------------------------------------------------------------
+# PR105: SYMBOL_STATUS_FILE source-type routing / scanner +
+# kline symbol_status sidecar merge.
+#
+# Cloud reality this fixes: a 30D multi-symbol kline ingestion produced
+# 466560 kline records; the operator then dropped a symbol-status JSONL
+# sidecar at
+#   data/historical_raw/binance_um/symbol_status/
+#       symbol_status_<from>_<to>.jsonl
+# but `--source-type SYMBOL_STATUS_FILE` still returned the 466560 kline
+# records (SYMBOL_STATUS=0, symbol_status_file_missing). The scanner now
+# routes by source_type and discovers the nested sidecar.
+# ---------------------------------------------------------------------------
+
+
+def _sidecar_status_row(
+    symbol: str,
+    status: str = SymbolStatus.TRADING,
+    *,
+    event_time: datetime = None,
+    available_at: datetime = None,
+    ingested_at: datetime = None,
+) -> Dict[str, Any]:
+    """Build one row in the PR105 sidecar schema:
+    {symbol, status, event_time, available_at, ingested_at, source}.
+
+    Deliberately carries NO ``listed_at`` and NO ``market_type`` so the
+    parser's event_time anchoring / UNKNOWN-market default is exercised.
+    """
+    et = event_time or (_T0 - timedelta(days=1))
+    av = available_at or et
+    ing = ingested_at or _GEN
+    return {
+        "symbol": symbol,
+        "status": status,
+        "event_time": et.isoformat(),
+        "available_at": av.isoformat(),
+        "ingested_at": ing.isoformat(),
+        "source": "BINANCE_PUBLIC_EXCHANGE_INFO_FILE",
+    }
+
+
+def _write_symbol_status_sidecar(
+    root: Path,
+    rows: List[Dict[str, Any]],
+    *,
+    base_subdir: str = "binance_um",
+    filename: str = "symbol_status_2026-04-08_2026-05-08.jsonl",
+) -> Path:
+    """Write a symbol-status JSONL sidecar under the real Binance public
+    dump layout (``<root>/<base_subdir>/symbol_status/<filename>``) and
+    return the file path."""
+    base = root if base_subdir is None else (root / base_subdir)
+    status_dir = base / "symbol_status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    path = status_dir / filename
+    path.write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _symbol_status_config(
+    tmp_path: Path,
+    *,
+    input_root: Path,
+    symbols=(),
+    intervals=("1m",),
+    end: datetime = None,
+) -> HistoricalDataIngestionConfig:
+    return HistoricalDataIngestionConfig(
+        input_root=str(input_root),
+        output_root=str(tmp_path / "out"),
+        start_time=_T0,
+        end_time=end or (_T0 + timedelta(minutes=5)),
+        symbols=tuple(symbols),
+        intervals=tuple(intervals),
+        include_funding=False,
+        include_open_interest=False,
+        include_ticker_24h=False,
+        source_type=HistoricalDataSourceType.SYMBOL_STATUS_FILE,
+    )
+
+
+# --- 1. SYMBOL_STATUS_FILE only fixture -> SYMBOL_STATUS=9, no klines --
+
+
+def test_symbol_status_file_only_yields_symbol_status_no_klines(tmp_path):
+    root = tmp_path / "data" / "historical_raw"
+    # Kline CSVs are present but MUST NOT be scanned for this source
+    # type (this is exactly the cloud bug: SYMBOL_STATUS_FILE was still
+    # returning the kline records).
+    _write_binance_kline_csv(
+        root,
+        symbol="BTCUSDT",
+        interval="1m",
+        count=5,
+        base_subdir="binance_um",
+    )
+    symbols = [f"COIN{i:02d}USDT" for i in range(9)]
+    sidecar = _write_symbol_status_sidecar(
+        root, [_sidecar_status_row(s) for s in symbols]
+    )
+    cfg = _symbol_status_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+
+    counts = result.manifest.record_counts_by_type
+    assert counts.get(HistoricalMarketRecordType.SYMBOL_STATUS) == 9
+    # NO kline records, despite the kline CSV files being on disk.
+    assert HistoricalMarketRecordType.KLINE_1M not in counts
+    assert HistoricalMarketRecordType.KLINE_5M not in counts
+    assert not any(
+        isinstance(r, HistoricalKlineRecord) for r in engine.records
+    )
+    # The nested, date-stamped sidecar was the file actually scanned.
+    assert str(sidecar) in result.manifest.source_files
+    assert not any(
+        s.endswith(".csv") for s in result.manifest.source_files
+    )
+    # No fabrication / no "missing" warning when the sidecar is found.
+    assert "symbol_status_file_missing" not in result.warnings
+
+
+# --- 2. kline + sidecar fixture -> KLINE + SYMBOL_STATUS both present --
+
+
+def test_kline_source_type_merges_symbol_status_sidecar(tmp_path):
+    root = tmp_path / "data" / "historical_raw"
+    _write_binance_kline_csv(
+        root,
+        symbol="BTCUSDT",
+        interval="1m",
+        count=5,
+        base_subdir="binance_um",
+    )
+    sidecar = _write_symbol_status_sidecar(
+        root,
+        [
+            _sidecar_status_row("BTCUSDT"),
+            _sidecar_status_row("ETHUSDT"),
+        ],
+    )
+    cfg = HistoricalDataIngestionConfig(
+        input_root=str(root),
+        output_root=str(tmp_path / "out"),
+        start_time=_T0,
+        end_time=_T0 + timedelta(minutes=5),
+        symbols=("BTCUSDT",),
+        intervals=("1m",),
+        include_funding=False,
+        include_open_interest=False,
+        include_ticker_24h=False,
+        include_exchange_info=False,
+        include_symbol_status=True,
+        source_type=HistoricalDataSourceType.BINANCE_PUBLIC_KLINE_FILE,
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+
+    counts = result.manifest.record_counts_by_type
+    assert counts[HistoricalMarketRecordType.KLINE_1M] == 5
+    assert counts[HistoricalMarketRecordType.SYMBOL_STATUS] == 2
+    assert any(
+        isinstance(r, HistoricalKlineRecord) for r in engine.records
+    )
+    assert any(
+        isinstance(r, SymbolStatusRecord) for r in engine.records
+    )
+    assert str(sidecar) in result.manifest.source_files
+
+    # Both record types are merged into the same records.jsonl.
+    written = engine.write_outputs()
+    lines = [
+        json.loads(ln)
+        for ln in Path(written.records_path)
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if ln.strip()
+    ]
+    types = {ln["record_type"] for ln in lines}
+    assert HistoricalMarketRecordType.KLINE_1M in types
+    assert HistoricalMarketRecordType.SYMBOL_STATUS in types
+
+
+# --- 3. missing sidecar -> warning, no fabrication -----------------------
+
+
+def test_kline_source_missing_sidecar_warns_no_fabrication(tmp_path):
+    root = tmp_path / "data" / "historical_raw"
+    _write_binance_kline_csv(
+        root,
+        symbol="BTCUSDT",
+        interval="1m",
+        count=5,
+        base_subdir="binance_um",
+    )
+    cfg = HistoricalDataIngestionConfig(
+        input_root=str(root),
+        output_root=str(tmp_path / "out"),
+        start_time=_T0,
+        end_time=_T0 + timedelta(minutes=5),
+        symbols=("BTCUSDT",),
+        intervals=("1m",),
+        include_funding=False,
+        include_open_interest=False,
+        include_ticker_24h=False,
+        include_exchange_info=False,
+        include_symbol_status=True,
+        source_type=HistoricalDataSourceType.BINANCE_PUBLIC_KLINE_FILE,
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+
+    # The sidecar is missing: warn, never fabricate a status record.
+    assert "symbol_status_file_missing" in result.warnings
+    assert (
+        HistoricalMarketRecordType.SYMBOL_STATUS
+        not in result.manifest.record_counts_by_type
+    )
+    assert not any(
+        isinstance(r, SymbolStatusRecord) for r in engine.records
+    )
+    # Klines are still ingested - a missing sidecar never blocks them.
+    assert result.manifest.record_counts_by_type[
+        HistoricalMarketRecordType.KLINE_1M
+    ] == 5
+
+
+def test_symbol_status_file_missing_returns_insufficient_evidence(
+    tmp_path,
+):
+    root = tmp_path / "data" / "historical_raw"
+    root.mkdir(parents=True, exist_ok=True)
+    cfg = _symbol_status_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    assert result.status == DataIngestionStatus.INSUFFICIENT_EVIDENCE
+    assert result.ingested_record_count == 0
+    assert result.manifest.record_counts_by_type == {}
+    assert "symbol_status_file_missing" in result.warnings
+    assert any(
+        "NOT fabricating real market data" in w
+        for w in result.warnings
+    )
+
+
+# --- 4. universe_manifest symbols / listed_count / unknown correct -------
+
+
+def test_symbol_status_file_universe_manifest_counts(tmp_path):
+    root = tmp_path / "data" / "historical_raw"
+    symbols = [f"COIN{i:02d}USDT" for i in range(9)]
+    rows = [_sidecar_status_row(s) for s in symbols[:8]]
+    # One symbol with an UNKNOWN status -> status_unknown_count == 1.
+    rows.append(
+        _sidecar_status_row(symbols[8], status=SymbolStatus.UNKNOWN)
+    )
+    _write_symbol_status_sidecar(root, rows)
+    cfg = _symbol_status_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+
+    um = result.universe_manifest
+    assert list(um.symbols) == sorted(symbols)
+    assert um.listed_count == 8
+    assert um.status_unknown_count == 1
+    assert um.delisted_count == 0
+    # The universe manifest carries the 9 status records and is not
+    # empty (the empty-universe warning must be absent).
+    assert len(um.symbol_status_records) == 9
+    udict = um.to_dict()
+    assert udict["listed_count"] == 8
+    assert udict["status_unknown_count"] == 1
+    assert udict["symbols"] == sorted(symbols)
+    assert not any(
+        "universe_empty" in w for w in um.warnings
+    )
+
+
+# --- direct parser: sidecar schema without listed_at --------------------
+
+
+def test_parse_symbol_status_sidecar_schema_anchors_to_event_time():
+    et = _T0 - timedelta(days=2)
+    av = _T0 - timedelta(days=1)
+    rec = parse_symbol_status_row(
+        {
+            "symbol": "BTCUSDT",
+            "status": SymbolStatus.TRADING,
+            "event_time": et.isoformat(),
+            "available_at": av.isoformat(),
+            "ingested_at": _GEN.isoformat(),
+            "source": "ignored-by-parser",
+        }
+    )
+    assert isinstance(rec, SymbolStatusRecord)
+    assert rec.symbol == "BTCUSDT"
+    assert rec.status == SymbolStatus.TRADING
+    # listed_at is anchored to event_time (never fabricated, never
+    # derived from ingested_at) and market_type defaults to UNKNOWN.
+    assert rec.listed_at == et
+    assert rec.event_time == et
+    assert rec.available_at == av
+    assert rec.ingested_at == _GEN
+    assert rec.market_type == "UNKNOWN"
+    assert rec.record_type == HistoricalMarketRecordType.SYMBOL_STATUS
+
+
+def test_parse_symbol_status_row_without_any_time_is_rejected():
+    # No listed_at / event_time / available_at -> cannot anchor a real
+    # listing time; reject rather than fabricate.
+    with pytest.raises(IngestionTimeFieldError):
+        parse_symbol_status_row(
+            {"symbol": "BTCUSDT", "status": SymbolStatus.TRADING}
+        )
+
+
+# --- 5. safety flags intact for the SYMBOL_STATUS_FILE path --------------
+
+
+def test_symbol_status_file_safety_flags_intact(tmp_path):
+    root = tmp_path / "data" / "historical_raw"
+    _write_symbol_status_sidecar(
+        root,
+        [
+            _sidecar_status_row("BTCUSDT"),
+            _sidecar_status_row("ETHUSDT"),
+        ],
+    )
+    cfg = _symbol_status_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    for payload in (
+        result.to_dict(),
+        result.manifest.to_dict(),
+        result.universe_manifest.to_dict(),
+        engine.coverage_report(),
+        engine.data_gap_report(),
+        cfg.to_dict(),
+        engine.safety_payload(),
+    ):
+        assert payload["phase_12_forbidden"] is True
+        assert payload["live_trading"] is False
+        assert payload["exchange_live_orders"] is False
+        assert payload["binance_private_api_enabled"] is False
+        assert payload["telegram_outbound_enabled"] is False
+        assert payload["ai_trade_authority"] is False
+        assert payload["auto_tuning_allowed"] is False
+        assert payload["trade_authority"] is False
+    # No forbidden field keys leak into any SYMBOL_STATUS_FILE payload.
+    for payload in (
+        result.to_dict(),
+        result.manifest.to_dict(),
+        result.universe_manifest.to_dict(),
+    ):
+        for key in _walk_keys(payload):
+            assert key not in ALL_FORBIDDEN_KEYS
+
+
+# --- scanner: flat-root and direct symbol_status/ layouts also work ------
+
+
+def test_symbol_status_scanner_flat_and_direct_subdir_layouts(tmp_path):
+    # Flat root file (legacy fixture layout) is still discovered.
+    flat_root = tmp_path / "flat"
+    flat_root.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(
+        flat_root / "symbol_status.jsonl",
+        [_sidecar_status_row("BTCUSDT")],
+    )
+    cfg_flat = _symbol_status_config(tmp_path, input_root=flat_root)
+    res_flat = HistoricalDataIngestion(
+        cfg_flat, generated_at_utc=_GEN
+    ).ingest()
+    assert (
+        res_flat.manifest.record_counts_by_type[
+            HistoricalMarketRecordType.SYMBOL_STATUS
+        ]
+        == 1
+    )
+
+    # Direct <root>/symbol_status/*.jsonl layout (no nesting).
+    direct_root = tmp_path / "direct"
+    _write_symbol_status_sidecar(
+        direct_root,
+        [_sidecar_status_row("BTCUSDT"), _sidecar_status_row("ETHUSDT")],
+        base_subdir=None,
+    )
+    cfg_direct = _symbol_status_config(
+        tmp_path, input_root=direct_root
+    )
+    res_direct = HistoricalDataIngestion(
+        cfg_direct, generated_at_utc=_GEN
+    ).ingest()
+    assert (
+        res_direct.manifest.record_counts_by_type[
+            HistoricalMarketRecordType.SYMBOL_STATUS
+        ]
+        == 2
+    )
