@@ -17,6 +17,13 @@ Responsibility (v0):
   * Convert **local file** rows into the PR95 record types
     (:class:`HistoricalKlineRecord`,
     :class:`HistoricalMarketRecord`, :class:`SymbolStatusRecord`).
+    Supported kline inputs are JSON / JSONL fixtures **and** real
+    Binance public futures daily-kline CSV dumps laid out as
+    ``klines/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv``
+    with the 12-column header
+    ``open_time,open,high,low,close,volume,close_time,quote_volume,
+    count,taker_buy_volume,taker_buy_quote_volume,ignore`` (the header
+    row is skipped, never parsed as data).
   * Compute ``event_time`` / ``available_at`` / ``ingested_at`` and
     enforce the four-timestamp record-time model of Constitution §5.
   * NEVER substitute ``ingested_at`` for ``available_at``.
@@ -94,6 +101,7 @@ coverage checkpoint / short-window no-lookahead trial preparation**.
 from __future__ import annotations
 
 import copy
+import csv
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -336,7 +344,9 @@ def parse_kline_row(
 
     ``available_at`` defaults to ``close_time + lag`` (Constitution §6:
     final OHLCV is invisible before candle close). ``ingested_at`` is
-    NEVER substituted for ``available_at``.
+    NEVER substituted for ``available_at``. ``event_time`` is pinned to
+    the candle ``close_time`` (the candle becomes a complete, readable
+    event only once it has closed).
     """
     if interval not in SUPPORTED_KLINE_INTERVALS:
         raise IngestionSchemaError(
@@ -433,6 +443,7 @@ def parse_kline_row(
             volume=v,
             available_at=available_at,
             close_time=close_time,
+            event_time=close_time,
             ingested_at=ingested_at,
             source=source,
             data_quality_flags=flags,
@@ -951,6 +962,109 @@ def _discover_file(root: Path, *candidates: str) -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
+# Binance public futures kline CSV adapter (PR101-A)
+# ---------------------------------------------------------------------------
+
+# Canonical Binance public futures kline daily CSV header (12 columns).
+# Real Binance dumps ship this header on daily files; the header row is
+# metadata and MUST never be parsed as a data row.
+_BINANCE_KLINE_CSV_HEADER: Tuple[str, ...] = (
+    "open_time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "close_time",
+    "quote_volume",
+    "count",
+    "taker_buy_volume",
+    "taker_buy_quote_volume",
+    "ignore",
+)
+
+
+def _is_binance_kline_header_row(row: Sequence[Any]) -> bool:
+    """Return ``True`` if ``row`` is a Binance kline CSV header row.
+
+    Detection is by the first column only: a header row carries the
+    literal ``open_time`` (case-insensitive) while a data row carries a
+    millisecond epoch integer. This means the header is skipped no
+    matter where it appears in the file, and a numeric data row is
+    never misclassified as a header.
+    """
+    if not row:
+        return False
+    first = str(row[0]).strip().lower()
+    return first in ("open_time", "opentime")
+
+
+def _read_csv_rows(path: Path) -> List[List[str]]:
+    """Read a CSV file into a list of string-cell rows.
+
+    Blank lines are dropped. This reader is file-only: it opens a local
+    path and never reaches a network.
+    """
+    rows: List[List[str]] = []
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        for raw in csv.reader(fh):
+            if not raw:
+                continue
+            if all(str(cell).strip() == "" for cell in raw):
+                continue
+            rows.append([str(cell) for cell in raw])
+    return rows
+
+
+def _binance_kline_csv_row_to_dict(row: Sequence[Any]) -> Dict[str, Any]:
+    """Map one Binance public futures kline CSV data row to a dict row
+    consumable by :func:`parse_kline_row`.
+
+    Binance daily-kline layout (12 columns):
+
+        ``open_time, open, high, low, close, volume, close_time,
+        quote_volume, count, taker_buy_volume,
+        taker_buy_quote_volume, ignore``
+
+    ``open_time`` / ``close_time`` are millisecond epoch integers and
+    are converted to ``int`` so :func:`_parse_time_field` interprets
+    them as epoch-ms (timezone-aware UTC). OHLCV cells are passed
+    through as-is (``parse_kline_row`` coerces them to ``float``). A row
+    with fewer than 6 columns, or a non-integer ms timestamp, raises
+    :class:`IngestionSchemaError` so the engine can reject it (and warn)
+    rather than fabricate data.
+    """
+    if len(row) < 6:
+        raise IngestionSchemaError(
+            "Binance kline CSV row must have at least 6 columns "
+            "[open_time, open, high, low, close, volume, ...], got "
+            f"{len(row)}"
+        )
+
+    def _to_int_ms(value: Any, name: str) -> int:
+        text = str(value).strip()
+        try:
+            return int(text)
+        except (TypeError, ValueError) as exc:
+            raise IngestionSchemaError(
+                f"Binance kline CSV {name} must be an integer "
+                f"millisecond timestamp, got {value!r}"
+            ) from exc
+
+    out: Dict[str, Any] = {
+        "open_time": _to_int_ms(row[0], "open_time"),
+        "open": row[1],
+        "high": row[2],
+        "low": row[3],
+        "close": row[4],
+        "volume": row[5],
+    }
+    if len(row) >= 7 and str(row[6]).strip() != "":
+        out["close_time"] = _to_int_ms(row[6], "close_time")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Coverage / gap audit
 # ---------------------------------------------------------------------------
 
@@ -1322,10 +1436,32 @@ class HistoricalDataIngestion:
         if cfg.include_symbol_status or cfg.include_exchange_info:
             self._load_symbol_status(root)
 
+    def _kline_base_dirs(self, root: Path) -> List[Path]:
+        """Return candidate ``klines`` base directories under ``root``.
+
+        Supports both a flat layout (``<root>/klines/...``) and the
+        Binance public futures dump layout where the operator points
+        ``--input-root`` at ``data/historical_raw`` and the data lives
+        under ``data/historical_raw/binance_um/klines/...``.
+        """
+        candidates = [
+            root / "klines",
+            root / "binance_um" / "klines",
+        ]
+        seen: set = set()
+        out: List[Path] = []
+        for d in candidates:
+            key = str(d)
+            if key in seen:
+                continue
+            seen.add(key)
+            if d.is_dir():
+                out.append(d)
+        return out
+
     def _discover_symbols(self, root: Path) -> List[str]:
         symbols: set = set()
-        klines_dir = root / "klines"
-        if klines_dir.is_dir():
+        for klines_dir in self._kline_base_dirs(root):
             for p in sorted(klines_dir.glob("*")):
                 if p.is_dir():
                     symbols.add(p.name)
@@ -1336,9 +1472,37 @@ class HistoricalDataIngestion:
                         symbols.add(stem.rsplit("_", 1)[0])
         return sorted(symbols)
 
+    def _find_kline_csv_dir(
+        self, root: Path, symbol: str, interval: str
+    ) -> Optional[Path]:
+        """Locate a Binance public futures kline daily-CSV directory.
+
+        The expected real layout is::
+
+            <klines_base>/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv
+
+        Returns the ``<SYMBOL>/<INTERVAL>`` directory iff it exists and
+        contains at least one ``.csv`` file, otherwise ``None``.
+        """
+        for base in self._kline_base_dirs(root):
+            interval_dir = base / symbol / interval
+            if interval_dir.is_dir() and any(
+                interval_dir.glob("*.csv")
+            ):
+                return interval_dir
+        return None
+
     def _load_klines(
         self, root: Path, symbol: str, interval: str
     ) -> None:
+        # 1. Binance public futures daily-CSV directory takes
+        #    precedence for real-file mode:
+        #    klines/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv
+        csv_dir = self._find_kline_csv_dir(root, symbol, interval)
+        if csv_dir is not None:
+            self._load_binance_kline_csv_dir(csv_dir, symbol, interval)
+            return
+        # 2. Fall back to a single JSON / JSONL file (fixture layout).
         path = _discover_file(
             root,
             f"klines/{symbol}/{interval}.jsonl",
@@ -1371,6 +1535,58 @@ class HistoricalDataIngestion:
                 )
                 continue
             self._add_kline(rec)
+
+    def _load_binance_kline_csv_dir(
+        self, interval_dir: Path, symbol: str, interval: str
+    ) -> None:
+        """Parse every Binance public futures daily-kline CSV file in
+        ``interval_dir`` into :class:`HistoricalKlineRecord` objects.
+
+        Files are processed in sorted (deterministic) order. The header
+        row is skipped and never parsed as data. Malformed data rows are
+        rejected with a warning - they are never fabricated or
+        back-filled. ``source`` is the configured ``source_type``
+        (``BINANCE_PUBLIC_KLINE_FILE`` for real Binance data).
+        """
+        csv_files = sorted(interval_dir.glob("*.csv"))
+        for csv_path in csv_files:
+            self._source_files.append(str(csv_path))
+            try:
+                raw_rows = _read_csv_rows(csv_path)
+            except OSError as exc:
+                self._record_parse_error(
+                    f"klines_csv:{symbol}:{interval}:{csv_path.name}",
+                    IngestionSchemaError(str(exc)),
+                )
+                continue
+            for idx, raw in enumerate(raw_rows):
+                # The Binance daily CSV header is metadata, never data.
+                if _is_binance_kline_header_row(raw):
+                    self._skipped += 1
+                    continue
+                try:
+                    row_dict = _binance_kline_csv_row_to_dict(raw)
+                    rec = parse_kline_row(
+                        row_dict,
+                        symbol=symbol,
+                        interval=interval,
+                        source=self.config.source_type,
+                        default_availability_lag_seconds=(
+                            self.config.default_availability_lag_seconds
+                        ),
+                    )
+                except (
+                    IngestionSchemaError,
+                    ValueError,
+                    TypeError,
+                ) as exc:
+                    self._record_parse_error(
+                        f"klines_csv:{symbol}:{interval}:"
+                        f"{csv_path.name}:{idx}",
+                        exc,
+                    )
+                    continue
+                self._add_kline(rec)
 
     def _load_market(
         self,

@@ -1133,3 +1133,425 @@ def test_schema_error_on_missing_required_numeric_field():
         parse_funding_row(
             {"symbol": "BTCUSDT", "event_time": _T0.isoformat()}
         )
+
+
+
+# ---------------------------------------------------------------------------
+# PR101-A: Binance public futures kline daily-CSV file adapter
+#
+# Real-file adaptation for Binance public futures kline dumps laid out
+# as klines/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv with
+# the 12-column header:
+#   open_time,open,high,low,close,volume,close_time,quote_volume,count,
+#   taker_buy_volume,taker_buy_quote_volume,ignore
+# ---------------------------------------------------------------------------
+
+_BINANCE_KLINE_CSV_HEADER = (
+    "open_time,open,high,low,close,volume,close_time,quote_volume,"
+    "count,taker_buy_volume,taker_buy_quote_volume,ignore"
+)
+
+
+def _binance_kline_csv_text(
+    *,
+    start: datetime = _T0,
+    interval: str = "1m",
+    count: int = 5,
+    with_header: bool = True,
+    base_price: float = 100.0,
+    extra_data_lines: List[str] = None,
+) -> str:
+    """Build the text of a real-shaped Binance public futures kline
+    daily CSV (12 columns, optional header, millisecond timestamps)."""
+    seconds = 60 if interval == "1m" else 300
+    lines: List[str] = []
+    if with_header:
+        lines.append(_BINANCE_KLINE_CSV_HEADER)
+    for i in range(count):
+        ot = start + timedelta(seconds=seconds * i)
+        open_ms = int(ot.timestamp() * 1000)
+        # Binance close_time is the last millisecond of the candle.
+        close_ms = open_ms + seconds * 1000 - 1
+        price = base_price + float(i)
+        lines.append(
+            f"{open_ms},{price},{price + 1.0},{price - 1.0},"
+            f"{price + 0.5},{1000.0 + float(i)},{close_ms},"
+            f"{price * 1000.0},{50 + i},{500.0 + float(i)},"
+            f"{50000.0 + float(i)},0"
+        )
+    if extra_data_lines:
+        lines.extend(extra_data_lines)
+    return "\n".join(lines) + "\n"
+
+
+def _write_binance_kline_csv(
+    root: Path,
+    *,
+    symbol: str = "BTCUSDT",
+    interval: str = "1m",
+    count: int = 5,
+    start: datetime = _T0,
+    date_str: str = "2026-05-01",
+    with_header: bool = True,
+    base_price: float = 100.0,
+    extra_data_lines: List[str] = None,
+    base_subdir: str = None,
+) -> Path:
+    """Write a Binance public futures kline daily CSV under the real
+    nested layout and return the file path."""
+    base = root if base_subdir is None else (root / base_subdir)
+    interval_dir = base / "klines" / symbol / interval
+    interval_dir.mkdir(parents=True, exist_ok=True)
+    path = interval_dir / f"{symbol}-{interval}-{date_str}.csv"
+    path.write_text(
+        _binance_kline_csv_text(
+            start=start,
+            interval=interval,
+            count=count,
+            with_header=with_header,
+            base_price=base_price,
+            extra_data_lines=extra_data_lines,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _binance_config(
+    tmp_path: Path,
+    *,
+    input_root: Path,
+    symbols=("BTCUSDT",),
+    intervals=("1m",),
+    end: datetime = None,
+    lag: float = 0.0,
+) -> HistoricalDataIngestionConfig:
+    return HistoricalDataIngestionConfig(
+        input_root=str(input_root),
+        output_root=str(tmp_path / "out"),
+        start_time=_T0,
+        end_time=end or (_T0 + timedelta(minutes=5)),
+        symbols=tuple(symbols),
+        intervals=tuple(intervals),
+        include_funding=False,
+        include_open_interest=False,
+        include_ticker_24h=False,
+        include_exchange_info=False,
+        include_symbol_status=False,
+        default_availability_lag_seconds=lag,
+        source_type=HistoricalDataSourceType.BINANCE_PUBLIC_KLINE_FILE,
+    )
+
+
+def _klines_of(engine: HistoricalDataIngestion) -> List[HistoricalKlineRecord]:
+    return [
+        r for r in engine.records
+        if isinstance(r, HistoricalKlineRecord)
+    ]
+
+
+# --- 1. scans nested Binance public kline path ---------------------------
+
+
+def test_binance_csv_scans_nested_kline_path(tmp_path):
+    root = tmp_path / "in"
+    csv_path = _write_binance_kline_csv(
+        root, symbol="BTCUSDT", interval="1m", count=5
+    )
+    assert csv_path.name == "BTCUSDT-1m-2026-05-01.csv"
+    cfg = _binance_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    assert result.status == DataIngestionStatus.EVIDENCE_GENERATED
+    assert str(csv_path) in result.manifest.source_files
+
+
+def test_binance_csv_scans_binance_um_layout_and_discovers_symbols(
+    tmp_path,
+):
+    # input_root points at data/historical_raw; data lives under the
+    # binance_um/ subtree, symbols are auto-discovered.
+    root = tmp_path / "data" / "historical_raw"
+    _write_binance_kline_csv(
+        root,
+        symbol="BTCUSDT",
+        interval="1m",
+        count=5,
+        base_subdir="binance_um",
+    )
+    cfg = HistoricalDataIngestionConfig(
+        input_root=str(root),
+        output_root=str(tmp_path / "out"),
+        start_time=_T0,
+        end_time=_T0 + timedelta(minutes=5),
+        symbols=(),  # force auto-discovery
+        intervals=("1m",),
+        include_funding=False,
+        include_open_interest=False,
+        include_ticker_24h=False,
+        include_exchange_info=False,
+        include_symbol_status=False,
+        source_type=HistoricalDataSourceType.BINANCE_PUBLIC_KLINE_FILE,
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    assert result.ingested_record_count == 5
+    assert all(k.symbol == "BTCUSDT" for k in _klines_of(engine))
+
+
+# --- 2. parses 12-column header CSV correctly ----------------------------
+
+
+def test_binance_csv_parses_12_column_header_row(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, count=3)
+    cfg = _binance_config(
+        tmp_path, input_root=root, end=_T0 + timedelta(minutes=3)
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    engine.ingest()
+    klines = sorted(_klines_of(engine), key=lambda k: k.open_time)
+    assert len(klines) == 3
+    first = klines[0]
+    assert first.open == 100.0
+    assert first.high == 101.0
+    assert first.low == 99.0
+    assert first.close == 100.5
+    assert first.volume == 1000.0
+
+
+# --- 3. skips the header row (never parsed as data) ----------------------
+
+
+def test_binance_csv_skips_header_row(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, count=5)
+    cfg = _binance_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    # Exactly 5 data rows ingested; the header row is NOT a record and
+    # is not counted as a rejection.
+    assert result.ingested_record_count == 5
+    assert result.rejected_record_count == 0
+    for k in _klines_of(engine):
+        assert isinstance(k.open, float)
+
+
+# --- 4. converts open_time / close_time milliseconds to UTC datetime -----
+
+
+def test_binance_csv_converts_ms_timestamps_to_utc(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, interval="1m", count=1)
+    cfg = _binance_config(
+        tmp_path, input_root=root, end=_T0 + timedelta(minutes=1)
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    engine.ingest()
+    k = _klines_of(engine)[0]
+    assert k.open_time == _T0
+    assert k.open_time.tzinfo is not None
+    assert k.open_time.utcoffset() == timedelta(0)
+    assert k.close_time == _T0 + timedelta(minutes=1)
+    assert k.close_time.utcoffset() == timedelta(0)
+    # event_time is pinned to the candle close_time.
+    assert k.event_time == k.close_time
+
+
+# --- 5. creates HistoricalKlineRecord for 1m -----------------------------
+
+
+def test_binance_csv_creates_kline_record_1m(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, interval="1m", count=2)
+    cfg = _binance_config(
+        tmp_path,
+        input_root=root,
+        intervals=("1m",),
+        end=_T0 + timedelta(minutes=2),
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    engine.ingest()
+    klines = _klines_of(engine)
+    assert klines
+    for k in klines:
+        assert isinstance(k, HistoricalKlineRecord)
+        assert k.interval == "1m"
+        assert k.record_type == HistoricalMarketRecordType.KLINE_1M
+        assert (
+            k.source
+            == HistoricalDataSourceType.BINANCE_PUBLIC_KLINE_FILE
+        )
+
+
+# --- 6. creates HistoricalKlineRecord for 5m -----------------------------
+
+
+def test_binance_csv_creates_kline_record_5m(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, interval="5m", count=3)
+    cfg = _binance_config(
+        tmp_path,
+        input_root=root,
+        intervals=("5m",),
+        end=_T0 + timedelta(minutes=15),
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    engine.ingest()
+    klines = sorted(_klines_of(engine), key=lambda k: k.open_time)
+    assert len(klines) == 3
+    for k in klines:
+        assert k.interval == "5m"
+        assert k.record_type == HistoricalMarketRecordType.KLINE_5M
+    assert klines[0].close_time == _T0 + timedelta(minutes=5)
+
+
+# --- 7. source_files is non-empty for real file mode ---------------------
+
+
+def test_binance_csv_source_files_non_empty(tmp_path):
+    root = tmp_path / "in"
+    csv_path = _write_binance_kline_csv(root, count=5)
+    cfg = _binance_config(tmp_path, input_root=root)
+    result = HistoricalDataIngestion(cfg, generated_at_utc=_GEN).ingest()
+    assert result.manifest.source_files  # non-empty
+    assert str(csv_path) in result.manifest.source_files
+
+
+# --- 8. ingested_record_count > 0 for a Binance CSV directory ------------
+
+
+def test_binance_csv_ingested_record_count_positive(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, count=5)
+    cfg = _binance_config(tmp_path, input_root=root)
+    result = HistoricalDataIngestion(cfg, generated_at_utc=_GEN).ingest()
+    assert result.ingested_record_count == 5
+    assert result.status == DataIngestionStatus.EVIDENCE_GENERATED
+
+
+# --- 9. available_at = close_time + lag, never ingested_at ---------------
+
+
+def test_binance_csv_available_at_is_close_time_plus_lag(tmp_path):
+    root = tmp_path / "in"
+    lag = 30.0
+    _write_binance_kline_csv(root, interval="1m", count=1)
+    cfg = _binance_config(
+        tmp_path,
+        input_root=root,
+        end=_T0 + timedelta(minutes=1),
+        lag=lag,
+    )
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    engine.ingest()
+    k = _klines_of(engine)[0]
+    assert k.available_at == k.close_time + timedelta(seconds=lag)
+    assert k.available_at == _T0 + timedelta(minutes=1, seconds=30)
+    # Binance public CSV carries no ingested_at; available_at is never
+    # derived from ingestion time.
+    assert k.ingested_at is None
+    assert k.available_at != k.ingested_at
+
+
+# --- 10. malformed rows are skipped/rejected with warnings ---------------
+
+
+def test_binance_csv_malformed_rows_rejected_not_fabricated(tmp_path):
+    root = tmp_path / "in"
+    bad_open_ms = int((_T0 + timedelta(minutes=2)).timestamp() * 1000)
+    bad_close_ms = bad_open_ms + 60_000 - 1
+    malformed = [
+        # non-numeric volume -> schema error, rejected.
+        f"{bad_open_ms},100.0,101.0,99.0,100.5,NOT_A_NUMBER,"
+        f"{bad_close_ms},0,0,0,0,0",
+        # too few columns -> schema error, rejected.
+        "1,2,3",
+    ]
+    _write_binance_kline_csv(root, count=5, extra_data_lines=malformed)
+    cfg = _binance_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    # Valid rows still ingested; malformed rows rejected, never invented.
+    assert result.ingested_record_count == 5
+    assert result.rejected_record_count == 2
+    assert any("rejected_row" in w for w in result.warnings)
+    assert result.status == DataIngestionStatus.PARTIAL_EVIDENCE
+
+
+# --- 11. missing input still returns INSUFFICIENT_EVIDENCE ---------------
+
+
+def test_binance_csv_missing_input_returns_insufficient_evidence(
+    tmp_path,
+):
+    cfg = _binance_config(
+        tmp_path, input_root=tmp_path / "does_not_exist"
+    )
+    result = HistoricalDataIngestion(cfg, generated_at_utc=_GEN).ingest()
+    assert result.status == DataIngestionStatus.INSUFFICIENT_EVIDENCE
+    assert result.ingested_record_count == 0
+    assert result.manifest.source_files == ()
+    assert result.manifest.record_counts_by_type == {}
+
+
+# --- 12. safety flags remain pinned for the Binance CSV path -------------
+
+
+def test_binance_csv_safety_flags_remain(tmp_path):
+    root = tmp_path / "in"
+    _write_binance_kline_csv(root, count=5)
+    cfg = _binance_config(tmp_path, input_root=root)
+    engine = HistoricalDataIngestion(cfg, generated_at_utc=_GEN)
+    result = engine.ingest()
+    for payload in (
+        result.to_dict(),
+        result.manifest.to_dict(),
+        engine.coverage_report(),
+        engine.data_gap_report(),
+        cfg.to_dict(),
+        engine.safety_payload(),
+    ):
+        assert payload["phase_12_forbidden"] is True
+        assert payload["live_trading"] is False
+        assert payload["exchange_live_orders"] is False
+        assert payload["binance_private_api_enabled"] is False
+        assert payload["auto_tuning_allowed"] is False
+        assert payload["trade_authority"] is False
+
+
+# --- 13. CSV adapter uses only the stdlib csv module, no network ----------
+
+
+def test_binance_csv_adapter_uses_only_stdlib_csv_no_network():
+    root = _project_root()
+    src = (
+        root / "app" / "sim" / "historical_data_ingestion.py"
+    ).read_text(encoding="utf-8")
+    imported = _collect_imported_modules(src)
+    # The CSV adapter relies on the standard-library csv module only.
+    assert "csv" in imported
+    forbidden = (
+        "binance",
+        "ccxt",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "websocket",
+        "websockets",
+        "telegram",
+        "deepseek",
+        "openai",
+        "anthropic",
+        "socket",
+        "urllib.request",
+        "http.client",
+        "grpc",
+        "boto3",
+    )
+    for mod in imported:
+        low = mod.lower()
+        for bad in forbidden:
+            assert not low.startswith(bad), (
+                f"forbidden import {mod!r} in CSV adapter"
+            )

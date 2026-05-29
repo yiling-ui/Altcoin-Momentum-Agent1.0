@@ -8826,6 +8826,30 @@ Phase 12 remains **FORBIDDEN**.
 > infrastructure).
 > **Phase 12:** **FORBIDDEN** (no change).
 
+> **Sub-task PR101-A — Binance Public Kline File Adapter Fix
+> (IN_REVIEW).** Bugfix on top of PR101: makes the ingestion
+> scanner / parser recognise **real** Binance public futures kline
+> daily CSV dumps when `source_type = BINANCE_PUBLIC_KLINE_FILE`.
+> Supported layout
+> `klines/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv`
+> (and the `binance_um/` dump prefix) with the 12-column header
+> `open_time,open,high,low,close,volume,close_time,quote_volume,
+> count,taker_buy_volume,taker_buy_quote_volume,ignore`; the header
+> row is skipped (never parsed as data), `open_time` / `close_time`
+> millisecond epochs become timezone-aware UTC, `event_time =
+> close_time`, `available_at = close_time + lag` (never
+> `ingested_at`), and malformed rows are rejected with warnings
+> (never fabricated). Scope: `app/sim/historical_data_ingestion.py`
+> + `tests/unit/test_historical_data_ingestion.py` + these status
+> docs only. **No** `app/risk/`, `app/execution/`, `app/exchanges/`,
+> `app/telegram/`, `app/config/`, Blind Runner, `MockExchange`, or
+> Capital Flow change. No Binance private API, no live orders, no
+> real Telegram, no auto-tuning, no 30D / 60D / 90D / 2Y runner.
+> `python -m pytest tests/unit/test_historical_data_ingestion.py -q`
+> → 44 passed; full `tests/unit` → 3628 passed. Still
+> `historical_blind_sim_live` / paper-only. **Phase 12 remains
+> FORBIDDEN.**
+
 PR101 ships the **eighth** anti-future-lookahead infrastructure
 block of the strict blind walk-forward stack defined by Phase
 11C.1D-D (PR93). It turns **local files** into the PR95 record
