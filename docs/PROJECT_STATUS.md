@@ -7,6 +7,294 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-D — MockExchange + Pessimistic Fill Model v0
+> (*Strict blind walk-forward simulated exchange + conservative
+> fill model / 严格前向 Sim-Live 模拟交易所与保守成交模型 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no I/O, no network, no real data
+> fetch, no real exchange API, no signed endpoint, no private
+> websocket, no API key, no API secret, and no authority over
+> the Risk Engine, the Execution FSM, or the Capital Flow
+> Engine is introduced by this PR.
+>
+> PR93 (the *Strict Blind Walk-forward Sim-Live
+> Constitution*) is merged. PR94 (*SimulationClock +
+> Time-Wall Guard*) is merged. PR95 (*Historical Market
+> Store v0*) is merged. PR96 (*ReplayFeedProvider v0*) is
+> merged. The constitution's PR93 §19 engineering route
+> explicitly authorises ONLY this PR (PR97 — *MockExchange +
+> Pessimistic Fill Model v0*) to begin the next paper-only
+> step. PR97 ships the **fourth** anti-future-lookahead
+> infrastructure block of the strict blind walk-forward
+> stack: a deterministic, paper-only simulated exchange and a
+> conservative fill model that consume only PR96
+> :class:`ReplayFeedBatch` / PR95
+> :class:`HistoricalKlineRecord` visible market data and
+> produce JSON-serialisable, audit-ready fills.
+>
+> The PR97 surface is intentionally small and pure-Python.
+> It introduces:
+>
+>   - :class:`MockOrderType` — closed taxonomy of mock order
+>     types (``MARKET``, ``LIMIT``, ``STOP_MARKET``,
+>     ``TAKE_PROFIT_MARKET``, ``FORCED_EXIT``).
+>   - :class:`MockOrderSide` — closed taxonomy of mock order
+>     sides (``BUY``, ``SELL``); paper-only field, NEVER an
+>     AI / strategy recommendation.
+>   - :class:`MockOrderStatus` — closed taxonomy of mock
+>     order statuses (``CREATED``, ``ACCEPTED``,
+>     ``PARTIALLY_FILLED``, ``FILLED``, ``REJECTED``,
+>     ``CANCELED``, ``EXPIRED``, ``STALE``,
+>     ``AMBIGUOUS_INTRABAR_PATH``); ``OPEN`` and ``TERMINAL``
+>     subsets exposed.
+>   - :class:`AmbiguousIntrabarPolicy` — closed taxonomy
+>     (``WORST_CASE`` default, ``AMBIGUOUS``).
+>   - :class:`LimitTouchFillPolicy` — closed taxonomy
+>     (``NO_FILL_ON_TOUCH`` default, ``ALLOW_FILL_ON_TOUCH``
+>     for parity testing only).
+>   - :class:`FillReason` — closed taxonomy of fill reasons
+>     (``MARKET_FILL``, ``LIMIT_FILL_ON_PENETRATION``,
+>     ``STOP_TRIGGERED_FILL``,
+>     ``TAKE_PROFIT_TRIGGERED_FILL``, ``FORCED_EXIT_FILL``,
+>     ``AMBIGUOUS_WORST_CASE_STOP_FILL``).
+>   - :class:`ConservativeAssumption` — closed taxonomy of
+>     conservative-assumption markers
+>     (``TAKER_FEE_APPLIED``, ``SLIPPAGE_APPLIED``,
+>     ``LATENCY_PENALTY_APPLIED``,
+>     ``LIMIT_PENETRATION_REQUIRED``,
+>     ``STOP_ADVERSE_FILL``,
+>     ``TAKE_PROFIT_CONSERVATIVE_FILL``,
+>     ``FORCED_EXIT_CONSERVATIVE_FILL``,
+>     ``AMBIGUOUS_INTRABAR_WORST_CASE``, ``PARTIAL_FILL``,
+>     ``NO_OPTIMISTIC_FILL_ON_INSUFFICIENT_DATA``).
+>   - :class:`MockOrder` — mutable mock order (so the
+>     lifecycle status / filled_qty can advance) carrying
+>     hard-pinned ``simulated_only=True``,
+>     ``no_live_order=True``, ``phase_12_forbidden=True``,
+>     ``trade_authority=False``,
+>     ``auto_tuning_allowed=False``. Construction refuses any
+>     attempt to flip the safety flags. Refuses ``LIMIT``
+>     orders without ``limit_price`` and ``STOP_MARKET`` /
+>     ``TAKE_PROFIT_MARKET`` orders without ``stop_price``.
+>   - :class:`MockFill` — frozen mock fill with
+>     conservative-assumption tuple. NEVER advertises a real
+>     exchange order id, an api key, an api secret, or a
+>     signed-endpoint reference.
+>   - :class:`MockExchangeConfig` — frozen taker / maker fee
+>     bps, slippage / latency bps, ``stale_after_seconds``,
+>     ``reject_if_no_visible_price`` (default ``True``),
+>     ``limit_touch_fill_policy`` (default
+>     ``NO_FILL_ON_TOUCH``), ``ambiguous_intrabar_policy``
+>     (default ``WORST_CASE``), ``partial_fill_enabled``
+>     (default ``True``), optional
+>     ``max_fill_fraction_per_batch`` (in ``(0, 1]``).
+>     Hard-pinned ``sandbox_only=True``,
+>     ``live_order_enabled=False``; refuses any other value
+>     at construction.
+>   - :class:`FillModelDecision` — frozen ``(fill, new_status,
+>     reason, detail)`` outcome of a single
+>     :class:`PessimisticFillModel` evaluation.
+>   - :class:`PessimisticFillModel` — pure / deterministic /
+>     pessimistic fill model. Market / forced-exit pay taker
+>     fee + slippage + latency adverse to side. Limit refuses
+>     fill on touch and requires strict penetration; fills at
+>     the limit price (best-case for the resting order) with
+>     a maker fee. Stop fills at the adverse stop price plus
+>     taker fee + slippage. Take-profit fills conservatively
+>     (still adverse by slippage + latency on the favorable
+>     side). Same-candle stop + take-profit triggers fall
+>     back to ``WORST_CASE`` (stop fires, paired TP canceled)
+>     or ``AMBIGUOUS_INTRABAR_PATH`` per
+>     :class:`AmbiguousIntrabarPolicy`. Insufficient visible
+>     price data NEVER produces an optimistic fill: the
+>     order is ``REJECTED`` (if young) or ``STALE`` (if old).
+>   - :class:`OrderRequest` — frozen request shape for
+>     :meth:`MockExchange.submit_order`.
+>   - :class:`MockExchangeDiagnostics` — cumulative counters
+>     (``orders_submitted_count``, ``orders_accepted_count``,
+>     ``orders_rejected_count``, ``orders_canceled_count``,
+>     ``orders_expired_count``, ``orders_stale_count``,
+>     ``orders_filled_count``,
+>     ``orders_partially_filled_count``,
+>     ``orders_ambiguous_intrabar_count``, ``fills_count``,
+>     ``process_batch_count``).
+>   - :class:`MockExchange` — paper-only simulated exchange.
+>     Public methods ``submit_order(request,
+>     replay_batch=None, simulated_time=None)``,
+>     ``cancel_order(order_id, simulated_time)``,
+>     ``expire_order(order_id, simulated_time)``,
+>     ``process_batch(replay_batch)``, ``get_order(order_id)``,
+>     ``list_open_orders()``, ``list_all_orders()``,
+>     ``list_fills()``, ``reset()``, ``safety_payload()``,
+>     ``to_dict()``. Public properties ``config`` /
+>     ``fill_model`` / ``diagnostics`` / ``order_count`` /
+>     ``fill_count`` / defensive tripwires
+>     (``sandbox_only`` / ``simulated_only`` /
+>     ``no_live_order`` / ``live_trading`` /
+>     ``exchange_live_orders`` /
+>     ``binance_private_api_enabled`` /
+>     ``signed_endpoint_reachable`` /
+>     ``private_websocket_reachable`` /
+>     ``account_endpoint_reachable`` /
+>     ``order_endpoint_reachable`` /
+>     ``position_endpoint_reachable`` /
+>     ``leverage_endpoint_reachable`` /
+>     ``margin_endpoint_reachable`` /
+>     ``real_exchange_order_path`` / ``real_capital`` /
+>     ``telegram_outbound_enabled`` /
+>     ``ai_trade_authority`` / ``trade_authority`` /
+>     ``auto_tuning_allowed`` / ``phase_12_forbidden``).
+>     Order ids are deterministic ``"mock_order_{counter:08d}"``
+>     strings; fill ids are deterministic
+>     ``"mock_fill_{counter:08d}"`` strings; NEVER a real
+>     exchange order id.
+>
+> Strict blind walk-forward semantics. The MockExchange
+> consumes only :class:`ReplayFeedBatch` /
+> :class:`HistoricalKlineRecord` visible market data;
+> :meth:`MockExchange._latest_visible_kline` picks the latest
+> 1m or 5m kline (preferring 1m) for the order's symbol from
+> the batch. By construction every kline in the batch has
+> ``available_at <= simulated_time`` and a closed candle
+> (PR94 / PR95 / PR96 invariants). The MockExchange NEVER
+> calls a real exchange endpoint, NEVER signs a request,
+> NEVER touches the Binance private API, NEVER opens a
+> private websocket, NEVER fetches account / order /
+> position / leverage / margin endpoints, NEVER advertises a
+> real exchange order id, an api key, an api secret, or a
+> signed-endpoint reference. The :class:`PessimisticFillModel`
+> is pure / deterministic / pessimistic and NEVER produces
+> an optimistic fill on insufficient visible data. Two
+> exchanges fed identical config / requests / batches
+> produce identical order / fill sequences (verified by
+> ``test_deterministic_output_from_same_batch_config_order``).
+>
+> Every record / batch / fill / order / config / diagnostics
+> / exchange ``to_dict()`` boundary re-pins the project-wide
+> safety boundary (``mode=paper``, ``sandbox_only=True``,
+> ``simulated_only=True``, ``no_live_order=True``,
+> ``live_trading=False``, ``exchange_live_orders=False``,
+> ``binance_private_api_enabled=False``,
+> ``signed_endpoint_reachable=False``,
+> ``private_websocket_reachable=False``,
+> ``account_endpoint_reachable=False``,
+> ``order_endpoint_reachable=False``,
+> ``position_endpoint_reachable=False``,
+> ``leverage_endpoint_reachable=False``,
+> ``margin_endpoint_reachable=False``,
+> ``real_exchange_order_path=False``, ``real_capital=False``,
+> ``telegram_outbound_enabled=False``,
+> ``ai_trade_authority=False``, ``trade_authority=False``,
+> ``auto_tuning_allowed=False``,
+> ``phase_12_forbidden=True``) and runs through the
+> recursive ``assert_no_forbidden_fields`` guard. The
+> :class:`MockExchange` and the :class:`PessimisticFillModel`
+> expose no public method with a trade verb (``place_order``,
+> ``place_real_order``, ``sign_request``, ``sign``,
+> ``open_websocket``, ``private_websocket``, ``listen_key``,
+> ``set_leverage``, ``set_stop``, ``set_target``,
+> ``apply_change``, ``deploy``, ``enable_live``).
+>
+> The package and module sources are AST-walked by the
+> tests to assert that they do **NOT** import
+> ``app.risk`` / ``app.execution`` / ``app.exchanges`` /
+> ``app.telegram`` / ``app.config``, do **NOT** import any
+> network / LLM / Telegram / Binance transport
+> (``deepseek``, ``openai``, ``anthropic``, ``telegram``,
+> ``binance``, ``ccxt``, ``websocket``, ``websockets``,
+> ``httpx``, ``aiohttp``, ``requests``, ``urllib.request``,
+> ``http.client``, ``grpc``, ``boto3``, ``socket``), and do
+> **NOT** reference any network call identifier
+> (``requests.get``, ``requests.post``, ``urllib.request``,
+> ``socket.connect``, ``socket.create_connection``).
+> Importing ``app.sim``, ``app.sim.mock_exchange``, and
+> ``app.sim.pessimistic_fill_model`` is also asserted at
+> runtime (via ``sys.modules`` diffing) to not pull any
+> forbidden module.
+>
+> Hard safety boundary (Phase 11C.1D-D-D / PR97):
+> ``mode=paper``, ``sandbox_only=True``,
+> ``simulated_only=True``, ``no_live_order=True``,
+> ``live_trading=False``, ``exchange_live_orders=False``,
+> ``binance_private_api_enabled=False``,
+> ``signed_endpoint_reachable=False``,
+> ``private_websocket_reachable=False``,
+> ``account_endpoint_reachable=False``,
+> ``order_endpoint_reachable=False``,
+> ``position_endpoint_reachable=False``,
+> ``leverage_endpoint_reachable=False``,
+> ``margin_endpoint_reachable=False``,
+> ``real_exchange_order_path=False``, ``real_capital=False``,
+> ``telegram_outbound_enabled=False``,
+> ``telegram_live_command_authority=False``,
+> ``ai_trade_authority=False``, ``trade_authority=False``,
+> ``auto_tuning_allowed=False``,
+> **`phase_12_forbidden=True`**.
+> The Risk Engine remains the single trade-decision gate.
+>
+> What this PR does **NOT** do, and CANNOT do, regardless
+> of any caller's wishes:
+>
+>   - implement the Simulated Capital Flow + Trade Ledger
+>     (PR98's responsibility),
+>   - implement the Telegram Sandbox Outbox (PR99's
+>     responsibility),
+>   - implement the Blind Walk-forward Runner (PR100's
+>     responsibility),
+>   - read real market network,
+>   - place a real order,
+>   - call DeepSeek / LLM / any network transport,
+>   - send Telegram outbound,
+>   - touch the Binance private API,
+>   - open a private websocket / listenKey,
+>   - emit a real exchange order id, an api key, an api
+>     secret, or a signed-endpoint reference,
+>   - emit any direction / order-routing / sizing / risk /
+>     execution-config field,
+>   - emit any runtime-tuning patch,
+>   - authorise live trading,
+>   - authorise auto-tuning,
+>   - authorise Phase 12.
+>
+> Successful PR97 only authorises the next allowed
+> paper-only step (**PR98 — Simulated Capital Flow + Trade
+> Ledger v0**). It does **NOT** authorise PR99 / PR100,
+> does **NOT** authorise the *Blind Walk-forward Runner*,
+> does **NOT** authorise live trading, does **NOT**
+> authorise auto-tuning, does **NOT** authorise the
+> DeepSeek hot path, does **NOT** authorise Telegram live
+> outbound, does **NOT** authorise opening Phase 12.
+> **Phase 12 remains FORBIDDEN.**
+>
+> Files shipped: ``app/sim/mock_exchange.py`` (the
+> ``MockExchange`` core implementation),
+> ``app/sim/pessimistic_fill_model.py`` (the
+> ``PessimisticFillModel`` core implementation, plus all
+> closed-taxonomy types and the ``MockOrder`` /
+> ``MockFill`` / ``MockExchangeConfig`` /
+> ``FillModelDecision`` dataclasses),
+> ``app/sim/__init__.py`` (re-exports the new public surface
+> alongside the PR94 + PR95 + PR96 substrate),
+> ``tests/unit/test_mock_exchange_pessimistic_fill_model.py``
+> (25 PASSING tests covering all 22 brief-mandated scenarios
+> plus 3 defensive extras: closed-taxonomy enforcement,
+> LIMIT/STOP/TP requires its trigger price, ``reset()``
+> clears state),
+> ``docs/PHASE_11C_1D_D_D_MOCK_EXCHANGE_PESSIMISTIC_FILL_MODEL.md``
+> (the design / acceptance brief),
+> ``docs/PROJECT_STATUS.md`` (this file — current-phase
+> entry prepended; prior 11C.1D-D-C entry preserved as
+> historical context below),
+> ``docs/PHASE_GATE.md`` (PR97 added to *Open / Reserved
+> phases*; only PR98 unlocked; Phase 12 row unchanged),
+> ``docs/CHANGELOG.md`` (this PR's entry).
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1D-D-C — ReplayFeedProvider v0
 > (*Strict forward-only historical sim-live replay feed provider /
 > 严格前向 Sim-Live 历史回放喂数器 v0*).**
