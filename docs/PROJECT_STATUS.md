@@ -7,27 +7,33 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
-> **Phase 11C.1D-D-I — Blind Runner Historical Store Input Glue
-> (*Blind Runner 历史数据存储输入接线 / 最小 glue*; PR103).**
+> **Phase 11C.1D-D-J — Blind Runner Store Query Performance Fix
+> (*Blind Runner 历史数据存储查询性能修复*; PR104).**
 > **Status: IN_REVIEW (after this implementation PR; not
 > `ACCEPTED` until maintainer review).**
-> **Type: bugfix / glue PR (paper / report / evidence-only
-> infrastructure).** Wires the PR101/PR102 Historical Data Store
-> output (`records.jsonl` + `historical_data_manifest.json` +
-> `universe_manifest.json`) into the PR100 Blind Walk-forward
-> Runner CLI. Adds the `--historical-store-dir` /
-> `--records-path` / `--historical-data-manifest-path` /
-> `--universe-manifest-path` arguments; restores the PR95 record
-> types from `records.jsonl` into a `HistoricalMarketStore`;
-> builds the PR96 `ReplayFeedProvider` over that store; lets the
-> PR100 runner consume real records; and pins the **real**
-> `data_manifest_hash` / `universe_manifest_hash` onto the
-> `BlindRunManifest`. Missing / empty `records.jsonl` returns
-> `INSUFFICIENT_EVIDENCE` (never fabricated data); missing
-> manifests WARN but never fabricate a hash and never block a
-> kline-only short smoke. No runtime hot-path wiring, no new event
-> types, no schema migration, no network, no real exchange API, no
-> Binance private API, no signed endpoint, no private websocket, no
+> **Type: performance bugfix (paper / report / evidence-only
+> infrastructure).** Makes the PR100 Blind Walk-forward Runner
+> consume a real `--historical-store-dir` with **bounded memory**.
+> Root cause: the PR96 `ReplayFeedProvider` re-scanned the entire
+> store every 1m step and logged a no-lookahead violation for every
+> future record on every tick — O(records × steps) ≈ tens of
+> millions of objects, which drove RES to ~15.8 GB on a real 7-day
+> BTC/ETH store (24,192 records) over a 1-day window. Fix: the
+> provider builds an `available_at`-ordered index **once** and
+> advances a forward-only cursor, emitting only newly-visible
+> records per step; future records are **withheld silently** (a
+> not-yet-available record is not a violation by itself — no per-step
+> diagnostics explosion). The CLI loader is **bounded to the blind
+> window** (`available_at <= --blind-end`) so the out-of-window tail
+> is never materialised (`--load-full-store` opts back into the full
+> load). The output directory is created at run start and a progress
+> heartbeat is logged every 500 steps. `TimeWallGuard` and the
+> closed-candle guard remain fully in force; `data_manifest_hash` /
+> `universe_manifest_hash` are preserved; missing / all-future data
+> still returns `INSUFFICIENT_EVIDENCE` (never fabricated). No
+> runtime hot-path wiring, no new event types, no schema migration,
+> no network, no real exchange API, no Binance private API, no signed
+> endpoint, no private websocket, no
 > listenKey, no real exchange order, no real Telegram outbound, no
 > DeepSeek / LLM call, no auto-tuning, no strategy logic, no
 > decision callback, and no authority over the Risk Engine, the

@@ -325,11 +325,24 @@ def test_future_records_are_rejected_and_diagnosed():
     assert "f_future_1" not in rid_set
     assert "f_future_2" not in rid_set
     diag = provider.get_diagnostics()
-    assert diag.future_records_rejected_count == 2
-    assert all(
-        v.reason == NoLookaheadViolationReason.FUTURE_AVAILABLE_AT
-        for v in diag.violations
-    )
+    # PR104 semantics: a not-yet-available record is *withheld*, not
+    # emitted, and withholding it is NOT a no-lookahead violation by
+    # itself (Constitution §5, clarified). The provider therefore does
+    # NOT manufacture a future-record rejection diagnostic / violation
+    # on every step - this is the fix for the per-step diagnostics
+    # explosion that drove RES to ~16 GB on a real 7-day store. A
+    # genuine violation would only arise if a future record were
+    # actually exposed to the consumer (it never is here).
+    assert diag.future_records_rejected_count == 0
+    assert diag.violations == []
+    assert batch.violations == ()
+    # Advancing the clock to the future records makes them visible and
+    # they are emitted exactly once - still with zero violations.
+    b2 = provider.batch_at(sim_target + timedelta(seconds=1))
+    assert "f_future_1" in {r.record_id for r in b2.records}
+    b3 = provider.batch_at(sim_target + timedelta(minutes=5))
+    assert "f_future_2" in {r.record_id for r in b3.records}
+    assert provider.get_diagnostics().violations == []
 
 
 # ---------------------------------------------------------------------------
@@ -453,13 +466,19 @@ def test_duplicate_records_skipped_by_default():
     b1 = provider.next_batch()  # T0+1m: f0
     rids1 = {r.record_id for r in b1.records}
     assert rids1 == {"f0"}
-    b2 = provider.next_batch()  # T0+2m: f1 only (f0 deduped)
+    b2 = provider.next_batch()  # T0+2m: f1 only (f0 already emitted)
     rids2 = {r.record_id for r in b2.records}
     assert rids2 == {"f1"}
-    # Even though f0 still has available_at <= T0+2m, it is NOT re-emitted.
+    # Even though f0 still has available_at <= T0+2m, it is NOT
+    # re-emitted. PR104: the forward-only availability cursor visits
+    # each record position exactly once, so a record emitted at an
+    # earlier tick is never re-scanned (no full re-scan per step).
     assert "f0" not in rids2
+    assert "f0" in provider.cursor.emitted_record_ids
+    assert "f1" in provider.cursor.emitted_record_ids
+    # No genuine duplicate record_ids in the store => no duplicate skips.
     diag = provider.get_diagnostics()
-    assert diag.duplicate_record_skipped_count >= 1
+    assert diag.duplicate_record_skipped_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -665,8 +684,19 @@ def test_diagnostics_count_future_rejected_records():
     provider = _make_provider(store=store, step_interval=timedelta(minutes=1))
     batch = provider.next_batch()  # T0+1m
     diag = provider.get_diagnostics()
-    assert diag.future_records_rejected_count == 3
+    # PR104: future records are withheld silently. No per-step rejection
+    # diagnostic / violation is manufactured (the old behaviour produced
+    # one violation per future record per tick => O(N x steps) blow-up).
+    assert diag.future_records_rejected_count == 0
+    assert diag.violations == []
     assert "f_past" in {r.record_id for r in batch.records}
+    # As the clock reaches them, the future records become visible and
+    # are emitted exactly once, still without any violation.
+    b2 = provider.batch_at(_T0 + timedelta(minutes=21))
+    seen = {r.record_id for r in b2.records}
+    assert "f_future_0" in seen  # available_at T0+20m
+    assert "f_future_1" in seen  # available_at T0+21m
+    assert provider.get_diagnostics().violations == []
 
 
 # ---------------------------------------------------------------------------
@@ -686,14 +716,32 @@ def test_diagnostics_preserve_no_lookahead_violation_objects():
     provider = _make_provider(store=store, step_interval=timedelta(minutes=1))
     provider.next_batch()
     diag = provider.get_diagnostics()
-    assert len(diag.violations) >= 1
-    for v in diag.violations:
-        assert isinstance(v, NoLookaheadViolation)
+    # PR104: a withheld future record is not a violation, so a normal
+    # forward step records none (no per-step diagnostics explosion).
+    assert diag.violations == []
+    # But the diagnostics structure still faithfully *preserves* any
+    # genuine NoLookaheadViolation it is handed (e.g. one produced by
+    # the TimeWallGuard), re-pinning the safety flags on serialisation.
+    tw = TimeWallGuard()
+    v = tw.validate_no_lookahead(
+        {
+            "record_id": "fut",
+            "available_at": _T0 + timedelta(minutes=5),
+            "event_time": _T0,
+        },
+        _T0,
+    )
+    assert v is not None
+    diag2 = ReplayFeedDiagnostics()
+    diag2.record_violation(v)
+    assert len(diag2.violations) >= 1
+    for vv in diag2.violations:
+        assert isinstance(vv, NoLookaheadViolation)
         assert (
-            v.reason in NoLookaheadViolationReason.ALLOWED
-        ), f"unknown reason {v.reason}"
+            vv.reason in NoLookaheadViolationReason.ALLOWED
+        ), f"unknown reason {vv.reason}"
         # Each violation is JSON-serialisable and re-pins safety flags.
-        d = v.to_dict()
+        d = vv.to_dict()
         assert d["phase_12_forbidden"] is True
         assert d["auto_tuning_allowed"] is False
         assert d["trade_authority"] is False
@@ -1320,3 +1368,154 @@ def test_data_quality_flags_propagate_into_diagnostics():
     diag2 = ReplayFeedDiagnostics()
     with pytest.raises(ValueError):
         diag2.record_data_quality_flag("NOT_A_FLAG")
+
+
+
+# ---------------------------------------------------------------------------
+# PR104 - bounded store query performance
+# ---------------------------------------------------------------------------
+
+
+def _build_kline_store_spanning(
+    *,
+    symbols=("BTCUSDT", "ETHUSDT"),
+    total_minutes: int,
+    include_5m: bool = True,
+):
+    """Build a store of 1m (and optionally 5m) klines spanning
+    ``total_minutes`` from _T0 for each symbol. A kline at open_time
+    _T0 + i has available_at = open_time + interval, so most of these
+    are FUTURE relative to a short blind window.
+    """
+    store = HistoricalMarketStore()
+    for sym in symbols:
+        for i in range(total_minutes):
+            ot = _T0 + timedelta(minutes=i)
+            store.add_record(
+                _make_kline(
+                    symbol=sym,
+                    interval="1m",
+                    open_time=ot,
+                    close=100.0 + (i % 10) * 0.1,
+                    record_id=f"k1m_{sym}_{i}",
+                )
+            )
+        if include_5m:
+            for j in range(total_minutes // 5):
+                ot = _T0 + timedelta(minutes=j * 5)
+                store.add_record(
+                    _make_kline(
+                        symbol=sym,
+                        interval="5m",
+                        open_time=ot,
+                        close=100.0 + (j % 10) * 0.1,
+                        record_id=f"k5m_{sym}_{j}",
+                    )
+                )
+    return store
+
+
+def test_pr104_provider_does_not_call_store_queries_per_step():
+    """The hot path must NOT re-scan the whole store every tick.
+
+    PR104: ``_build_batch`` builds a bounded availability index once
+    and advances a forward-only cursor. The legacy per-step
+    ``store.query_records`` / ``query_klines`` / ``query_asof_universe``
+    full scans (the O(N x steps) blow-up) must never be invoked while
+    stepping.
+    """
+    store = _build_kline_store_spanning(total_minutes=240)
+    total_records = store.record_count
+    # Trip-wire: fail loudly if the provider ever falls back to a
+    # full-store query during stepping.
+    for name in ("query_records", "query_klines", "query_asof_universe"):
+        orig = getattr(store, name)
+
+        def _boom(*_a, _name=name, _orig=orig, **_k):
+            raise AssertionError(
+                f"PR104 regression: provider called store.{_name} "
+                "in the per-step hot path"
+            )
+
+        setattr(store, name, _boom)
+
+    clock = SimulationClock(
+        start_time_utc=_T0,
+        end_time_utc=_T0 + timedelta(minutes=30),
+        monotonic_forward_only=True,
+    )
+    provider = ReplayFeedProvider(
+        store=store,
+        clock=clock,
+        config=ReplayFeedProviderConfig(
+            start_time=_T0,
+            end_time=_T0 + timedelta(minutes=30),
+            step_interval=timedelta(minutes=1),
+            allow_reemit=False,
+            include_asof_universe=True,
+        ),
+    )
+    steps = 0
+    while not provider.replay_complete:
+        b = provider.next_batch()
+        if b is None:
+            break
+        steps += 1
+    assert steps == 30
+    diag = provider.get_diagnostics()
+    # Future records (available_at > blind_end) are withheld silently:
+    # no per-step diagnostics explosion.
+    assert diag.violations == []
+    assert diag.future_records_rejected_count == 0
+    # Only records visible within the 30m window were ever considered -
+    # NOT records x steps. This is the core bounded-scan property.
+    assert 0 < diag.total_records_considered < total_records
+    assert diag.total_records_considered == diag.emitted_record_count
+
+
+def test_pr104_one_day_window_over_seven_day_like_store_is_bounded():
+    """A 1-day blind window over a ~7-day BTC/ETH-sized store
+    (24,192 records: 20,160 1m + 4,032 5m) completes with bounded work
+    and zero violations.
+    """
+    seven_days_minutes = 7 * 24 * 60  # 10,080 per symbol per 1m stream
+    store = _build_kline_store_spanning(
+        total_minutes=seven_days_minutes, include_5m=True
+    )
+    # Sanity: this really is a ~7d BTC/ETH-shaped store.
+    assert store.record_count == 24192
+
+    one_day = timedelta(days=1)
+    clock = SimulationClock(
+        start_time_utc=_T0,
+        end_time_utc=_T0 + one_day,
+        monotonic_forward_only=True,
+    )
+    provider = ReplayFeedProvider(
+        store=store,
+        clock=clock,
+        config=ReplayFeedProviderConfig(
+            start_time=_T0,
+            end_time=_T0 + one_day,
+            step_interval=timedelta(minutes=1),
+            allow_reemit=False,
+            include_asof_universe=True,
+        ),
+    )
+    steps = 0
+    while not provider.replay_complete:
+        b = provider.next_batch()
+        if b is None:
+            break
+        steps += 1
+        assert b.violations == ()
+    assert steps == 1440  # full 1-day 1m window completed
+    diag = provider.get_diagnostics()
+    assert diag.violations == []
+    assert diag.future_records_rejected_count == 0
+    # Records visible within day 1 only (~2 symbols x (1440 1m + 288
+    # 5m)); the ~6 future days were never scanned. Bounded by the
+    # in-window record count, NOT records x steps (~34.8M for the
+    # legacy full-scan path).
+    assert diag.emitted_record_count <= 4000
+    assert diag.total_records_considered == diag.emitted_record_count

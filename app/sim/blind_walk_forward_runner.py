@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import statistics
 import uuid
@@ -141,6 +142,22 @@ __phase__ = PHASE_NAME
 # ---------------------------------------------------------------------------
 
 DEFAULT_REPORT_ROOT: str = "data/reports/blind_walk_forward"
+
+
+# ---------------------------------------------------------------------------
+# Progress logging (PR104)
+# ---------------------------------------------------------------------------
+
+# Module logger. Heartbeats go through ``logging`` (NOT stdout) so the
+# operator JSON summary printed by ``scripts/run_blind_walk_forward.py``
+# stays machine-parseable. Operators see progress by configuring
+# logging at INFO (the script does this in ``main``).
+_LOGGER = logging.getLogger("app.sim.blind_walk_forward_runner")
+
+# Emit a heartbeat every this many blind-window steps so a long real
+# replay (e.g. a 1-day 1m window = 1440 steps) shows liveness instead of
+# appearing hung for 10+ minutes with no output directory.
+DEFAULT_HEARTBEAT_EVERY_STEPS: int = 500
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +586,7 @@ class BlindWalkForwardRunner:
         telegram_sandbox: TelegramSandboxOutbox,
         decision_callback: Optional[DecisionCallback] = None,
         feature_cache: Optional[AsOfFeatureCache] = None,
+        heartbeat_every_steps: int = DEFAULT_HEARTBEAT_EVERY_STEPS,
     ) -> None:
         if not isinstance(config, BlindWalkForwardRunnerConfig):
             raise TypeError(
@@ -656,6 +674,18 @@ class BlindWalkForwardRunner:
         self._clock: SimulationClock = replay_provider.clock
         # Defensive: the provider's clock must not advance backwards.
         self._last_simulated_time: datetime = self._clock.now()
+        # PR104: progress heartbeat cadence (steps). Clamped to >= 1 so
+        # ``steps % heartbeat == 0`` never divides by zero.
+        try:
+            hb = int(heartbeat_every_steps)
+        except (TypeError, ValueError):
+            hb = DEFAULT_HEARTBEAT_EVERY_STEPS
+        self._heartbeat_every: int = hb if hb > 0 else (
+            DEFAULT_HEARTBEAT_EVERY_STEPS
+        )
+        # Resolved per-run output directory; created at run start so an
+        # operator can see the run exists immediately (PR104).
+        self._output_dir: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -996,11 +1026,33 @@ class BlindWalkForwardRunner:
                 f"BLIND_RUNNING; got {self._phase}"
             )
         batches: List[ReplayFeedBatch] = []
+        _LOGGER.info(
+            "blind walk-forward window starting: run_id=%s "
+            "blind_start=%s blind_end=%s base_clock_step=%s",
+            self._manifest.run_id,
+            self._config.window.blind_start.isoformat(),
+            self._config.window.blind_end.isoformat(),
+            self._config.base_clock_step,
+        )
         while True:
             b = self.step_once()
             if b is None:
                 break
             batches.append(b)
+            # PR104: progress heartbeat so a long real replay (e.g. a
+            # 1-day 1m window = 1440 steps) shows liveness instead of
+            # appearing hung. Goes through logging, never stdout.
+            if self._steps_run % self._heartbeat_every == 0:
+                _LOGGER.info(
+                    "blind walk-forward heartbeat: run_id=%s "
+                    "steps_run=%d batches_consumed=%d "
+                    "simulated_time=%s violations=%d",
+                    self._manifest.run_id,
+                    self._steps_run,
+                    self._batches_consumed,
+                    self._last_simulated_time.isoformat(),
+                    len(self._violations),
+                )
         # Final mark-to-market at blind_end so the equity time-series
         # contains a closing point even if the last batch was earlier.
         try:
@@ -1445,14 +1497,41 @@ class BlindWalkForwardRunner:
         """
         self.prepare_manifest()
         self.freeze_artifacts()
+        # PR104: create the per-run output directory at run start (not
+        # only after scoring) so a long real replay surfaces a visible
+        # artefact directory immediately instead of looking hung.
+        out_dir = self._resolve_output_dir(report_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        self._output_dir = out_dir
+        _LOGGER.info(
+            "blind walk-forward run output directory ready: %s", out_dir
+        )
         self.run_blind_window()
         self.score_after_window_close()
-        paths = self.generate_outputs(report_dir=report_dir)
+        paths = self.generate_outputs(report_dir=out_dir)
         return {
             "manifest": self._manifest.to_dict() if self._manifest else None,
             "score": self._score.to_dict() if self._score else None,
             "paths": paths,
         }
+
+    def _resolve_output_dir(
+        self, report_dir: Optional[str] = None
+    ) -> str:
+        """Resolve the per-run output directory path (PR104).
+
+        Mirrors the resolution used by :meth:`generate_outputs` so the
+        directory created at run start is the same one the artefacts are
+        written to.
+        """
+        if report_dir:
+            return report_dir
+        run_id = (
+            self._manifest.run_id
+            if self._manifest is not None
+            else (self._config.run_id or "bwf_unknown")
+        )
+        return os.path.join(self._config.report_root, run_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
