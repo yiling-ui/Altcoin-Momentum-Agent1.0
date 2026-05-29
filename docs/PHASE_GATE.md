@@ -8414,3 +8414,117 @@ Phase 11C.1D-D-A *SimulationClock + Time-Wall Guard*, Phase
 
 The Risk Engine remains the single trade-decision gate.
 Phase 12 remains **FORBIDDEN**.
+
+
+
+## Open phase: Phase 11C.1D-D-E / Simulated Capital Flow + Trade Ledger v0 (PR98, IN_REVIEW)
+
+> **Status:** IN_REVIEW after this implementation PR; not
+> ACCEPTED until maintainer review.
+> **Phase identity string:**
+> `Phase 11C.1D-D-E / PR98 / Simulated Capital Flow + Trade Ledger v0`.
+
+### Purpose
+
+Phase 11C.1D-D-E ships the **fifth** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack defined
+by Phase 11C.1D-D (PR93). PR97's engineering route explicitly
+authorises ONLY this PR (PR98) to begin the next paper-only step.
+PR98 introduces two small, deterministic, pure-Python modules
+(`app/sim/simulated_capital_flow.py` and `app/sim/trade_ledger.py`)
+that consume the :class:`MockFill` outputs of PR97's
+:class:`MockExchange` and produce the simulated capital state, the
+simulated position book, the trade ledger, and the equity
+timeseries.
+
+### Scope (Phase 11C.1D-D-E / PR98)
+
+  - `app/sim/simulated_capital_flow.py` (new module): defines
+    `SimulatedCapitalConfig`, `SimulatedPosition`,
+    `SimulatedCapitalState`, `SimulatedCapitalFlowEngine`,
+    `PositionSide`, `PositionStatus`, `RiskFreezeReason`,
+    `CapitalFrozenError`.
+  - `app/sim/trade_ledger.py` (new module): defines
+    `TradeLedgerEntry`, `TradeLedger`, `TradeLedgerSummary`,
+    `EquityTimeseriesPoint`, `TradeOutcome`, `TradeFailureFlag`.
+  - `app/sim/__init__.py` (extended): re-exports the new public
+    surface alongside PR94 / PR95 / PR96 / PR97.
+  - `tests/unit/test_simulated_capital_flow_trade_ledger.py` (new):
+    the 26-test PR98 safety contract — 24 brief-mandated tests
+    plus closed-taxonomy enforcement and phase-name-string
+    presence.
+  - `docs/PHASE_11C_1D_D_E_SIMULATED_CAPITAL_FLOW_TRADE_LEDGER.md`
+    (new): the phase design / acceptance doc.
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` (updated).
+
+### Out-of-scope (Phase 11C.1D-D-E)
+
+  - **Telegram Sandbox Outbox** (PR99). Forbidden by this phase
+    alone.
+  - **Blind Walk-forward Runner** (PR100). Forbidden by this phase
+    alone.
+  - Any change under `app/risk/`, `app/execution/`,
+    `app/exchanges/`, `app/telegram/`, `app/config/`, or other
+    runtime hot-path packages.
+  - Any modification of the existing PR94 / PR95 / PR96 / PR97
+    sources.
+  - Any real account / signed endpoint / private websocket /
+    listenKey access.
+  - Any LLM, DeepSeek, Telegram, or Binance network call.
+  - Any auto-tuning of any parameter or rule.
+  - Any entry into Phase 12.
+
+### Hard safety boundary (Phase 11C.1D-D-E / PR98)
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `simulated_only` | `True` |
+| `no_live_order` | `True` |
+| `live_trading` | `False` |
+| `live_capital_enabled` | `False` |
+| `exchange_live_orders` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_outbound_enabled` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `ai_trade_authority` | `False` |
+| `trade_authority` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+### Allowed transitions out of Phase 11C.1D-D-E
+
+| From | To | Authorised by |
+| --- | --- | --- |
+| Phase 11C.1D-D-E IN_REVIEW | Phase 11C.1D-D-E ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-D-E IN_REVIEW | PR99 — Telegram Sandbox Outbox v0 | After a successful PR98 acceptance; PR99 itself opens its own gate. |
+| Phase 11C.1D-D-E IN_REVIEW | PR100 — Blind Walk-forward Runner v0 | **FORBIDDEN by this phase alone.** Requires successful PR99 acceptance first. |
+| Phase 11C.1D-D-E IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** A complete blind walk-forward run requires PR94 → PR100 to have been accepted in order. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+### Inheritance
+
+Phase 11C.1D-D-E inherits, verbatim, every Phase 1, Phase 11C,
+Phase 11C.1A, Phase 11C.1B, Phase 11C.1C-A through Phase
+11C.1C-C-B-B-B-E-D, Phase AI-1 through Phase AI-CHECKPOINT, Phase
+11C / Offline Rule Sandbox Replay, Phase 11C.1D-B *Paper Shadow
+Strategy Validation*, Phase 11C.1D-C *Risk / Execution / Capital
+Safety Matrix*, Phase 11C.1D-D *Strict Blind Walk-forward Sim-Live
+Constitution*, Phase 11C.1D-D-A *SimulationClock + Time-Wall
+Guard*, Phase 11C.1D-D-B *Historical Market Store v0*, Phase
+11C.1D-D-C *ReplayFeedProvider v0*, and Phase 11C.1D-D-D
+*MockExchange + Pessimistic Fill Model v0* forbidden item.
+
+The Risk Engine remains the single trade-decision gate.
+Phase 12 remains **FORBIDDEN**.
