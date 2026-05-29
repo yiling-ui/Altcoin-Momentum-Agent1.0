@@ -7071,3 +7071,200 @@ ships **22 PASSING** tests covering the full safety contract for
 this phase;
 `python -m pytest tests/unit -q` reports **3368 PASSING** tests, 0
 failures (was 3346 before this phase; +22 from this phase).
+
+
+---
+
+## Open phase: Phase 11C.1D-C / Risk / Execution / Capital Safety Matrix v0 (IN_REVIEW)
+
+> **Title:** Risk / Execution / Capital Safety Matrix v0
+> *风险 / 执行 / 资金 / 数据降级 / AI 降级 安全矩阵 v0*
+> **Status:** IN_REVIEW (after the implementation PR is merged the
+> phase moves from IN_REVIEW to ACCEPTED only via a separate docs
+> closeout PR; this PR alone does NOT mark the phase ACCEPTED).
+> **Parent:** Phase 11C umbrella.
+> **Trade authority:** **none.**
+> **Phase 12:** **FORBIDDEN.**
+
+### Purpose
+
+A strictly paper / report / evidence-only safety verification
+engine that turns the documented safety boundary of the AMA-RT
+V1.4 system into a deterministic, auditable matrix. The matrix
+takes a closed taxonomy of adverse-condition scenarios (stop
+failures, ghost / orphan / missing-remote positions, reconciliation
+mismatches, data degradations, WebSocket staleness, REST 429 / 418
+throttling, Telegram export failures, capital rebase / external
+deposit / profit withdrawal, AI degradation / DeepSeek timeout /
+Reality-Check failure / forbidden-field stripped, kill-all
+audit-only, pause-resume required) and verifies that every
+scenario, when evaluated, produces the *minimum required defensive
+safety actions*: pauses new opens when required, rejects unsafe
+actions, requires operator review or operator resume when
+required, degrades to report-only when telemetry is degraded,
+blocks Telegram outbound, AI trade authority, runtime config
+changes, and live orders unconditionally, keeps the paper ledger
+when the live path is unsafe, and records audit events for every
+adverse scenario. The output is one descriptive
+``risk_execution_capital_safety_matrix_report.json`` (plus its
+Markdown twin) that an auditor can review.
+
+### Gate flags (Phase 11C.1D-C / Risk / Execution / Capital Safety Matrix v0)
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `right_tail` | `False` |
+| `llm` | `False` (default) |
+| `llm_outbound_enabled` | `False` (default) |
+| `telegram_outbound_enabled` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `sandbox_only` | `True` |
+| `allow_trade_decision` | `False` |
+| `allow_runtime_config_change` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `trade_authority` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+### Allowed event types (added by this phase, all report / export / audit scope)
+
+- `SAFETY_MATRIX_SCENARIO_EVALUATED`
+- `SAFETY_MATRIX_REPORT_GENERATED`
+- `SAFETY_MATRIX_BLOCKER_DETECTED`
+
+No trade-action events are added. No event is wired into the
+runtime hot path. No database schema or migration is touched.
+
+### Allowed scenario types (closed taxonomy)
+
+```
+STOP_FAILED
+STOP_UNCONFIRMED
+GHOST_POSITION
+ORPHAN_STOP
+MISSING_REMOTE_POSITION
+RECONCILIATION_MISMATCH
+DATA_DEGRADED
+WS_STALE
+REST_429
+REST_418
+TELEGRAM_EXPORT_FAILURE
+TELEGRAM_OUTBOUND_BLOCKED
+PAUSE_RESUME_REQUIRED
+KILL_ALL_AUDIT_ONLY
+CAPITAL_REBASE_IN_PROGRESS
+EXTERNAL_DEPOSIT
+PROFIT_WITHDRAWAL
+LLM_DEGRADED
+DEEPSEEK_TIMEOUT
+AI_REALITY_CHECK_FAILED
+AI_FORBIDDEN_FIELD_STRIPPED
+```
+
+### Allowed expected actions (closed taxonomy)
+
+```
+PAUSE_NEW_OPENS
+REJECT_UNSAFE_ACTION
+REQUIRE_OPERATOR_REVIEW
+REQUIRE_OPERATOR_RESUME
+DEGRADE_TO_REPORT_ONLY
+RECORD_AUDIT_EVENT
+BLOCK_TELEGRAM_OUTBOUND
+BLOCK_AI_TRADE_AUTHORITY
+BLOCK_RUNTIME_CONFIG_CHANGE
+BLOCK_LIVE_ORDER
+PAPER_LEDGER_ONLY
+NO_ACTION_REQUIRED
+```
+
+`APPLY`, `DEPLOY`, `ENABLE_LIVE`, `GO_LIVE`, `AUTO_APPLY`, `BUY`,
+`SELL`, `OPEN_POSITION`, `CLOSE_POSITION`, `PLACE_ORDER`,
+`SUBMIT_ORDER` are intentionally NOT defined and the engine
+refuses to ever emit them.
+
+### Allowed result statuses (closed taxonomy)
+
+```
+PASS
+WARN
+FAIL
+INSUFFICIENT_EVIDENCE
+```
+
+`ACCEPTED`, `TRADE`, `BUY`, `SELL`, `GO_LIVE`, `ENABLE_LIVE`,
+`APPLY`, `DEPLOY` are intentionally NOT in the result-status
+taxonomy.
+
+### Forbidden by this phase (verbatim)
+
+- Do not modify `app/risk/**`, `app/execution/**`,
+  `app/exchanges/**`, `app/telegram/**`, or `app/config/**`.
+- Do not add Binance signed endpoints, `listenKey`, or private
+  WebSockets.
+- Do not enable live orders.
+- Do not send real Telegram messages.
+- Do not let Telegram commands bypass the Risk Engine.
+- Do not let AI / DeepSeek output a trade action.
+- Do not let AI / DeepSeek modify config / risk / execution.
+- Do not modify `symbol_limit`, anomaly thresholds,
+  `candidate_pool`, or Regime weights.
+- Do not generate `runtime_config_patch`, `threshold_patch`,
+  `symbol_limit_patch`, `candidate_pool_patch`,
+  `regime_weight_patch`, or `strategy_parameter_patch`.
+- Do not output `buy`, `sell`, `long`, `short`, `direction`,
+  `entry`, `exit`, `position_size`, `leverage`, `stop`,
+  `stop_loss`, `target`, `take_profit`, `risk_budget`, `order`,
+  `execution_command`, `signal_to_trade`, `should_buy`,
+  `should_short`, `apply_change`, `deploy_change`,
+  `enable_live`, `live_ready`, `trading_approved`.
+- Do not call DeepSeek / LLM / network endpoints.
+- Do not auto-tune.
+- Do not enter Phase 12.
+
+### Next-allowed-phase decision rule
+
+```
+if failed_count == 0 and len(p0_failures) == 0 and len(p1_failures) == 0
+        and total_scenarios > 0:
+    next_allowed_phase = Strict Blind Walk-forward design checkpoint
+                         (paper / read-only; requires human-owner-
+                         supplied strict forward-only anti-lookahead
+                         blind-test design)
+else:
+    next_allowed_phase = Safety Matrix remediation required
+                         (paper / read-only; remediate P0 / P1
+                         blockers and re-run)
+```
+
+A successful Safety Matrix run only authorises the *Strict Blind
+Walk-forward design checkpoint*. It does **NOT** authorise *Blind
+Walk-forward implementation*. **Before Blind Walk-forward
+implementation can begin, the human owner MUST provide a finalized
+strict forward-only anti-lookahead blind-test design.** This phase
+does not, and cannot, generate that design.
+
+### Allowed transitions
+
+| From | To | Allowed? |
+| --- | --- | --- |
+| Phase 11C.1D-C IN_REVIEW | Phase 11C.1D-C ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-C IN_REVIEW | Strict Blind Walk-forward design checkpoint | After a successful Safety Matrix run with zero P0 / P1 blockers AND human-owner-supplied strict forward-only anti-lookahead blind-test design; transition itself is the next phase's responsibility. |
+| Phase 11C.1D-C IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** Requires the design checkpoint to have completed AND the human owner to have signed off on the design. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+### Tests
+
+`python -m pytest tests/unit/test_risk_execution_capital_safety_matrix.py -q`
+ships **32 PASSING** tests covering all 20 brief-mandated scenarios
+plus extras (scenario taxonomy coverage, SAFETY_CONTRACT shape,
+scenario / result input validation, empty-scenarios
+INSUFFICIENT_EVIDENCE status, P0 failure flips overall status and
+next_allowed_phase, runner file output, byte-identical re-run with
+a fixed clock, runner rejects unsupported scenario_set values,
+result-status closed-enum sweep, expected-action vocabulary
+excludes trade verbs);
+`python -m pytest tests/unit -q` reports **3400 PASSING** tests, 0
+failures (was 3368 before this phase; +32 from this phase).
