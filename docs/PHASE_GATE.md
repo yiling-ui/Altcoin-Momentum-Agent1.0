@@ -7766,3 +7766,243 @@ Constitution* forbidden item.
 
 The Risk Engine remains the single trade-decision gate.
 Phase 12 remains **FORBIDDEN**.
+
+
+
+## Open phase: Phase 11C.1D-D-B / Historical Market Store v0 (PR95, IN_REVIEW)
+
+**Type:** Implementation PR (paper / report / evidence-only
+infrastructure). **Runtime effect:** **none on real trading.**
+One new module `app/sim/historical_market_store.py`, one new
+unit-test module `tests/unit/test_historical_market_store.py`,
+and one new phase doc
+`docs/PHASE_11C_1D_D_B_HISTORICAL_MARKET_STORE.md`. The
+`app/sim/__init__.py` re-exports the new public surface
+alongside the PR94 substrate. **No file under `app/risk/`,
+`app/execution/`, `app/exchanges/`, `app/telegram/`, or
+`app/config/` is touched.** No event type wired into the
+runtime hot path. No database schema / migration. The new
+module has NO I/O, NO network, NO real data fetch, NO authority
+over the Risk Engine, the Execution FSM, or the Capital Flow
+Engine.
+
+**What this PR ships.** The **second** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack
+defined by Phase 11C.1D-D (PR93, the *Strict Blind Walk-forward
+Sim-Live Constitution*). PR93 §19's engineering route
+explicitly authorises ONLY this PR (PR95) to begin the next
+paper-only step after PR94. PR95 implements the typed
+historical-record schema and the in-memory store that all
+later (separately gated) PR96..PR100 modules MUST consume so
+that the Constitution §5 / §6 / §9 / §10 / §E rules become
+machine-enforceable at the data layer.
+
+**Public surface added.**
+
+  - :class:`HistoricalMarketRecordType` — closed taxonomy:
+    `KLINE_1M`, `KLINE_5M`, `FUNDING_RATE`, `OPEN_INTEREST`,
+    `TICKER_24H`, `EXCHANGE_INFO`, `SYMBOL_STATUS`,
+    `LISTING_STATUS`, `DELISTING_STATUS`. `KLINE_TYPES` and
+    `SYMBOL_STATUS_TYPES` subsets exposed.
+  - :class:`DataQualityFlag` — closed taxonomy: `DATA_GAP`,
+    `LATE_ARRIVAL`, `REVISED_RECORD`, `INCOMPLETE_KLINE`,
+    `SYMBOL_STATUS_UNKNOWN`, `FUNDING_MISSING`, `OI_MISSING`,
+    `TICKER_MISSING`.
+  - :class:`SymbolStatus` — closed taxonomy: `TRADING`,
+    `BREAK`, `HALT`, `DELISTED`, `SETTLING`, `PRE_TRADING`,
+    `UNKNOWN`. `TRADABLE_OR_MONITORABLE` subset exposed
+    (`DELISTED` is **explicitly excluded** from the as-of
+    universe).
+  - :class:`DataCompletenessState` — closed taxonomy: `OK`,
+    `DEGRADED`, `INCOMPLETE`, `UNKNOWN`.
+  - :class:`HistoricalMarketRecord` — generic non-kline
+    record. Required: `record_id`, `record_type`, `event_time`,
+    `available_at`. Optional: `symbol`, `ingested_at`, `source`,
+    `interval`, `payload`, `data_quality_flags`, `evidence_refs`,
+    `revision_time`, `revised_from_record_id`, `late_arrival`.
+    `available_at >= event_time` enforced at construction;
+    naive datetimes rejected; `payload` runs through
+    `assert_no_forbidden_fields` and a JSON-serialisability
+    check at construction time.
+  - :class:`HistoricalKlineRecord` — 1m / 5m kline (v0
+    supports `"1m"` and `"5m"` only). Required: `symbol`,
+    `interval`, `open_time`, `open`, `high`, `low`, `close`,
+    `volume`, `available_at`. Optional: `close_time` (defaults
+    to `open_time + interval`; explicit value must agree),
+    `event_time` (defaults to `open_time`), `ingested_at`,
+    `source`, `record_id`, `data_quality_flags`,
+    `evidence_refs`, `revision_time`, `revised_from_record_id`,
+    `late_arrival`. `available_at >= close_time` is enforced at
+    construction time (Constitution §6: final OHLCV invisible
+    before close); OHLC sanity (`high >= max(open, close)`,
+    `low <= min(open, close)`, `volume >= 0`) is enforced at
+    construction time.
+  - :class:`SymbolStatusRecord` — symbol metadata for the
+    as-of universe (Constitution §9). Required: `symbol`,
+    `market_type`, `listed_at`, `status`, `available_at`.
+    Optional: `delisted_at`, `min_notional`, `tick_size`,
+    `step_size`, `contract_type`, `data_completeness_state`
+    (default `OK`), `source`, `ingested_at`, `record_id`,
+    `event_time` (defaults to `listed_at`; the **only** field
+    that may legitimately allow `available_at < listed_at` for
+    pre-listing-announcement records, by being set explicitly
+    to the announcement time, in which case `available_at >=
+    event_time` is still enforced), `data_quality_flags`,
+    `evidence_refs`, `revision_time`,
+    `revised_from_record_id`, `late_arrival`. `DELISTED` status
+    requires `delisted_at` to be set.
+  - :class:`HistoricalMarketStore` — in-memory store. Public
+    methods: `add_record(record)`, `add_records(records)`,
+    `query_records(record_type, *, symbol=None,
+    start_time=None, end_time=None, simulated_time)`,
+    `query_latest(record_type, symbol, simulated_time)`,
+    `query_klines(symbol, interval, *, start_time=None,
+    end_time=None, simulated_time)`,
+    `query_symbol_status(symbol, simulated_time)`,
+    `query_asof_universe(simulated_time)`. Public properties:
+    `time_wall_guard`, `candle_visibility_guard`, `violations`,
+    `record_count`, `kline_count`, `symbol_status_count`.
+    `clear_violations()` resets the audit accumulator.
+    `safety_payload()` and `to_dict()` re-pin the project-wide
+    safety boundary.
+
+**Strict blind walk-forward semantics.**
+
+  - Every query is gated by :class:`TimeWallGuard`. At
+    simulated time `T`, the store returns ONLY records whose
+    `available_at <= T`. Future records are NEVER silently
+    dropped; every rejection produces a
+    :class:`NoLookaheadViolation` audit object accessible via
+    `store.violations`. `ingested_at` is NEVER substituted for
+    `available_at`.
+  - `query_klines` cross-checks
+    :meth:`CandleVisibilityGuard.is_candle_closed` after the
+    time wall passes. If a kline somehow lands on an unclosed
+    candle relative to `simulated_time`, the store mints an
+    `UNCLOSED_CANDLE_FIELD_ACCESS` violation and refuses to
+    return the record. The candle is closed iff `simulated_time
+    >= candle_close_time`; the close instant itself counts as
+    closed.
+  - `query_asof_universe(simulated_time)` enforces Constitution
+    §9: a symbol qualifies iff `listed_at <= simulated_time`
+    AND (`delisted_at is None` OR `delisted_at >
+    simulated_time`) AND `available_at <= simulated_time` AND
+    `status` is in `SymbolStatus.TRADABLE_OR_MONITORABLE`. The
+    store NEVER substitutes the *current* symbol list; an empty
+    store at any `simulated_time` returns an empty universe.
+  - Late-arriving / revised records are first-class. A revised
+    record's own `available_at` decides its earliest visibility.
+    The original record is NEVER overwritten or removed; both
+    remain in the audit trail.
+  - All query results are deterministically sorted (by
+    `(event_time, available_at, symbol, record_id)` for generic
+    records; by `(open_time, available_at, record_id)` for
+    klines; by `(symbol, listed_at, record_id)` for the as-of
+    universe).
+
+**Hard safety boundary (Phase 11C.1D-D-B / PR95).**
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_outbound_enabled` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `ai_trade_authority` | `False` |
+| `trade_authority` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+The Risk Engine remains the single trade-decision gate.
+
+**No-network / no-LLM / no-Telegram / no-Binance assertions.**
+The unit suite AST-walks `app/sim/__init__.py` and
+`app/sim/historical_market_store.py` and asserts that they do
+**NOT** import `app.risk` / `app.execution` / `app.exchanges` /
+`app.telegram` / `app.config`, do **NOT** import any
+`deepseek` / `openai` / `anthropic` / `telegram` / `binance` /
+`ccxt` / `websocket` / `websockets` / `httpx` / `aiohttp` /
+`requests` / `urllib.request` / `http.client` / `grpc` /
+`boto3` / `socket` module, and do **NOT** reference any
+`requests.get` / `requests.post` / `urllib.request` /
+`socket.connect` / `socket.create_connection` identifier.
+Importing the `app.sim` package and the new
+`app.sim.historical_market_store` module is also asserted at
+runtime (via `sys.modules` diffing) to not pull any forbidden
+module.
+
+**No-trade-verb public surface assertion.** A dedicated test
+asserts that no public method on
+:class:`HistoricalMarketStore`, :class:`HistoricalMarketRecord`,
+:class:`HistoricalKlineRecord`, or :class:`SymbolStatusRecord`
+exposes any of the trade verbs `buy`, `sell`, `place_order`,
+`submit_order`, `long`, `short`, `open_position`,
+`close_position`, `set_leverage`, `set_stop`, `set_target`,
+`apply_change`, `deploy`, `enable_live`.
+
+**Forbidden by this PR (verbatim).**
+
+  - Do not modify `app/risk/**`, `app/execution/**`,
+    `app/exchanges/**`, `app/telegram/**`, `app/config/**`.
+  - Do not implement the ReplayFeedProvider (PR96).
+  - Do not implement the MockExchange + Pessimistic Fill
+    Model (PR97).
+  - Do not implement the Simulated Capital Flow + Trade
+    Ledger (PR98).
+  - Do not implement the Telegram Sandbox Outbox (PR99).
+  - Do not implement the Blind Walk-forward Runner (PR100).
+  - Do not enable live orders.
+  - Do not connect to Binance private API.
+  - Do not enable any real Telegram outbound.
+  - Do not call DeepSeek / LLM / any network transport.
+  - Do not auto-tune anything.
+  - Do not enter Phase 12.
+
+**Tests.** `python -m pytest
+tests/unit/test_historical_market_store.py -q` ships **26
+PASSING** tests (covering all 21 brief-mandated scenarios plus
+5 defensive extras: closed-taxonomy sweep, kline construction-
+time invariants, symbol-status invariants, latest-symbol-
+status, deterministic violation IDs); `python -m pytest
+tests/unit -q` reports **3453 PASSING** tests, 0 failures (was
+3427 before this phase; +26 from this phase).
+
+### Allowed transitions out of Phase 11C.1D-D-B
+
+| From | To | Authorised by |
+| --- | --- | --- |
+| Phase 11C.1D-D-B IN_REVIEW | Phase 11C.1D-D-B ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-D-B IN_REVIEW | PR96 — ReplayFeedProvider | After a successful PR95 acceptance; PR96 itself opens its own gate. |
+| Phase 11C.1D-D-B IN_REVIEW | PR97 — MockExchange + Pessimistic Fill Model | **FORBIDDEN by this phase alone.** Requires successful PR96 acceptance first. |
+| Phase 11C.1D-D-B IN_REVIEW | PR98 — Simulated Capital Flow + Trade Ledger | **FORBIDDEN by this phase alone.** Requires successful PR97 acceptance first. |
+| Phase 11C.1D-D-B IN_REVIEW | PR99 — Telegram Sandbox Outbox | **FORBIDDEN by this phase alone.** Requires successful PR98 acceptance first. |
+| Phase 11C.1D-D-B IN_REVIEW | PR100 — Blind Walk-forward Runner v0 | **FORBIDDEN by this phase alone.** Requires successful PR99 acceptance first. |
+| Phase 11C.1D-D-B IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** A complete blind walk-forward run requires PR94 → PR100 to have been accepted in order. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+### Inheritance
+
+Phase 11C.1D-D-B inherits, verbatim, every Phase 1, Phase
+11C, Phase 11C.1A, Phase 11C.1B, Phase 11C.1C-A through
+Phase 11C.1C-C-B-B-B-E-D, Phase AI-1 through Phase
+AI-CHECKPOINT, Phase 11C / Offline Rule Sandbox Replay,
+Phase 11C.1D-B *Paper Shadow Strategy Validation*, Phase
+11C.1D-C *Risk / Execution / Capital Safety Matrix*, Phase
+11C.1D-D *Strict Blind Walk-forward Sim-Live Constitution*,
+and Phase 11C.1D-D-A *SimulationClock + Time-Wall Guard*
+forbidden item.
+
+The Risk Engine remains the single trade-decision gate.
+Phase 12 remains **FORBIDDEN**.

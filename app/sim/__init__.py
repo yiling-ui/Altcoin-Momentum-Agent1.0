@@ -1,24 +1,51 @@
 """Simulation package for AMA-RT V1.4.
 
 This package contains the strict forward-only historical sim-live
-time substrate. Its first PR (Phase 11C.1D-D-A / PR94) introduces:
+time substrate.
 
-  - :class:`SimulationClock` - strict forward-only simulated UTC
-    clock (the ONLY source of market-state decision time inside a
-    blind walk-forward run),
-  - :class:`HistoricalRecordTime` - the four-timestamp record-time
-    helper (``event_time`` / ``available_at`` / ``ingested_at`` /
-    ``source``),
-  - :class:`TimeWallGuard` - the ``available_at <= simulated_time``
-    enforcement layer,
-  - :class:`NoLookaheadViolation` - audit-only descriptive violation
-    object,
-  - :class:`CandleVisibilityGuard` - closed-candle visibility
-    enforcement (final OHLCV invisible before close),
-  - :func:`assert_no_forbidden_fields` - recursive guard against
-    trade-action / runtime-config-patch fields in any output payload.
+  * Phase 11C.1D-D-A / PR94 - SimulationClock + Time-Wall Guard:
 
-Hard safety boundaries (Phase 11C.1D-D-A / PR94):
+      - :class:`SimulationClock` - strict forward-only simulated UTC
+        clock (the ONLY source of market-state decision time inside
+        a blind walk-forward run),
+      - :class:`HistoricalRecordTime` - the four-timestamp record-time
+        helper (``event_time`` / ``available_at`` / ``ingested_at`` /
+        ``source``),
+      - :class:`TimeWallGuard` - the ``available_at <= simulated_time``
+        enforcement layer,
+      - :class:`NoLookaheadViolation` - audit-only descriptive
+        violation object,
+      - :class:`CandleVisibilityGuard` - closed-candle visibility
+        enforcement (final OHLCV invisible before close),
+      - :func:`assert_no_forbidden_fields` - recursive guard against
+        trade-action / runtime-config-patch fields in any output
+        payload.
+
+  * Phase 11C.1D-D-B / PR95 - Historical Market Store v0:
+
+      - :class:`HistoricalMarketRecordType` - closed taxonomy of
+        historical record types (1m / 5m kline, funding rate, open
+        interest, 24h ticker, exchangeInfo, symbol / listing /
+        delisting status),
+      - :class:`DataQualityFlag` - closed taxonomy of record-level
+        data-quality flags,
+      - :class:`SymbolStatus` - closed taxonomy of symbol statuses
+        (with the ``TRADABLE_OR_MONITORABLE`` subset used by the
+        as-of universe),
+      - :class:`DataCompletenessState` - closed taxonomy of
+        symbol-level data completeness states,
+      - :class:`HistoricalMarketRecord` - generic historical record
+        (non-kline shape),
+      - :class:`HistoricalKlineRecord` - 1m / 5m kline record (final
+        OHLCV invisible before candle close),
+      - :class:`SymbolStatusRecord` - symbol metadata record for the
+        as-of universe (no survivorship bias),
+      - :class:`HistoricalMarketStore` - in-memory store with
+        ``available_at <= simulated_time`` enforcement, closed-candle
+        visibility, and as-of universe query.
+
+Hard safety boundaries (Phase 11C.1D-D-A / PR94 + Phase 11C.1D-D-B /
+PR95):
 
   - mode = paper
   - sandbox_only = True
@@ -59,20 +86,32 @@ This package MUST NOT:
   - authorize live trading or auto-tuning
   - enter Phase 12
 
-PR94 acceptance authorises ONLY PR95 (*Historical Market Store v0*)
-to begin. PR94 does NOT implement, and does NOT authorise:
+PR95 acceptance authorises ONLY PR96 (*ReplayFeedProvider*) to begin
+its own gate. PR95 does NOT implement, and does NOT authorise:
 
-  - the Blind Walk-forward Runner (PR100),
-  - the Historical Market Store v0 (PR95),
   - the ReplayFeedProvider (PR96),
   - the MockExchange + Pessimistic Fill Model (PR97),
   - the Simulated Capital Flow + Trade Ledger (PR98),
   - the Telegram Sandbox Outbox (PR99),
+  - the Blind Walk-forward Runner (PR100),
   - Phase 12.
 
 The Risk Engine remains the single trade-decision gate.
 """
 
+from app.sim.historical_market_store import (
+    PHASE_NAME as HISTORICAL_MARKET_STORE_PHASE_NAME,
+)
+from app.sim.historical_market_store import (
+    DataCompletenessState,
+    DataQualityFlag,
+    HistoricalKlineRecord,
+    HistoricalMarketRecord,
+    HistoricalMarketRecordType,
+    HistoricalMarketStore,
+    SymbolStatus,
+    SymbolStatusRecord,
+)
 from app.sim.simulation_clock import (
     PHASE_NAME,
     HistoricalRecordTime,
@@ -92,13 +131,22 @@ from app.sim.time_wall_guard import (
 
 __all__ = [
     "PHASE_NAME",
+    "HISTORICAL_MARKET_STORE_PHASE_NAME",
     "FORBIDDEN_OUTPUT_FIELDS",
     "CandleVisibilityGuard",
+    "DataCompletenessState",
+    "DataQualityFlag",
+    "HistoricalKlineRecord",
+    "HistoricalMarketRecord",
+    "HistoricalMarketRecordType",
+    "HistoricalMarketStore",
     "HistoricalRecordTime",
     "NoLookaheadViolation",
     "NoLookaheadViolationReason",
     "NoLookaheadViolationSeverity",
     "SimulationClock",
+    "SymbolStatus",
+    "SymbolStatusRecord",
     "TimeWallGuard",
     "assert_no_forbidden_fields",
     "ensure_utc_aware",

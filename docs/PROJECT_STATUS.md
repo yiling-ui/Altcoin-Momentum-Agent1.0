@@ -7,6 +7,221 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-B — Historical Market Store v0
+> (*Strict forward-only historical sim-live market data store /
+> 严格前向 Sim-Live 历史市场数据存储 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no I/O, no network, no real data
+> fetch, and no authority over the Risk Engine or the
+> Execution FSM is introduced by this PR.
+>
+> PR93 (the *Strict Blind Walk-forward Sim-Live
+> Constitution*) is merged. PR94 (*SimulationClock +
+> Time-Wall Guard*) is merged. The constitution's PR93 §19
+> engineering route explicitly authorises ONLY this PR
+> (PR95 — *Historical Market Store v0*) to begin the next
+> paper-only step. PR95 ships the **second**
+> anti-future-lookahead infrastructure block of the strict
+> blind walk-forward stack: the typed historical-record
+> schema and an in-memory store that consults the PR94
+> :class:`TimeWallGuard` and :class:`CandleVisibilityGuard`
+> on every read so that the §5 / §6 / §9 / §10 / §E rules
+> become machine-enforceable at the data layer.
+>
+> The PR95 surface is intentionally small and pure-Python.
+> It introduces:
+>
+>   - :class:`HistoricalMarketRecordType` — closed taxonomy
+>     of historical record types (Constitution §10 v0
+>     minimum: ``KLINE_1M``, ``KLINE_5M``, ``FUNDING_RATE``,
+>     ``OPEN_INTEREST``, ``TICKER_24H``, ``EXCHANGE_INFO``,
+>     ``SYMBOL_STATUS``, ``LISTING_STATUS``,
+>     ``DELISTING_STATUS``).
+>   - :class:`DataQualityFlag` — closed taxonomy of
+>     record-level data-quality flags (``DATA_GAP``,
+>     ``LATE_ARRIVAL``, ``REVISED_RECORD``,
+>     ``INCOMPLETE_KLINE``, ``SYMBOL_STATUS_UNKNOWN``,
+>     ``FUNDING_MISSING``, ``OI_MISSING``,
+>     ``TICKER_MISSING``).
+>   - :class:`SymbolStatus` — closed taxonomy of symbol
+>     statuses (``TRADING``, ``BREAK``, ``HALT``,
+>     ``DELISTED``, ``SETTLING``, ``PRE_TRADING``,
+>     ``UNKNOWN``) with a ``TRADABLE_OR_MONITORABLE`` subset
+>     that the as-of universe query consults; ``DELISTED``
+>     is **explicitly excluded** from the universe.
+>   - :class:`DataCompletenessState` — closed taxonomy of
+>     symbol-level data completeness states (``OK``,
+>     ``DEGRADED``, ``INCOMPLETE``, ``UNKNOWN``).
+>   - :class:`HistoricalMarketRecord` — generic non-kline
+>     historical record. Carries the four-timestamp
+>     record-time model (``event_time`` / ``available_at``
+>     / ``ingested_at`` / ``source``) plus
+>     ``record_id`` / ``record_type`` / ``symbol`` /
+>     ``interval`` / ``payload`` / ``data_quality_flags`` /
+>     ``evidence_refs`` / ``revision_time`` /
+>     ``revised_from_record_id`` / ``late_arrival``.
+>     ``available_at >= event_time`` is enforced at
+>     construction; naive datetimes are rejected; the
+>     ``payload`` runs through ``assert_no_forbidden_fields``
+>     and a JSON-serialisability check at construction time.
+>   - :class:`HistoricalKlineRecord` — 1m / 5m kline. v0
+>     supports ``"1m"`` and ``"5m"`` only (Constitution §10).
+>     ``close_time`` defaults to ``open_time + interval``;
+>     an explicit ``close_time`` must agree.
+>     ``available_at >= close_time`` is enforced at
+>     construction (Constitution §6: final OHLCV invisible
+>     before close). OHLC sanity (``high >= max(open,
+>     close)``, ``low <= min(open, close)``, ``volume >=
+>     0``) is enforced at construction.
+>   - :class:`SymbolStatusRecord` — symbol metadata for the
+>     as-of universe (Constitution §9). ``listed_at`` /
+>     ``status`` / ``available_at`` are required; optional
+>     ``delisted_at`` / ``min_notional`` / ``tick_size`` /
+>     ``step_size`` / ``contract_type`` /
+>     ``data_completeness_state``. ``event_time`` defaults
+>     to ``listed_at`` but may be overridden for
+>     pre-listing-announcement records (the brief's
+>     "special metadata with explicit reason" exception),
+>     in which case ``available_at >= event_time`` is still
+>     enforced.
+>   - :class:`HistoricalMarketStore` — in-memory store with
+>     ``add_record`` / ``add_records`` / ``query_records``
+>     / ``query_latest`` / ``query_klines`` /
+>     ``query_symbol_status`` / ``query_asof_universe`` /
+>     ``violations`` / ``clear_violations`` /
+>     ``safety_payload`` / ``to_dict``. Every query is
+>     gated by :class:`TimeWallGuard`; future records are
+>     NEVER silently dropped, every rejection produces a
+>     :class:`NoLookaheadViolation` audit object accessible
+>     via ``store.violations``. ``query_klines`` additionally
+>     cross-checks
+>     :meth:`CandleVisibilityGuard.is_candle_closed` so that
+>     a kline that somehow survived the time wall but lands
+>     on an unclosed candle relative to ``simulated_time``
+>     is rejected with an
+>     ``UNCLOSED_CANDLE_FIELD_ACCESS`` violation.
+>     ``query_asof_universe`` enforces Constitution §9: a
+>     symbol qualifies iff ``listed_at <= simulated_time``
+>     AND (``delisted_at is None`` OR ``delisted_at >
+>     simulated_time``) AND ``available_at <= simulated_time``
+>     AND ``status`` is in
+>     :data:`SymbolStatus.TRADABLE_OR_MONITORABLE``; the
+>     store NEVER substitutes the *current* symbol list, so
+>     an empty store at any ``simulated_time`` returns an
+>     empty universe.
+>
+> Every record / store / payload ``to_dict()`` boundary
+> re-pins the project-wide safety boundary
+> (``mode=paper``, ``sandbox_only=True``,
+> ``live_trading=False``, ``exchange_live_orders=False``,
+> ``binance_private_api_enabled=False``,
+> ``telegram_outbound_enabled=False``,
+> ``ai_trade_authority=False``, ``trade_authority=False``,
+> ``auto_tuning_allowed=False``,
+> ``phase_12_forbidden=True``) and runs through the
+> recursive ``assert_no_forbidden_fields`` guard. The
+> :class:`HistoricalMarketStore` exposes no public method
+> with a trade verb (``buy``, ``sell``, ``place_order``,
+> ``submit_order``, ``long``, ``short``, ``open_position``,
+> ``close_position``, ``set_leverage``, ``set_stop``,
+> ``set_target``, ``apply_change``, ``deploy``,
+> ``enable_live``).
+>
+> The package and module sources are AST-walked by the
+> tests to assert that they do **NOT** import
+> ``app.risk`` / ``app.execution`` / ``app.exchanges`` /
+> ``app.telegram`` / ``app.config``, do **NOT** import any
+> network / LLM / Telegram / Binance transport
+> (``deepseek``, ``openai``, ``anthropic``, ``telegram``,
+> ``binance``, ``ccxt``, ``websocket``, ``websockets``,
+> ``httpx``, ``aiohttp``, ``requests``, ``urllib.request``,
+> ``http.client``, ``grpc``, ``boto3``, ``socket``), and do
+> **NOT** reference any network call identifier
+> (``requests.get``, ``requests.post``, ``urllib.request``,
+> ``socket.connect``, ``socket.create_connection``).
+> Importing ``app.sim`` and
+> ``app.sim.historical_market_store`` is also asserted at
+> runtime (via ``sys.modules`` diffing) to not pull any
+> forbidden module.
+>
+> Hard safety boundary (Phase 11C.1D-D-B / PR95):
+> ``mode=paper``, ``sandbox_only=True``,
+> ``live_trading=False``, ``exchange_live_orders=False``,
+> ``binance_private_api_enabled=False``,
+> ``signed_endpoint_reachable=False``,
+> ``private_websocket_reachable=False``,
+> ``account_endpoint_reachable=False``,
+> ``order_endpoint_reachable=False``,
+> ``position_endpoint_reachable=False``,
+> ``leverage_endpoint_reachable=False``,
+> ``margin_endpoint_reachable=False``,
+> ``real_exchange_order_path=False``, ``real_capital=False``,
+> ``telegram_outbound_enabled=False``,
+> ``telegram_live_command_authority=False``,
+> ``ai_trade_authority=False``, ``trade_authority=False``,
+> ``auto_tuning_allowed=False``,
+> **`phase_12_forbidden=True`**.
+> The Risk Engine remains the single trade-decision gate.
+>
+> What this PR does **NOT** do, and CANNOT do, regardless
+> of any caller's wishes:
+>
+>   - implement the ReplayFeedProvider (PR96's
+>     responsibility),
+>   - implement the MockExchange + Pessimistic Fill Model
+>     (PR97's responsibility),
+>   - implement the Simulated Capital Flow + Trade Ledger
+>     (PR98's responsibility),
+>   - implement the Telegram Sandbox Outbox (PR99's
+>     responsibility),
+>   - implement the Blind Walk-forward Runner (PR100's
+>     responsibility),
+>   - read real market network,
+>   - place an order,
+>   - call DeepSeek / LLM / any network transport,
+>   - send Telegram outbound,
+>   - touch the Binance private API,
+>   - emit any direction / order / sizing / risk /
+>     execution field,
+>   - emit any runtime-tuning patch,
+>   - authorise live trading,
+>   - authorise auto-tuning,
+>   - authorise Phase 12.
+>
+> Successful PR95 only authorises the next allowed
+> paper-only step (**PR96 — ReplayFeedProvider**).
+> It does **NOT** authorise PR97 / PR98 / PR99 / PR100,
+> does **NOT** authorise the *Blind Walk-forward Runner*,
+> does **NOT** authorise live trading, does **NOT**
+> authorise auto-tuning, does **NOT** authorise the
+> DeepSeek hot path, does **NOT** authorise Telegram live
+> outbound, does **NOT** authorise opening Phase 12.
+> **Phase 12 remains FORBIDDEN.**
+>
+> Files shipped: ``app/sim/historical_market_store.py``
+> (the core implementation),
+> ``app/sim/__init__.py`` (re-exports the new public
+> surface alongside the PR94 substrate),
+> ``tests/unit/test_historical_market_store.py`` (26
+> PASSING tests covering all 21 brief-mandated scenarios
+> plus 5 defensive extras: closed-taxonomy sweep, kline
+> construction-time invariants, symbol-status invariants,
+> latest-symbol-status, deterministic violation IDs),
+> ``docs/PHASE_11C_1D_D_B_HISTORICAL_MARKET_STORE.md``
+> (the design / acceptance brief),
+> ``docs/PROJECT_STATUS.md`` (this file — current-phase
+> entry prepended; prior 11C.1D-D-A entry preserved as
+> historical context below),
+> ``docs/PHASE_GATE.md`` (PR95 added to *Open / Reserved
+> phases*; only PR96 unlocked; Phase 12 row unchanged),
+> ``docs/CHANGELOG.md`` (this PR's entry).
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1D-D-A — SimulationClock + Time-Wall Guard
 > (*Strict forward-only historical sim-live time substrate /
 > 严格前向 Sim-Live 模拟时钟与时间墙守卫 v0*).**
