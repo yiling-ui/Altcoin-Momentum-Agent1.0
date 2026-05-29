@@ -7,6 +7,107 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D-H — Historical Data Ingestion / Backfill v0 (PR101): IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence-only
+infrastructure). **Runtime effect:** **none on real trading; no
+real data download; no network; no Binance private API; no signed
+endpoint; no private websocket; no listenKey; no real exchange
+order; no real Telegram outbound; no Telegram command authority; no
+DeepSeek / LLM call; no auto-tuning.** Two new modules
+(`app/sim/historical_data_manifest.py`,
+`app/sim/historical_data_ingestion.py`), one extended
+`app/sim/__init__.py` re-exporting the new public surface alongside
+the PR94..PR100 substrate, one new operator entry point
+`scripts/run_historical_data_ingestion.py`, one new unit-test module
+`tests/unit/test_historical_data_ingestion.py` (30 PASSING tests
+covering all 25 brief-mandated scenarios plus 5 defensive extras),
+and one new phase doc
+`docs/PHASE_11C_1D_D_H_HISTORICAL_DATA_INGESTION_BACKFILL.md`. No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/` is touched. The existing PR94..PR100
+`app/sim/` sources are reused **verbatim** and are NOT modified by
+this PR except `app/sim/__init__.py` (export wiring only). No event
+type wired into the runtime hot path. No database schema /
+migration.
+
+**What this PR ships.** The **eighth** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack defined
+by Phase 11C.1D-D (PR93). PR101 turns **local files** into the PR95
+record types and produces the data / universe manifests + coverage
+/ gap audit that the later strict forward-only blind walk-forward
+runs (the PR100 runner) consume. It is the feeder that produces the
+`data_manifest_hash` / `universe_manifest_hash` the PR100
+`BlindRunManifest` pins.
+
+**Public surface added.**
+
+  - `HistoricalDataSourceType` — closed taxonomy of **public /
+    file** source types (`BINANCE_PUBLIC_KLINE_FILE`,
+    `BINANCE_PUBLIC_FUNDING_FILE`,
+    `BINANCE_PUBLIC_OPEN_INTEREST_FILE`,
+    `BINANCE_PUBLIC_TICKER_FILE`, `EXCHANGE_INFO_FILE`,
+    `SYMBOL_STATUS_FILE`, `MANUAL_FIXTURE_FILE`). NEVER a private /
+    signed / account / order / position / leverage / margin
+    endpoint, a private websocket, or a listenKey.
+  - `DataIngestionStatus` — closed taxonomy
+    (`EVIDENCE_GENERATED`, `PARTIAL_EVIDENCE`,
+    `INSUFFICIENT_EVIDENCE`, `FAILED_SCHEMA_VALIDATION`,
+    `INVALIDATED_TIME_FIELDS`). None of these is a
+    strategy-effectiveness conclusion.
+  - `HistoricalDataIngestionConfig` — frozen config (`input_root`,
+    `output_root`, `start_time`, `end_time`, `symbols`,
+    `intervals`, include-flags, `source_type`,
+    `default_availability_lag_seconds`, `strict_utc`,
+    `strict_available_at`, `fixture_mode`).
+  - `HistoricalDataManifest` — frozen manifest with a deterministic
+    `sha256:<hex>` `data_manifest_hash` over the content (excluding
+    the wall-clock `generated_at_utc`), `record_counts_by_type`,
+    `coverage_by_symbol`, `data_gap_summary`, `late_arrival_count`,
+    `revised_record_count`, `source_files`, `warnings`.
+  - `UniverseManifest` — frozen as-of universe manifest retaining
+    every `SymbolStatusRecord` (including delisted symbols),
+    `listed_count` / `delisted_count` / `status_unknown_count`,
+    `universe_manifest_hash`, `survivorship_bias_guard=True`, and an
+    `asof_universe_symbols(simulated_time)` reconstruction.
+  - `HistoricalDataIngestionResult` — frozen result (`status`,
+    `ingested_record_count`, `skipped_record_count`,
+    `rejected_record_count`, `manifest`, `universe_manifest`,
+    report paths, `warnings`, `next_allowed_step`).
+  - Row parsers (`parse_kline_row` — dict or Binance array,
+    `parse_funding_row`, `parse_open_interest_row`,
+    `parse_ticker_24h_row`, `parse_symbol_status_row`) that compute
+    `event_time` / `available_at` / `ingested_at`, enforce
+    timezone-aware UTC, and **NEVER** substitute `ingested_at` for
+    `available_at`.
+  - `HistoricalDataIngestion` — the engine (`ingest` /
+    `build_store` / `coverage_report` / `data_gap_report` /
+    `write_outputs`).
+
+**Safety boundary held.** `mode=historical_blind_sim_live`,
+`sandbox_only=True`, `simulated_only=True`, `no_live_order=True`,
+`live_trading=False`, `exchange_live_orders=False`,
+`binance_private_api_enabled=False`, no signed endpoint, no private
+websocket, no account / order / position / leverage / margin
+endpoint, no real exchange order, no real capital, no real account
+id, no real Telegram outbound, no Telegram command authority, AI
+trade authority `False`, trade authority `False`, auto-tuning
+allowed `False`, `phase_12_forbidden=True`. Every emitted payload is
+run through the recursive `assert_no_forbidden_fields` guard and
+additionally carries no `api_key` / `api_secret` / `listenKey` /
+`signed_endpoint` / `private_websocket` / `real_order_id` /
+`exchange_order_id` / `enable_live` / `live_ready` /
+`trading_approved` field, and pins
+`is_strategy_effectiveness_conclusion=False`. **Phase 12 remains
+FORBIDDEN.**
+
+**What this PR does NOT do.** It does not modify the live behaviour
+of Risk / Execution / Exchange / Telegram / config; does not
+download real data; does not implement the 30D / 60D / 90D / 2Y
+runner; does not auto-tune; does not enter Phase 12. A successful
+PR101 only authorises a **Historical Data Coverage Checkpoint /
+short-window no-lookahead trial preparation**.
+
 ### Phase 11C.1D-D-G — Blind Walk-forward Runner v0 (PR100): IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only
