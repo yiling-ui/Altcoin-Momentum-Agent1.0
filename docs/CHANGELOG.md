@@ -7,6 +7,292 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D — Strict Blind Walk-forward Sim-Live Constitution: IN_REVIEW (docs-only)
+
+**Type:** **docs-only constitution PR.** No runtime code, no
+configuration, no tests, no scripts, no data files are
+introduced or modified by this PR. **No runtime behaviour
+changed.**
+
+**Runtime effect:** **none.** This PR adds one new docs file
+(`docs/PHASE_11C_1D_D_STRICT_BLIND_WALK_FORWARD_SIM_LIVE_CONSTITUTION.md`),
+prepends a current-phase block to `docs/PROJECT_STATUS.md`
+(prior Phase 11C.1D-C entry preserved verbatim as *Prior
+status*), appends a new *Open phase: Phase 11C.1D-D* section
+to `docs/PHASE_GATE.md` (the Phase 12 row in the
+*Open / Reserved phases* table is unchanged), and appends
+this CHANGELOG entry. **No file under `app/`, `scripts/`,
+`tests/`, `configs/`, `data/`, no `requirements.txt`, no
+`pyproject.toml`, and no `.env*` is touched by this PR.**
+
+**What this PR ships.** The human-owner-supplied **Strict
+Blind Walk-forward design checkpoint** that the Phase
+11C.1D-C *Risk / Execution / Capital Safety Matrix v0*
+`next_allowed_phase` rule explicitly required before any
+*Blind Walk-forward implementation* may begin. The
+constitution defines AMA-RT V1.4 blind testing as a **strict
+forward-only historical sim-live**, not an ordinary backtest.
+At simulated time `T`, the system MAY only access records
+whose `available_at <= T`. Future top-mover labels, completed
+tail labels, post-discovery outcomes, future MFE / MAE,
+severe missed-tail labels, final window PnL, future drawdown,
+future funding-rate changes, future regime labels, future AI
+briefings, future replay summaries, and future reflection
+summaries MAY ONLY be used for scoring / audit AFTER the
+blind window has closed; they MUST NOT enter any decision
+surface inside the window. Training MAY use only
+already-closed historical windows. Before a blind window
+opens, the runtime code, configuration, rule set, feature
+schema, data manifest, universe manifest, fee / slippage /
+latency / outage models, and AI offline state MUST be frozen
+and content-hashed. The blind window MUST NOT auto-tune. Any
+look-ahead / drift / leakage MUST mark the run
+`INVALIDATED_LOOKAHEAD_OR_DRIFT`. The objective is truthful
+quantitative validation, not pretty equity curves.
+
+**Sections covered (verbatim).** §1 Purpose; §2 Safety
+Boundary (`live_trading=False`,
+`exchange_live_orders=False`,
+`binance_private_api_enabled=False`, no signed endpoint, no
+private WebSocket, no account / order / position / leverage /
+margin endpoint, no real exchange order, no real capital,
+`telegram_live_command_authority=false`,
+`ai_trade_authority=false`,
+`auto_tuning_inside_blind_window=false`,
+`phase_12_forbidden=true`); §3 Sim-live namespace
+(`mode=historical_blind_sim_live`,
+`historical_replay_enabled=True`,
+`simulation_clock_enabled=True`,
+`time_wall_guard_enabled=True`,
+`mock_exchange_enabled=True`,
+`paper_shadow_execution_enabled=True`,
+`simulated_order_lifecycle_enabled=True`,
+`simulated_position_lifecycle_enabled=True`,
+`simulated_capital_flow_enabled=True`,
+`telegram_sandbox_outbox_enabled=True`,
+`ai_offline_briefing_enabled=True`; sim-live flags MAY NOT
+flip live-trading flags); §4 Required architecture
+(`HistoricalReplayProvider → MarketDataBuffer → Regime
+Engine → Discovery / Radar → Candidate Pool → Strategy
+Orchestrator / Shadow Rule Evaluation → Risk Engine →
+Execution FSM → MockExchange → Simulated Position Book →
+Simulated Capital Flow → Replay / Reflection / Export →
+Telegram Sandbox Outbox → AI Offline Operator Briefing`;
+explicit forbidden arrows: `Execution FSM → Real Exchange
+Gateway → Binance signed order endpoint`, and `AI Output →
+Strategy / Risk / Execution / Config / Position / Leverage /
+Stop / Target`); §5 Time-Wall Constitution (SimulationClock
+mandatory; `datetime.now` / `datetime.utcnow` / `time.time` /
+`pandas.Timestamp.now` forbidden as market-state decision
+time; `event_time` / `available_at` / `source` /
+`ingested_at` distinguished; `available_at > T` reads
+rejected and logged as `NO_LOOKAHEAD_VIOLATION`;
+`ingested_at` is not a substitute for `available_at`); §6
+Candle visibility rule (1m / 5m / longer-period candles
+fully visible only after close; intra-bar ambiguity uses
+worst-case or `AMBIGUOUS_INTRABAR_PATH`, never favourable
+default); §7 Outcome-label isolation (closed list of 12
+forbidden-during-blind-window labels); §8 Train / Freeze /
+Blind / Score / Experience-Update loop; §9 As-of market
+universe (no survivorship bias; required fields `symbol`,
+`market_type`, `listed_at`, `delisted_at`, `status`,
+`available_at`, `min_notional`, `tick_size`, `step_size`,
+`contract_type`, `data_completeness_state`); §10 Historical
+data scope (v0 minimum: 1m / 5m kline, funding rate, open
+interest, 24h ticker, exchangeInfo, listing / delisting
+timeline; high-fidelity tick / orderbook deferred); §11
+MockExchange + Pessimistic Fill Model (closed list of
+simulated lifecycle events; closed list of forbidden
+real-exchange calls; "touched price ≠ filled" and "stop =
+adverse execution" defaults; same-candle stop+target →
+worst-case or `AMBIGUOUS_INTRABAR_PATH`); §12 Latency /
+Outage / Data Degradation injection (closed list of 11
+required injections); §13 Simulated Capital Flow (closed
+field set including the locked-profit reuse-only-with-frozen-
+config rule); §14 Telegram sandbox (file-only
+`data/reports/telegram_sandbox_outbox.jsonl` +
+`data/reports/telegram_sandbox_messages.md`; four verbatim
+banners `[SIMULATED HISTORICAL BLIND TEST]` /
+`[NO LIVE ORDER]` / `[NO REAL CAPITAL]` /
+`[NO TELEGRAM COMMAND AUTHORITY]`; Telegram has no execution
+authority); §15 AI role (offline-only intelligence; AI MUST
+NOT make direction / symbol / sizing / leverage / stop /
+target / execution-timing / risk-budget / runtime-config /
+training-label / tail-label / Truth-Layer / auto-tuning
+decisions); §16 Required outputs (Blind Run Manifest, Trade
+Ledger, Equity Timeseries, Discovery Quality Ledger,
+Failure Ledger, Telegram Sandbox Transcript, AI Operator
+Briefing); §17 Acceptance criteria; §18 Explicit non-goals
+for v0; §19 Recommended engineering route (PR93 → PR94 →
+PR95 → PR96 → PR97 → PR98 → PR99 → PR100 — each step its
+own gate; skipping forbidden); §20 Final governance rule
+(the strict blind walk-forward stack MAY simulate a full
+live-trading system but MAY NOT become one; Phase 12 / real
+trading / private exchange access / AI trade authority /
+Telegram command trading remain forbidden).
+
+**Owner-review enhancements (also written into the
+constitution, verbatim).**
+
+  - **§A. Explicit leakage test suite** — required test
+    names (normative for later implementation PRs only;
+    this docs-only PR does NOT add tests):
+    `test_available_at_future_record_rejected`,
+    `test_unclosed_candle_high_low_not_visible`,
+    `test_future_tail_label_unavailable_in_blind_window`,
+    `test_post_discovery_outcome_unavailable_before_window_close`,
+    `test_ai_briefing_unavailable_as_truth`,
+    `test_replay_reflection_summary_unavailable_during_blind_window`,
+    `test_config_drift_invalidates_window`.
+  - **§B. Feature Store as-of rule** — features at
+    simulated time `T` computed only from records with
+    `available_at <= T`; feature cache keyed by
+    `as_of_time`; later-computed values cannot be reused at
+    earlier `T`; the feature store cannot precompute
+    future-window features.
+  - **§C. Hyperparameter / rule search budget** —
+    `max_scenarios_per_training_window` and
+    `max_rule_candidates_promoted` are part of the frozen
+    config; rejected candidates logged; no unlimited sweep;
+    no repeated tuning on validation / test outcomes;
+    sandbox results cannot self-promote into runtime
+    config.
+  - **§D. Mandatory final untouched holdout** — 60-90 day
+    minimum; not used for tuning, rule selection, model
+    selection, AI prompt tuning; `INCONCLUSIVE` final
+    holdout MAY NOT authorise small-capital live trading.
+  - **§E. Data revision / late arrival policy** — a record
+    not available at `T` MAY NOT be used inside `T` even
+    after correction; revisions logged with
+    `revision_time` / `available_at` / `affected_window`;
+    corrected-data replay requires a new data-manifest hash
+    and becomes a new run, never overwriting old evidence.
+  - **§F. Run invalidation rules** — the
+    `INVALIDATED_LOOKAHEAD_OR_DRIFT` outcome covers config
+    drift, rule-hash drift, feature-schema drift,
+    data-manifest drift, universe-manifest drift,
+    future-record access, tail-label leakage,
+    post-discovery outcome leakage, replay / reflection
+    summary leakage, AI output used as truth / label /
+    strategy sample, manual sample deletion, validation /
+    test tuning, missing failure ledger, unlogged runtime
+    override. The status is permanent evidence; only a
+    fresh frozen-artefact re-run can produce a new outcome.
+
+**Files added / modified by this PR.**
+
+  - Added: `docs/PHASE_11C_1D_D_STRICT_BLIND_WALK_FORWARD_SIM_LIVE_CONSTITUTION.md`
+    (the constitution itself; §1–§20 plus owner-review
+    enhancements §A–§F).
+  - Modified: `docs/PROJECT_STATUS.md` (current-phase
+    blockquote prepended; prior Phase 11C.1D-C entry
+    preserved verbatim as *Prior status*).
+  - Modified: `docs/PHASE_GATE.md` (new
+    *Open phase: Phase 11C.1D-D / Strict Blind
+    Walk-forward Sim-Live Constitution (IN_REVIEW)*
+    section appended after the existing 11C.1D-C section;
+    Phase 12 row in the *Open / Reserved phases* table at
+    the top of the file is unchanged).
+  - Modified: `docs/CHANGELOG.md` (this entry).
+
+**Files explicitly NOT touched.**
+
+  - `app/**`
+  - `scripts/**`
+  - `tests/**`
+  - `configs/**`
+  - `data/**`
+  - `requirements.txt`
+  - `pyproject.toml`
+  - `.env*`
+
+**Hard safety boundary (Phase 11C.1D-D / Strict Blind
+Walk-forward Sim-Live Constitution).**
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `right_tail` | `False` |
+| `llm` | `False` (default) |
+| `llm_outbound_enabled` | `False` (default) |
+| `telegram_outbound_enabled` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `ai_trade_authority` | `False` |
+| `auto_tuning_inside_blind_window` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+The Risk Engine remains the single trade-decision gate.
+
+**Forbidden by this docs-only PR (verbatim).**
+
+  - Do not modify `app/risk/**`, `app/execution/**`,
+    `app/exchanges/**`, `app/telegram/**`, `app/config/**`,
+    or any other `app/**` file.
+  - Do not modify `scripts/**`, `tests/**`, `configs/**`,
+    or `data/**`.
+  - Do not modify `requirements.txt`, `pyproject.toml`, or
+    `.env*`.
+  - Do not implement a SimulationClock (PR94's
+    responsibility).
+  - Do not implement a Time-Wall Guard (PR94's
+    responsibility).
+  - Do not implement a Historical Market Store (PR95's
+    responsibility).
+  - Do not implement a ReplayFeedProvider (PR96's
+    responsibility).
+  - Do not implement a MockExchange + Pessimistic Fill
+    Model (PR97's responsibility).
+  - Do not implement a Simulated Capital Flow + Trade
+    Ledger (PR98's responsibility).
+  - Do not implement a Telegram Sandbox Outbox (PR99's
+    responsibility).
+  - Do not implement a Blind Walk-forward Runner (PR100's
+    responsibility).
+  - Do not enable live orders.
+  - Do not connect to Binance private API.
+  - Do not enable any real Telegram outbound.
+  - Do not grant AI / DeepSeek any trade authority.
+  - Do not auto-tune anything.
+  - Do not enter Phase 12.
+
+**Next-allowed-phase decision rule.**
+
+  - PR93 acceptance only authorises **PR94 — SimulationClock
+    + Time-Wall Guard** to begin. PR94 itself opens its own
+    gate.
+  - PR93 acceptance does **NOT** authorise PR95, PR96, PR97,
+    PR98, PR99, PR100, the *Blind Walk-forward Runner*,
+    live trading, auto-tuning, the DeepSeek hot path,
+    Telegram live outbound, or Phase 12. Phase 12 remains
+    **FORBIDDEN**.
+
+**Tests.** This is a docs-only PR. It adds zero tests. The
+required leakage test suite (§A) is normative for later
+implementation PRs only. The full `tests/unit` suite is
+unchanged by this PR (the post-PR-#92 `tests/unit` baseline
+is preserved as-is; this PR introduces no regression by
+construction because it touches no Python code).
+
+**Phase taxonomy clarification.** The status taxonomy for
+this phase is intentionally **NOT** `ACCEPTED` / `APPLY` /
+`DEPLOY` / `ENABLE_LIVE` / `GO_LIVE`. The phase is marked
+**IN_REVIEW**; promotion to `ACCEPTED` requires a separate
+docs-closeout PR after maintainer review. Phase 12 remains
+**FORBIDDEN**.
+
+
 ### Phase 11C.1D-C — Risk / Execution / Capital Safety Matrix v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only).
