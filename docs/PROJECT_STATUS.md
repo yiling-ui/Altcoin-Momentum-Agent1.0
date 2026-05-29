@@ -7,6 +7,114 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-F — Telegram Sandbox Outbox v0
+> (*Strict blind walk-forward simulated Telegram outbox / 严格
+> 前向 Sim-Live Telegram 沙盒 outbox v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no network, no real Telegram
+> outbound, no real Telegram bot token, no production / live
+> Telegram channel, no Telegram command authority, no real
+> data fetch, no real exchange API, no signed endpoint, no
+> private websocket, no API key, no API secret, no real
+> account, and no authority over the Risk Engine, the
+> Execution FSM, or the Capital Flow Engine.
+
+PR99 ships the **sixth** anti-future-lookahead infrastructure block
+of the strict blind walk-forward stack defined by Phase 11C.1D-D
+(PR93). It implements the deterministic, paper-only,
+**file-only** Telegram notification surface:
+
+  - the closed taxonomy of Telegram sandbox message types
+    (`TelegramSandboxMessageType` — exactly 13 values:
+    `SIMULATED_ENTRY_ALERT`, `SIMULATED_EXIT_ALERT`,
+    `RISK_REJECTION`, `FORCED_EXIT`, `STALE_FEED`, `OUTAGE`,
+    `DATA_GAP`, `RIGHT_TAIL_CAPTURED`, `SEVERE_MISSED_TAIL`,
+    `EQUITY_SUMMARY`, `FAILURE_LEDGER_SUMMARY`,
+    `MONTHLY_BLIND_TEST_SUMMARY`, `AI_OPERATOR_BRIEFING_READY`),
+  - the closed taxonomy of severities (`TelegramSandboxSeverity`
+    — `INFO` / `NOTICE` / `WARNING` / `CRITICAL`),
+  - the four mandatory simulated / no-live transcript labels
+    (`[SIMULATED HISTORICAL BLIND TEST]`, `[NO LIVE ORDER]`,
+    `[NO REAL CAPITAL]`, `[NO TELEGRAM COMMAND AUTHORITY]`),
+  - the frozen, JSON-serialisable `TelegramSandboxMessage`
+    (paper-only fields with hard-pinned safety markers
+    `sandbox_only=True`, `no_live_order_assertion=True`,
+    `no_real_capital_assertion=True`,
+    `no_telegram_command_authority=True`,
+    `phase_12_forbidden=True`, `trade_authority=False`,
+    `auto_tuning_allowed=False`),
+  - the frozen `TelegramSandboxOutboxConfig` (output JSONL /
+    Markdown paths, `append_mode`, `include_evidence_refs`,
+    `max_message_body_chars`, hard-pinned `sandbox_only=True`,
+    `telegram_outbound_enabled=False`,
+    `telegram_live_command_authority=False`,
+    `telegram_production_channel_enabled=False`,
+    `command_authority=False`),
+  - the deterministic, paper-only, file-only
+    `TelegramSandboxOutbox` writer (`append_message` /
+    `append_messages` / `render_message` / `write_jsonl` /
+    `write_markdown_transcript` / `list_messages` / `reset` /
+    `safety_payload` / `to_dict`).
+
+PR99 NEVER opens a network socket, NEVER calls the Telegram Bot
+API, NEVER reads a Telegram production token, NEVER targets a
+production / live channel, NEVER accepts an inbound command,
+NEVER carries Telegram command authority, NEVER authorises a
+runtime-config patch, NEVER touches the Risk Engine, the
+Execution FSM, the real exchange gateway, or any runtime config.
+The outbox writes only deterministic local JSONL + Markdown
+transcript files for operator review and blind-run evidence. The
+existing Phase 10D Telegram fake / refusal boundary is **NOT**
+reused — PR99 has its own separate sandbox path that NEVER touches
+the real outbound transport.
+
+One new module `app/sim/telegram_sandbox_outbox.py`, one extended
+`app/sim/__init__.py` re-exporting the new public surface
+alongside the PR94 + PR95 + PR96 + PR97 + PR98 substrate, one new
+unit-test module `tests/unit/test_telegram_sandbox_outbox.py` (23
+PASSING tests covering all 21 brief-mandated scenarios plus 2
+defensive extras: closed-taxonomy + phase-name-string presence,
+and `reset()` semantics), and one new phase doc
+`docs/PHASE_11C_1D_D_F_TELEGRAM_SANDBOX_OUTBOX.md`. No file under
+`app/risk/`, `app/execution/`, `app/exchanges/`, `app/telegram/`,
+`app/config/`, `app/safety/`, `app/ai/`, `app/replay/`,
+`app/reflection/`, `app/paper_shadow/`, `app/sandbox/`,
+`app/state_machine/`, `app/scanner/`, `app/regime/`,
+`app/market_data/`, `app/market_data_public/`, `app/universe/`,
+`app/liquidity/`, `app/manipulation/`, `app/monitoring/`,
+`app/database/`, `app/exports/`, `app/incidents/`, `app/learning/`,
+`app/llm/`, `app/paper_run/`, `app/reconciliation/`,
+`app/confirmation/`, `app/capital/`, `app/core/`, `app/main.py` is
+touched. The existing PR94 / PR95 / PR96 / PR97 / PR98 sources
+(`app/sim/simulation_clock.py`, `app/sim/time_wall_guard.py`,
+`app/sim/historical_market_store.py`,
+`app/sim/replay_feed_provider.py`, `app/sim/mock_exchange.py`,
+`app/sim/pessimistic_fill_model.py`,
+`app/sim/simulated_capital_flow.py`, `app/sim/trade_ledger.py`)
+are reused **verbatim** and are NOT modified by this PR.
+
+Hard safety boundary held: `mode=paper`, `sandbox_only=True`,
+`simulated_only=True`, `no_live_order=True`,
+`no_live_order_assertion=True`,
+`no_real_capital_assertion=True`,
+`no_telegram_command_authority=True`, `live_trading=False`,
+`live_capital_enabled=False`, `exchange_live_orders=False`,
+`binance_private_api_enabled=False`, no signed endpoint, no
+private websocket, no account / order / position / leverage /
+margin endpoint, no real exchange order, no real capital, no real
+account id, no real Telegram outbound, no Telegram production /
+live channel, no Telegram command authority, AI trade authority
+`False`, trade authority `False`, auto-tuning allowed `False`,
+`phase_12_forbidden=True`. **Phase 12 remains FORBIDDEN.**
+
+A successful PR99 only authorises **PR100 — Blind Walk-forward
+Runner v0** to begin its own gate. It does NOT authorise live
+trading, auto-tuning, real Telegram outbound, real production /
+live Telegram channel, Telegram command authority, or Phase 12.
+
 > **Phase 11C.1D-D-E — Simulated Capital Flow + Trade Ledger v0
 > (*Strict blind walk-forward simulated capital accounting,
 > position book, trade ledger, and equity timeseries / 严格前向
