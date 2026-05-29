@@ -7612,3 +7612,157 @@ Phase 11C / Offline Rule Sandbox Replay, Phase 11C.1D-B
 
 The Risk Engine remains the single trade-decision gate.
 Phase 12 remains **FORBIDDEN**.
+
+
+
+## Open phase: Phase 11C.1D-D-A / SimulationClock + Time-Wall Guard (PR94, IN_REVIEW)
+
+> **Title:** SimulationClock + Time-Wall Guard
+> *(Strict forward-only historical sim-live time substrate /
+> 严格前向 Sim-Live 模拟时钟与时间墙守卫 v0)*
+>
+> **Status:** IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).
+> **Type:** Implementation PR (paper / report / evidence-only
+> infrastructure).
+> **Parent:** Phase 11C.1D-D *Strict Blind Walk-forward Sim-Live
+> Constitution* (PR93, merged).
+>
+> Phase 11C.1D-D-A ships the **first** anti-future-lookahead
+> infrastructure block of the strict blind walk-forward stack
+> defined by PR93. PR93 §19's engineering route explicitly
+> authorises ONLY this PR (PR94) to begin the next paper-only
+> step. PR94 introduces a small, deterministic, pure-Python
+> time substrate. It introduces NO runtime hot-path wiring, NO
+> new event types, NO schema migration, NO I/O, NO network,
+> and NO authority over the Risk Engine or the Execution FSM.
+
+### Scope (Phase 11C.1D-D-A / PR94)
+
+  - `app/sim/__init__.py` — package init re-exporting the
+    PR94 public surface.
+  - `app/sim/simulation_clock.py` — :class:`SimulationClock`
+    (strict forward-only simulated UTC clock; the **only**
+    source of market-state decision time inside a strict
+    blind walk-forward run; never consults the wall-clock;
+    forward-only by default; rewinds require an explicit
+    test-only flag); :class:`HistoricalRecordTime` (the
+    four-timestamp record-time helper carrying `event_time`,
+    `available_at`, `ingested_at`, `source`, plus optional
+    `record_id` / `symbol` / `interval`); the
+    `ensure_utc_aware` and `parse_interval_seconds` helpers.
+  - `app/sim/time_wall_guard.py` — :class:`TimeWallGuard`
+    (the `available_at <= simulated_time` enforcement layer;
+    `can_read` / `assert_can_read` / `validate_no_lookahead` /
+    `filter_available` / `reject_future_records` /
+    `make_ingested_at_used_as_availability_violation` /
+    `make_outcome_label_violation` /
+    `make_unclosed_candle_field_access_violation`);
+    :class:`NoLookaheadViolation` (audit-only descriptive
+    violation object with a closed reason taxonomy
+    `FUTURE_AVAILABLE_AT` / `MISSING_AVAILABLE_AT` /
+    `INGESTED_AT_USED_AS_AVAILABILITY` /
+    `UNCLOSED_CANDLE_FIELD_ACCESS` /
+    `OUTCOME_LABEL_DURING_BLIND_WINDOW`, and a closed
+    severity taxonomy `P0` / `P1`);
+    :class:`CandleVisibilityGuard` (the §6 closed-candle
+    visibility rule; final OHLCV invisible before close);
+    `assert_no_forbidden_fields` (recursive guard against
+    trade-action / runtime-config-patch / "live ready" field
+    names at any nesting depth).
+  - `tests/unit/test_simulation_clock_time_wall_guard.py` —
+    the 27-test PR94 safety contract (21 brief-mandated
+    scenarios plus 6 defensive extras).
+  - `docs/PHASE_11C_1D_D_A_SIMULATION_CLOCK_TIME_WALL_GUARD.md`
+    — the design / acceptance brief.
+  - `docs/PROJECT_STATUS.md` — current-phase entry prepended
+    (prior 11C.1D-D entry preserved as historical context
+    below).
+  - `docs/PHASE_GATE.md` — this section appended; Phase 12
+    row in the *Open / Reserved phases* table unchanged.
+  - `docs/CHANGELOG.md` — this PR's entry.
+
+### Boundary (must hold from day one)
+
+| flag | required value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_outbound_enabled` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `ai_trade_authority` | `False` |
+| `trade_authority` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+### Explicitly forbidden (inherited verbatim)
+
+  - Do NOT modify `app/risk/**`, `app/execution/**`,
+    `app/exchanges/**`, `app/telegram/**`, `app/config/**`.
+  - Do NOT implement the Blind Walk-forward Runner (PR100).
+  - Do NOT implement the Historical Market Store v0 (PR95).
+  - Do NOT implement the ReplayFeedProvider (PR96).
+  - Do NOT implement the MockExchange + Pessimistic Fill
+    Model (PR97).
+  - Do NOT implement the Simulated Capital Flow + Trade
+    Ledger (PR98).
+  - Do NOT implement the Telegram Sandbox Outbox (PR99).
+  - Do NOT enable live orders.
+  - Do NOT connect to Binance private API.
+  - Do NOT enable any real Telegram outbound.
+  - Do NOT call DeepSeek / LLM / any network transport.
+  - Do NOT import `app.risk` / `app.execution` /
+    `app.exchanges` / `app.telegram` / `app.config`.
+  - Do NOT auto-tune anything.
+  - Do NOT enter Phase 12.
+
+### Acceptance gate (placeholder; status: IN_REVIEW)
+
+  - PR94 is marked **IN_REVIEW**.
+  - Maintainer-led review of the implementation PR is the
+    only path to **ACCEPTED**.
+  - `python -m pytest tests/unit/test_simulation_clock_time_wall_guard.py -q`
+    ships 27 PASSING tests on the PR branch.
+  - `python -m pytest tests/unit -q` reports 3427 PASSING
+    tests, 0 failures (was 3400 before this PR; +27 from
+    this PR).
+
+### Allowed transitions out of Phase 11C.1D-D-A
+
+| From | To | Authorised by |
+| --- | --- | --- |
+| Phase 11C.1D-D-A IN_REVIEW | Phase 11C.1D-D-A ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-D-A IN_REVIEW | PR95 — Historical Market Store v0 | After a successful PR94 acceptance; PR95 itself opens its own gate. |
+| Phase 11C.1D-D-A IN_REVIEW | PR96 — ReplayFeedProvider | **FORBIDDEN by this phase alone.** Requires successful PR95 acceptance first. |
+| Phase 11C.1D-D-A IN_REVIEW | PR97 — MockExchange + Pessimistic Fill Model | **FORBIDDEN by this phase alone.** Requires successful PR96 acceptance first. |
+| Phase 11C.1D-D-A IN_REVIEW | PR98 — Simulated Capital Flow + Trade Ledger | **FORBIDDEN by this phase alone.** Requires successful PR97 acceptance first. |
+| Phase 11C.1D-D-A IN_REVIEW | PR99 — Telegram Sandbox Outbox | **FORBIDDEN by this phase alone.** Requires successful PR98 acceptance first. |
+| Phase 11C.1D-D-A IN_REVIEW | PR100 — Blind Walk-forward Runner v0 | **FORBIDDEN by this phase alone.** Requires successful PR99 acceptance first. |
+| Phase 11C.1D-D-A IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** A complete blind walk-forward run requires PR94 → PR100 to have been accepted in order. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+### Inheritance
+
+Phase 11C.1D-D-A inherits, verbatim, every Phase 1, Phase
+11C, Phase 11C.1A, Phase 11C.1B, Phase 11C.1C-A through
+Phase 11C.1C-C-B-B-B-E-D, Phase AI-1 through Phase
+AI-CHECKPOINT, Phase 11C / Offline Rule Sandbox Replay,
+Phase 11C.1D-B *Paper Shadow Strategy Validation*, Phase
+11C.1D-C *Risk / Execution / Capital Safety Matrix*, and
+Phase 11C.1D-D *Strict Blind Walk-forward Sim-Live
+Constitution* forbidden item.
+
+The Risk Engine remains the single trade-decision gate.
+Phase 12 remains **FORBIDDEN**.

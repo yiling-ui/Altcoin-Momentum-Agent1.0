@@ -7,6 +7,188 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-A — SimulationClock + Time-Wall Guard
+> (*Strict forward-only historical sim-live time substrate /
+> 严格前向 Sim-Live 模拟时钟与时间墙守卫 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no I/O, no network, and no
+> authority over the Risk Engine or the Execution FSM is
+> introduced by this PR.
+>
+> PR93 (the *Strict Blind Walk-forward Sim-Live
+> Constitution*) is merged. The constitution's PR93 §19
+> engineering route explicitly authorises ONLY this PR
+> (PR94 — *SimulationClock + Time-Wall Guard*) to begin the
+> next paper-only step. PR94 ships the **first**
+> anti-future-lookahead infrastructure block of the strict
+> blind walk-forward stack: the substrate that all later
+> (separately gated) PR95..PR100 modules MUST consume so
+> that the §5 / §6 / §7 anti-leakage rules become
+> machine-enforceable.
+>
+> The PR94 surface is intentionally small and pure-Python.
+> It introduces:
+>
+>   - :class:`SimulationClock` — a strict forward-only
+>     simulated UTC clock. The clock is the **only** source
+>     of market-state decision time inside a strict blind
+>     walk-forward run. It NEVER consults the real
+>     wall-clock; modules that consume it MUST NOT call
+>     `datetime.now()` / `datetime.utcnow()` / `time.time()` /
+>     `time.monotonic()` / `pandas.Timestamp.now()` as a
+>     substitute. Forward-only by default; rewinds require
+>     an explicit test-only flag (`monotonic_forward_only=False`).
+>     Every output is timezone-aware UTC; naive datetimes
+>     are rejected; non-UTC offsets are normalised to UTC.
+>   - :class:`HistoricalRecordTime` — the four-timestamp
+>     record-time helper (`event_time` / `available_at` /
+>     `ingested_at` / `source`, plus optional `record_id` /
+>     `symbol` / `interval`). `available_at >= event_time` is
+>     enforced at construction; naive datetimes are rejected;
+>     `ingested_at` is NEVER substituted for `available_at`.
+>   - :class:`TimeWallGuard` — the
+>     `available_at <= simulated_time` enforcement layer.
+>     Public API: `can_read` / `assert_can_read` /
+>     `validate_no_lookahead` / `filter_available` /
+>     `reject_future_records` /
+>     `make_ingested_at_used_as_availability_violation` /
+>     `make_outcome_label_violation` /
+>     `make_unclosed_candle_field_access_violation`. Records
+>     are NEVER silently dropped; every rejected record
+>     produces an auditable `NoLookaheadViolation`.
+>   - :class:`NoLookaheadViolation` — audit-only descriptive
+>     violation object. Closed reason taxonomy:
+>     `FUTURE_AVAILABLE_AT`, `MISSING_AVAILABLE_AT`,
+>     `INGESTED_AT_USED_AS_AVAILABILITY`,
+>     `UNCLOSED_CANDLE_FIELD_ACCESS`,
+>     `OUTCOME_LABEL_DURING_BLIND_WINDOW`. Closed severity
+>     taxonomy: `P0`, `P1`. JSON-serialisable. Hard-pinned
+>     `phase_12_forbidden=True`,
+>     `auto_tuning_allowed=False`, `trade_authority=False`.
+>     Defensive `is_no_lookahead_violation=True` /
+>     `is_trade=False` / `is_runtime_patch=False` markers.
+>   - :class:`CandleVisibilityGuard` — the §6 closed-candle
+>     visibility rule. A 1m / 5m / longer-period candle's
+>     final OHLCV (`high` / `low` / `close` / `volume`) is
+>     fully visible only after that candle has closed
+>     (`simulated_time >= candle_close_time`). Public API:
+>     `candle_close_time` / `is_candle_closed` /
+>     `assert_candle_fields_visible` / `visible_candle_fields`.
+>     Without tick / trade data, intra-bar paths are
+>     ambiguous; PR94 refuses to leak unclosed candle
+>     fields, and a downstream fill model (PR97) will pick
+>     the conservative / `AMBIGUOUS_INTRABAR_PATH` policy.
+>   - `assert_no_forbidden_fields(payload)` — recursive
+>     guard against any of the brief-mandated trade-action /
+>     runtime-config-patch / "live ready" field names at any
+>     nesting depth. Used defensively on every `to_dict()`
+>     boundary.
+>
+> The :class:`TimeWallGuard` and :class:`CandleVisibilityGuard`
+> have no knowledge of trade direction, sizing, leverage,
+> stops, or targets — they ONLY enforce time-wall and
+> closed-candle visibility. The unit suite asserts that no
+> public method on any PR94 class exposes a trade verb
+> (`buy`, `sell`, `long`, `short`, `place_order`,
+> `submit_order`, `open_position`, `close_position`,
+> `set_leverage`, `set_stop`, `set_target`, `apply_change`,
+> `deploy`, `enable_live`).
+>
+> The package and module sources are AST-walked by the
+> tests to assert that they do **NOT** import
+> `app.risk` / `app.execution` / `app.exchanges` /
+> `app.telegram` / `app.config`, do **NOT** import any
+> network / LLM / Telegram / Binance transport
+> (`deepseek`, `openai`, `anthropic`, `telegram`,
+> `binance`, `ccxt`, `websocket`, `websockets`, `httpx`,
+> `aiohttp`, `requests`, `urllib.request`, `http.client`,
+> `grpc`, `boto3`, `socket`), and do **NOT** reference any
+> network call identifier (`requests.get`, `requests.post`,
+> `urllib.request`, `socket.connect`,
+> `socket.create_connection`). Importing the `app.sim`
+> package itself is also asserted at runtime (via
+> `sys.modules` diffing) to not pull any forbidden module.
+>
+> Hard safety boundary (Phase 11C.1D-D-A / PR94):
+> `mode=paper`, `sandbox_only=True`, `live_trading=False`,
+> `exchange_live_orders=False`,
+> `binance_private_api_enabled=False`,
+> `signed_endpoint_reachable=False`,
+> `private_websocket_reachable=False`,
+> `account_endpoint_reachable=False`,
+> `order_endpoint_reachable=False`,
+> `position_endpoint_reachable=False`,
+> `leverage_endpoint_reachable=False`,
+> `margin_endpoint_reachable=False`,
+> `real_exchange_order_path=False`, `real_capital=False`,
+> `telegram_outbound_enabled=False`,
+> `telegram_live_command_authority=False`,
+> `ai_trade_authority=False`, `trade_authority=False`,
+> `auto_tuning_allowed=False`, **`phase_12_forbidden=True`**.
+> The Risk Engine remains the single trade-decision gate.
+>
+> What this PR does **NOT** do, and CANNOT do, regardless
+> of any caller's wishes:
+>
+>   - implement the Blind Walk-forward Runner (PR100's
+>     responsibility),
+>   - implement the Historical Market Store v0 (PR95's
+>     responsibility),
+>   - implement the ReplayFeedProvider (PR96's
+>     responsibility),
+>   - implement the MockExchange + Pessimistic Fill Model
+>     (PR97's responsibility),
+>   - implement the Simulated Capital Flow + Trade Ledger
+>     (PR98's responsibility),
+>   - implement the Telegram Sandbox Outbox (PR99's
+>     responsibility),
+>   - read real market network,
+>   - place an order,
+>   - call DeepSeek / LLM / any network transport,
+>   - send Telegram outbound,
+>   - touch the Binance private API,
+>   - emit any direction / order / sizing / risk /
+>     execution field,
+>   - emit any runtime-tuning patch,
+>   - authorise live trading,
+>   - authorise auto-tuning,
+>   - authorise Phase 12.
+>
+> Successful PR94 only authorises the next allowed
+> paper-only step (**PR95 — Historical Market Store v0**).
+> It does **NOT** authorise PR96 / PR97 / PR98 / PR99 /
+> PR100, does **NOT** authorise the *Blind Walk-forward
+> Runner*, does **NOT** authorise live trading, does
+> **NOT** authorise auto-tuning, does **NOT** authorise the
+> DeepSeek hot path, does **NOT** authorise Telegram live
+> outbound, does **NOT** authorise opening Phase 12.
+> **Phase 12 remains FORBIDDEN.**
+>
+> Files shipped: ``app/sim/__init__.py``,
+> ``app/sim/simulation_clock.py``,
+> ``app/sim/time_wall_guard.py``,
+> ``tests/unit/test_simulation_clock_time_wall_guard.py``
+> (27 PASSING tests covering all 21 brief-mandated
+> scenarios plus 6 defensive extras: closed-taxonomy
+> interval parsing, naive-datetime rejection, record-time
+> invariants, closed-enum reason / severity, brief-mandated
+> forbidden-field name set, no-trade-verb public surface
+> assertion),
+> ``docs/PHASE_11C_1D_D_A_SIMULATION_CLOCK_TIME_WALL_GUARD.md``
+> (the design / acceptance brief),
+> ``docs/PROJECT_STATUS.md`` (this file — current-phase
+> entry prepended; prior 11C.1D-D entry preserved as
+> historical context below),
+> ``docs/PHASE_GATE.md`` (PR94 added to *Open / Reserved
+> phases*; only PR95 unlocked; Phase 12 row unchanged),
+> ``docs/CHANGELOG.md`` (this PR's entry).
+>
+> *Prior status (kept for history; superseded by the entry
+> above):*
+>
 > **Phase 11C.1D-D — Strict Blind Walk-forward Sim-Live
 > Constitution (*Strict Forward-only Historical Sim-Live Blind
 > Walk-forward Design Baseline / 盲测设计宪法 / 严格前向 Sim-Live
