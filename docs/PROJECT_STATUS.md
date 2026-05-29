@@ -7,6 +7,147 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-G — Blind Walk-forward Runner v0
+> (*Strict blind walk-forward orchestrator / 严格前向 Sim-Live
+> blind walk-forward runner v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no network, no real Telegram
+> outbound, no real Telegram bot token, no production / live
+> Telegram channel, no Telegram command authority, no real data
+> fetch, no real exchange API, no signed endpoint, no private
+> websocket, no API key, no API secret, no real account, no
+> automatic parameter optimisation, no AI hot path inside the
+> trade-decision chain, and no authority over the Risk Engine,
+> the Execution FSM, or the Capital Flow Engine.
+
+PR100 ships the **seventh** anti-future-lookahead infrastructure
+block of the strict blind walk-forward stack defined by Phase
+11C.1D-D (PR93). It strings PR94..PR99 substrate into the first
+version of the strict forward-only historical sim-live blind
+runner:
+
+  - `BlindWalkForwardWindow` — frozen description of one strict
+    blind walk-forward window (`train_start` / `train_end` /
+    `blind_start` / `blind_end` / `score_time` /
+    `reference_window` / `window_id`).
+  - `BlindRunManifest` — frozen manifest (`run_id`,
+    `code_commit`, `config_hash`, `rule_hash`,
+    `feature_schema_hash`, `data_manifest_hash`,
+    `universe_manifest_hash`, `simulation_clock_start /_end`,
+    `base_clock_step`, `allowed_timeframes`, `fee_model_hash`,
+    `slippage_model_hash`, `latency_model_hash`,
+    `outage_model_hash`, `fill_model_hash`, `ai_enabled_state`,
+    `telegram_sandbox_state`, `intrabar_ambiguity_policy`)
+    pinning every input artefact via deterministic
+    `sha256:<hex>` hashes, with hard-pinned safety markers
+    (`phase_12_forbidden=True`, `live_trading=False`,
+    `exchange_live_orders=False`,
+    `binance_private_api_enabled=False`,
+    `auto_tuning_inside_blind_window=False`,
+    `auto_tuning_allowed=False`, `trade_authority=False`,
+    `ai_trade_authority=False`, `sandbox_only=True`,
+    `simulated_only=True`, `no_live_order=True`,
+    `telegram_outbound_enabled=False`,
+    `telegram_live_command_authority=False`,
+    `telegram_production_channel_enabled=False`,
+    `real_capital=False`, `real_exchange_order_path=False`).
+  - `BlindRunStatus` — closed taxonomy
+    (`INSUFFICIENT_EVIDENCE`, `EVIDENCE_GENERATED`,
+    `INVALIDATED_LOOKAHEAD_OR_DRIFT`,
+    `FAILED_SAFETY_BOUNDARY`, `PARTIAL_EVIDENCE`).
+  - `BlindRunInvalidationReason` — closed taxonomy mirroring PR100
+    brief §9 (`FUTURE_RECORD_ACCESS`, `CONFIG_DRIFT`,
+    `RULE_HASH_DRIFT`, `FEATURE_SCHEMA_DRIFT`,
+    `DATA_MANIFEST_DRIFT_DURING_BLIND_WINDOW`,
+    `UNIVERSE_MANIFEST_DRIFT_DURING_BLIND_WINDOW`,
+    `TAIL_LABEL_LEAKAGE`,
+    `POST_DISCOVERY_OUTCOME_LEAKAGE`,
+    `REPLAY_REFLECTION_LEAKAGE`,
+    `AI_OUTPUT_USED_AS_TRUTH_OR_LABEL`,
+    `MANUAL_SAMPLE_DELETION`, `VALIDATION_TEST_TUNING`,
+    `MISSING_FAILURE_LEDGER`, `UNLOGGED_RUNTIME_OVERRIDE`).
+  - `BlindRunScore` + `score_blind_run` — pure / deterministic /
+    post-window scoring helper.
+  - `BlindWalkForwardRunnerConfig` — frozen runner configuration
+    with hard-pinned `ai_blind_window_enabled=False`,
+    `auto_tuning_inside_blind_window=False`,
+    `phase_12_forbidden=True`, `strict_time_wall=True`,
+    `strict_closed_candle_visibility=True`,
+    `strict_feature_asof=True`.
+  - `MultiTimeframeAsOfGuard` — closed-candle / available-at gate
+    enforcing the v0 `1m` base step and the
+    `("1m", "5m", "15m", "1h", "4h", "1d")` allowed timeframes.
+  - `AsOfFeatureCache` — feature cache keyed by `as_of_time`
+    that NEVER discloses a future feature.
+  - `BlindWalkForwardRunner` — the orchestrator itself
+    (`prepare_manifest` / `freeze_artifacts` / `run_blind_window`
+    / `step_once` / `score_after_window_close` /
+    `generate_failure_ledger` / `generate_discovery_quality_ledger`
+    / `generate_outputs` / `run`, plus
+    `assert_blind_window_ai_evidence_bundle` and
+    `build_post_window_ai_summary`).
+
+PR100 NEVER opens a network socket, NEVER calls Telegram / Binance
+private API / DeepSeek / any LLM, NEVER places a real order,
+NEVER reads a real account / position / leverage / margin
+endpoint, NEVER patches runtime config, NEVER mutates
+`app/risk/`, `app/execution/`, `app/exchanges/`, `app/telegram/`,
+or `app/config/`, NEVER lets AI output enter the trade-decision
+chain, and NEVER auto-tunes inside the blind window. The runner
+writes only deterministic local artefacts under
+`data/reports/blind_walk_forward/<run_id>/`.
+
+Three new modules
+(`app/sim/blind_walk_forward_manifest.py`,
+`app/sim/blind_walk_forward_scoring.py`,
+`app/sim/blind_walk_forward_runner.py`), one extended
+`app/sim/__init__.py` re-exporting the new public surface
+alongside the PR94..PR99 substrate, one new operator entry point
+`scripts/run_blind_walk_forward.py`, one new unit-test module
+`tests/unit/test_blind_walk_forward_runner.py` (31 PASSING tests
+covering all 30 brief-mandated scenarios plus one bonus
+`INSUFFICIENT_EVIDENCE`-on-empty-run check), and one new phase
+doc `docs/PHASE_11C_1D_D_G_BLIND_WALK_FORWARD_RUNNER.md`. No file
+under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, `app/safety/`, `app/ai/`,
+`app/replay/`, `app/reflection/`, `app/paper_shadow/`,
+`app/sandbox/`, `app/state_machine/`, `app/scanner/`,
+`app/regime/`, `app/market_data/`, `app/market_data_public/`,
+`app/universe/`, `app/liquidity/`, `app/manipulation/`,
+`app/monitoring/`, `app/database/`, `app/exports/`,
+`app/incidents/`, `app/learning/`, `app/llm/`, `app/paper_run/`,
+`app/reconciliation/`, `app/confirmation/`, `app/capital/`,
+`app/core/`, `app/main.py` is touched. The existing PR94..PR99
+sources (`app/sim/simulation_clock.py`, `app/sim/time_wall_guard.py`,
+`app/sim/historical_market_store.py`,
+`app/sim/replay_feed_provider.py`, `app/sim/mock_exchange.py`,
+`app/sim/pessimistic_fill_model.py`,
+`app/sim/simulated_capital_flow.py`, `app/sim/trade_ledger.py`,
+`app/sim/telegram_sandbox_outbox.py`) are reused **verbatim** and
+are NOT modified by this PR.
+
+Hard safety boundary held: `mode=historical_blind_sim_live`,
+`sandbox_only=True`, `simulated_only=True`, `no_live_order=True`,
+`live_trading=False`, `live_capital_enabled=False`,
+`exchange_live_orders=False`, `binance_private_api_enabled=False`,
+no signed endpoint, no private websocket, no account / order /
+position / leverage / margin endpoint, no real exchange order,
+no real capital, no real account id, no real Telegram outbound,
+no Telegram production / live channel, no Telegram command
+authority, AI trade authority `False`, trade authority `False`,
+auto-tuning inside the blind window `False`, auto-tuning allowed
+`False`, `phase_12_forbidden=True`. **Phase 12 remains
+FORBIDDEN.**
+
+A successful PR100 only authorises a paper-only **blind-run
+checkpoint / operator evidence run**. It does NOT authorise live
+trading, auto-tuning, real Telegram outbound, real production /
+live Telegram channel, Telegram command authority, the Binance
+private API, small-cap live trading, or Phase 12.
+
 > **Phase 11C.1D-D-F — Telegram Sandbox Outbox v0
 > (*Strict blind walk-forward simulated Telegram outbox / 严格
 > 前向 Sim-Live Telegram 沙盒 outbox v0*).**

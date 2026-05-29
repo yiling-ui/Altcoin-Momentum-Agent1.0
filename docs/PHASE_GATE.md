@@ -8663,3 +8663,155 @@ Guard*, Phase 11C.1D-D-B *Historical Market Store v0*, Phase
 
 The Risk Engine remains the single trade-decision gate.
 Phase 12 remains **FORBIDDEN**.
+
+
+
+## Open phase: Phase 11C.1D-D-G / Blind Walk-forward Runner v0 (PR100, IN_REVIEW)
+
+> **Title:** Blind Walk-forward Runner v0
+> **Status:** IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).
+> **Type:** implementation PR (paper / report / evidence-only
+> infrastructure).
+> **Phase 12:** **FORBIDDEN** (no change).
+
+PR100 ships the **seventh** anti-future-lookahead infrastructure
+block of the strict blind walk-forward stack defined by Phase
+11C.1D-D (PR93). It strings PR94..PR99 substrate (the
+SimulationClock + Time-Wall Guard, the Historical Market Store,
+the ReplayFeedProvider, the MockExchange + Pessimistic Fill
+Model, the Simulated Capital Flow + Trade Ledger, the Telegram
+Sandbox Outbox) into the first version of the strict
+forward-only historical sim-live blind runner.
+
+The runner implements the `train` / `freeze` / `blind` /
+`score` / `experience-update` loop the Constitution requires,
+drives a `SimulationClock` from `window.blind_start` to
+`window.blind_end`, pulls one batch per step from the
+`ReplayFeedProvider`, marks the `SimulatedCapitalFlowEngine`
+against the closed 1m candles in each batch, forwards orders
+returned by an optional decision callback to the
+`MockExchange`, forwards every fill back into the
+`SimulatedCapitalFlowEngine` so the trade ledger and equity
+time-series stay consistent, writes a paper-only Telegram
+sandbox transcript via the `TelegramSandboxOutbox`, records
+every `NoLookaheadViolation` and every
+`BlindRunInvalidationReason`, and scores **only** after
+`window.blind_end` (never inside the blind window).
+
+PR100 outputs every required artefact under
+`data/reports/blind_walk_forward/<run_id>/`:
+`blind_run_manifest.json`, `trade_ledger.json`,
+`equity_timeseries.json`, `discovery_quality_ledger.json`,
+`failure_ledger.json`, `telegram_sandbox_transcript.md`,
+`blind_walk_forward_report.json`,
+`blind_walk_forward_report.md`, `no_lookahead_violations.json`.
+Every payload is checked against the project-wide
+`FORBIDDEN_OUTPUT_FIELDS` guard. Every payload re-pins the
+safety boundary.
+
+### Gate flags (Phase 11C.1D-D-G / PR100)
+
+  - mode = `historical_blind_sim_live`
+  - sandbox_only = `True`
+  - simulated_only = `True`
+  - no_live_order = `True`
+  - live_trading = `False`
+  - exchange_live_orders = `False`
+  - binance_private_api_enabled = `False`
+  - signed_endpoint_reachable = `False`
+  - private_websocket_reachable = `False`
+  - account_endpoint_reachable = `False`
+  - order_endpoint_reachable = `False`
+  - position_endpoint_reachable = `False`
+  - leverage_endpoint_reachable = `False`
+  - margin_endpoint_reachable = `False`
+  - real_exchange_order_path = `False`
+  - real_capital = `False`
+  - telegram_outbound_enabled = `False`
+  - telegram_live_command_authority = `False`
+  - telegram_production_channel_enabled = `False`
+  - ai_trade_authority = `False`
+  - trade_authority = `False`
+  - auto_tuning_inside_blind_window = `False`
+  - auto_tuning_allowed = `False`
+  - phase_12_forbidden = `True`
+
+### What this PR does NOT authorise
+
+  - Do NOT authorise live trading.
+  - Do NOT authorise auto-tuning (no runtime config patch, no
+    threshold patch, no symbol limit patch, no candidate pool
+    patch, no regime weight patch, no strategy parameter patch).
+  - Do NOT authorise real Telegram outbound.
+  - Do NOT authorise Telegram production / live channel.
+  - Do NOT authorise Telegram command authority.
+  - Do NOT authorise the Binance private API.
+  - Do NOT authorise small-cap live trading.
+  - Do NOT authorise AI / DeepSeek output to enter the trade
+    decision chain.
+  - Do NOT authorise AI / DeepSeek output to become Truth Layer
+    fact, training label, tail label, or strategy validation
+    sample.
+  - Do NOT authorise Phase 12.
+
+### Allowed transitions
+
+| From                           | To                                                  | Notes                                                                                                  |
+| ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Phase 11C.1D-D-G IN_REVIEW     | Phase 11C.1D-D-G ACCEPTED                           | Only via a separate docs-closeout PR after maintainer review. Acceptance authorises ONLY the next item. |
+| Phase 11C.1D-D-G ACCEPTED      | Blind Walk-forward operator evidence run / checkpoint | Paper-only, sandbox-only. NEVER authorises live trading, auto-tuning, real Telegram outbound, real exchange orders, the Binance private API, or Phase 12. |
+| any                            | Phase 12                                            | **FORBIDDEN.**                                                                                          |
+
+### Tests
+
+`tests/unit/test_blind_walk_forward_runner.py` ships **31
+PASSING tests** covering all 30 brief-mandated scenarios plus
+one bonus `INSUFFICIENT_EVIDENCE`-on-empty-run check on the
+pure scoring helper. The full unit suite remains green
+(`python -m pytest tests/unit -q` — 3584 PASSING).
+
+### Files shipped
+
+  - `app/sim/blind_walk_forward_manifest.py` (NEW)
+  - `app/sim/blind_walk_forward_scoring.py` (NEW)
+  - `app/sim/blind_walk_forward_runner.py` (NEW)
+  - `app/sim/__init__.py` (EXTENDED — re-exports)
+  - `scripts/run_blind_walk_forward.py` (NEW)
+  - `tests/unit/test_blind_walk_forward_runner.py` (NEW)
+  - `docs/PHASE_11C_1D_D_G_BLIND_WALK_FORWARD_RUNNER.md` (NEW)
+  - `docs/PROJECT_STATUS.md` (UPDATED)
+  - `docs/PHASE_GATE.md` (this section appended)
+  - `docs/CHANGELOG.md` (UPDATED)
+
+No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, `app/safety/`, `app/ai/`,
+`app/replay/`, `app/reflection/`, `app/paper_shadow/`,
+`app/sandbox/`, `app/state_machine/`, `app/scanner/`,
+`app/regime/`, `app/market_data/`, `app/market_data_public/`,
+`app/universe/`, `app/liquidity/`, `app/manipulation/`,
+`app/monitoring/`, `app/database/`, `app/exports/`,
+`app/incidents/`, `app/learning/`, `app/llm/`,
+`app/paper_run/`, `app/reconciliation/`, `app/confirmation/`,
+`app/capital/`, `app/core/`, `app/main.py` is touched. The
+existing PR94..PR99 sources are reused **verbatim** and are
+NOT modified by this PR.
+
+### Inheritance
+
+Phase 11C.1D-D-G inherits, verbatim, every Phase 1, Phase
+11C, Phase 11C.1A, Phase 11C.1B, Phase 11C.1C-A through
+Phase 11C.1C-C-B-B-B-E-D, Phase AI-1 through Phase
+AI-CHECKPOINT, Phase 11C / Offline Rule Sandbox Replay,
+Phase 11C.1D-B *Paper Shadow Strategy Validation*, Phase
+11C.1D-C *Risk / Execution / Capital Safety Matrix*, Phase
+11C.1D-D *Strict Blind Walk-forward Sim-Live Constitution*,
+Phase 11C.1D-D-A *SimulationClock + Time-Wall Guard*, Phase
+11C.1D-D-B *Historical Market Store v0*, Phase 11C.1D-D-C
+*ReplayFeedProvider v0*, Phase 11C.1D-D-D *MockExchange +
+Pessimistic Fill Model v0*, Phase 11C.1D-D-E *Simulated
+Capital Flow + Trade Ledger v0*, and Phase 11C.1D-D-F
+*Telegram Sandbox Outbox v0* forbidden item.
+
+The Risk Engine remains the single trade-decision gate.
+Phase 12 remains **FORBIDDEN**.
