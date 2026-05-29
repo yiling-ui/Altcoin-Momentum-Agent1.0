@@ -297,6 +297,39 @@ from app.sim.time_wall_guard import (
     TimeWallGuard,
     assert_no_forbidden_fields,
 )
+from app.sim.blind_walk_forward_manifest import (
+    PHASE_NAME as BLIND_WALK_FORWARD_RUNNER_PHASE_NAME,
+)
+from app.sim.blind_walk_forward_manifest import (
+    ALLOWED_TIMEFRAMES as BLIND_WALK_FORWARD_ALLOWED_TIMEFRAMES,
+)
+from app.sim.blind_walk_forward_manifest import (
+    DEFAULT_BASE_CLOCK_STEP as BLIND_WALK_FORWARD_DEFAULT_BASE_CLOCK_STEP,
+)
+from app.sim.blind_walk_forward_manifest import (
+    BlindRunManifest,
+    BlindWalkForwardWindow,
+    compute_artefact_hash,
+)
+from app.sim.blind_walk_forward_manifest import (
+    safety_payload as blind_walk_forward_safety_payload,
+)
+from app.sim.blind_walk_forward_scoring import (
+    BlindRunInvalidationReason,
+    BlindRunScore,
+    BlindRunStatus,
+    score_blind_run,
+)
+from app.sim.blind_walk_forward_runner import (
+    DEFAULT_REPORT_ROOT as BLIND_WALK_FORWARD_DEFAULT_REPORT_ROOT,
+)
+from app.sim.blind_walk_forward_runner import (
+    AsOfFeatureCache,
+    BlindWalkForwardRunner,
+    BlindWalkForwardRunnerConfig,
+    DecisionCallback,
+    MultiTimeframeAsOfGuard,
+)
 
 __all__ = [
     "PHASE_NAME",
@@ -310,6 +343,23 @@ __all__ = [
     "TELEGRAM_SANDBOX_DEFAULT_OUTPUT_JSONL_PATH",
     "TELEGRAM_SANDBOX_DEFAULT_OUTPUT_MARKDOWN_PATH",
     "TELEGRAM_SANDBOX_MANDATORY_LABELS",
+    "BLIND_WALK_FORWARD_RUNNER_PHASE_NAME",
+    "BLIND_WALK_FORWARD_ALLOWED_TIMEFRAMES",
+    "BLIND_WALK_FORWARD_DEFAULT_BASE_CLOCK_STEP",
+    "BLIND_WALK_FORWARD_DEFAULT_REPORT_ROOT",
+    "AsOfFeatureCache",
+    "BlindRunInvalidationReason",
+    "BlindRunManifest",
+    "BlindRunScore",
+    "BlindRunStatus",
+    "BlindWalkForwardRunner",
+    "BlindWalkForwardRunnerConfig",
+    "BlindWalkForwardWindow",
+    "DecisionCallback",
+    "MultiTimeframeAsOfGuard",
+    "blind_walk_forward_safety_payload",
+    "compute_artefact_hash",
+    "score_blind_run",
     "NO_LIVE_ORDER_LABEL",
     "NO_REAL_CAPITAL_LABEL",
     "NO_TELEGRAM_COMMAND_AUTHORITY_LABEL",
