@@ -7,6 +7,135 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-C — Risk / Execution / Capital Safety Matrix v0
+> (*风险 / 执行 / 资金 / 数据降级 / AI 降级 安全矩阵 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+>
+> Block A is complete. Block B is complete and integrated.
+> Block C is complete and integrated. AI-1 → AI-6 are
+> complete and the AI Integrated Checkpoint is merged. PR
+> #89 (Phase 11C / Offline Rule Sandbox Replay v0) is
+> merged. The Paper Shadow Strategy Validation v0 (Phase
+> 11C.1D-B) is merged. The project is therefore allowed to
+> ship the **Risk / Execution / Capital Safety Matrix v0**
+> — a strictly paper / report / evidence-only safety
+> verification engine that takes a closed taxonomy of
+> adverse-condition scenarios (stop failures, ghost /
+> orphan / missing-remote positions, reconciliation
+> mismatches, data degradations, WebSocket staleness,
+> REST 429 / 418 throttling, Telegram export failures,
+> capital rebase / external deposit / profit withdrawal,
+> AI degradation / DeepSeek timeout / Reality-Check
+> failure / forbidden-field stripped, kill-all audit-only,
+> pause-resume required) and verifies that every
+> scenario, when evaluated, produces the *minimum
+> required defensive safety actions*: pauses new opens
+> when required, rejects unsafe actions, requires
+> operator review or operator resume when required,
+> degrades to report-only when telemetry is degraded,
+> blocks Telegram outbound, AI trade authority, runtime
+> config changes, and live orders unconditionally, keeps
+> the paper ledger when the live path is unsafe, and
+> records audit events for every adverse scenario. The
+> output is one descriptive
+> ``risk_execution_capital_safety_matrix_report.json``
+> (plus its Markdown twin) that an auditor can review.
+> The project is still **paper only** and Phase 12
+> remains **FORBIDDEN**.
+>
+> The runner reads no external evidence reports; it
+> generates a deterministic ``default`` scenario set in
+> code and writes only files under ``--output-dir``. The
+> engine and runner do **NOT** import ``app.risk``,
+> ``app.execution``, ``app.exchanges``, ``app.telegram``,
+> or ``app.config``. The engine and runner do **NOT**
+> import any HTTP / network library (``deepseek``,
+> ``openai``, ``anthropic``, ``telegram``, ``binance``,
+> ``ccxt``, ``websocket``, ``websockets``, ``httpx``,
+> ``aiohttp``, ``requests``, ``urllib.request``,
+> ``http.client``, ``grpc``, ``boto3``). The output JSON
+> re-pins the project-wide invariants at the
+> serialisation boundary (``mode=paper``,
+> ``live_trading=False``, ``exchange_live_orders=False``,
+> ``right_tail=False``, ``llm=False``,
+> ``llm_outbound_enabled=False``, ``sandbox_only=True``,
+> ``telegram_outbound_enabled=False``,
+> ``binance_private_api_enabled=False``,
+> ``trade_authority=False``, ``auto_tuning_allowed=False``,
+> ``writes_runtime_config=False``,
+> ``allow_trade_decision=False``,
+> ``allow_runtime_config_change=False``,
+> ``phase_12_forbidden=True``); every scenario result
+> additionally re-pins ``live_order_blocked=True``,
+> ``runtime_config_unchanged=True``,
+> ``ai_trade_authority_blocked=True``,
+> ``telegram_outbound_blocked=True``; the recursive
+> ``assert_no_forbidden_fields`` guard refuses to emit
+> any payload that carries a trade-action /
+> runtime-config-patch / "live ready" / "trading
+> approved" / "phase_12_allowed" key at any nesting
+> depth.
+>
+> Status taxonomy (intentionally **not** ``ACCEPTED`` /
+> ``APPLY`` / ``DEPLOY`` / ``ENABLE_LIVE`` / ``GO_LIVE``):
+>
+>   - ``PASS`` — every expected action is observed; the
+>     scenario passes.
+>   - ``WARN`` — at least one expected action is missing
+>     AND the scenario severity is P2 / P3.
+>   - ``FAIL`` — at least one expected action is missing
+>     AND the scenario severity is P0 / P1.
+>   - ``INSUFFICIENT_EVIDENCE`` — the report's overall
+>     status when zero scenarios were evaluated.
+>
+> Next-allowed-phase decision rule:
+>
+>   - If ``failed_count == 0`` AND ``len(p0_failures) ==
+>     0`` AND ``len(p1_failures) == 0`` AND
+>     ``total_scenarios > 0``:
+>     ``next_allowed_phase = Strict Blind Walk-forward
+>     design checkpoint (paper / read-only; requires
+>     human-owner-supplied strict forward-only
+>     anti-lookahead blind-test design)``.
+>   - Otherwise:
+>     ``next_allowed_phase = Safety Matrix remediation
+>     required (paper / read-only; remediate P0 / P1
+>     blockers and re-run)``.
+>
+> A successful Safety Matrix run only authorises the next
+> allowed paper-only step (the *Strict Blind Walk-forward
+> design checkpoint*). It does **NOT** authorise *Blind
+> Walk-forward implementation*. It does **NOT** authorise
+> live trading. It does **NOT** authorise auto-tuning. It
+> does **NOT** authorise the DeepSeek hot path. It does
+> **NOT** authorise Telegram live outbound. It does
+> **NOT** open Phase 12. **Phase 12 remains FORBIDDEN.**
+>
+> Before Blind Walk-forward implementation can begin, the
+> human owner MUST provide a finalized strict
+> forward-only anti-lookahead blind-test design. This
+> phase does not, and cannot, generate that design.
+>
+> Files shipped: ``app/safety/__init__.py``,
+> ``app/safety/risk_execution_capital_matrix.py``,
+> ``scripts/run_risk_execution_capital_safety_matrix.py``,
+> ``tests/unit/test_risk_execution_capital_safety_matrix.py``
+> (32 PASSING tests covering all 20 brief-mandated
+> scenarios plus extras: scenario taxonomy coverage,
+> SAFETY_CONTRACT shape, scenario / result input
+> validation, empty-scenarios INSUFFICIENT_EVIDENCE
+> status, P0 failure flips overall status and
+> next_allowed_phase, runner file output, byte-identical
+> re-run with a fixed clock, runner rejects unsupported
+> scenario_set values, result status closed-enum sweep,
+> expected-action vocabulary excludes trade verbs),
+> ``docs/PHASE_11C_1D_C_RISK_EXECUTION_CAPITAL_SAFETY_MATRIX.md``
+> (the design / acceptance brief).
+>
+> *Prior status (kept for history; superseded by the
+> entry above):*
+>
 > **Phase 11C.1D-B — Paper Shadow Strategy Validation v0
 > (*纸面影子策略验证 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not

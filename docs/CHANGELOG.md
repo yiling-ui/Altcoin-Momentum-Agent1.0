@@ -7,6 +7,98 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-C — Risk / Execution / Capital Safety Matrix v0 implementation: IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence-only).
+**Runtime effect:** **none on real trading.** One new package
+`app/safety/` (an `__init__.py` and
+`risk_execution_capital_matrix.py`), one new runner
+`scripts/run_risk_execution_capital_safety_matrix.py`, one new
+unit-test module
+`tests/unit/test_risk_execution_capital_safety_matrix.py` (32
+PASSING tests covering all 20 brief-mandated scenarios plus
+extras: full scenario taxonomy coverage, SAFETY_CONTRACT shape,
+scenario / result input validation, empty-scenarios
+INSUFFICIENT_EVIDENCE status, P0 failure flips overall status
+and `next_allowed_phase`, runner file output, byte-identical
+re-run with a fixed clock, runner rejects unsupported
+`scenario_set` values, result-status closed-enum sweep,
+expected-action vocabulary excludes trade verbs), and one new
+phase doc
+`docs/PHASE_11C_1D_C_RISK_EXECUTION_CAPITAL_SAFETY_MATRIX.md`.
+No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, or `app/config/`, no event type wired into the
+runtime hot path, and no database schema / migration is touched.
+The runner reads no external evidence reports; it generates a
+deterministic ``default`` scenario set in code and writes only
+files under `--output-dir`. The runner imports only
+`app.safety.risk_execution_capital_matrix`. It does **NOT**
+import `app.risk`, `app.execution`, `app.exchanges`,
+`app.telegram`, or `app.config`. It does **NOT** import any HTTP
+/ network library (`deepseek`, `openai`, `anthropic`,
+`telegram`, `binance`, `ccxt`, `websocket`, `websockets`,
+`httpx`, `aiohttp`, `requests`, `urllib.request`, `http.client`,
+`grpc`, `boto3`). The output JSON re-pins the project-wide
+invariants at the serialisation boundary (`mode=paper`,
+`live_trading=False`, `exchange_live_orders=False`,
+`right_tail=False`, `llm=False`, `llm_outbound_enabled=False`,
+`sandbox_only=True`, `telegram_outbound_enabled=False`,
+`binance_private_api_enabled=False`, `trade_authority=False`,
+`auto_tuning_allowed=False`, `writes_runtime_config=False`,
+`allow_trade_decision=False`,
+`allow_runtime_config_change=False`,
+`phase_12_forbidden=True`); every scenario result additionally
+re-pins `live_order_blocked=True`,
+`runtime_config_unchanged=True`,
+`ai_trade_authority_blocked=True`,
+`telegram_outbound_blocked=True`; the recursive
+`assert_no_forbidden_fields` guard refuses to emit any payload
+that carries a trade-action / runtime-config-patch / "live
+ready" / "trading approved" / "phase_12_allowed" key at any
+nesting depth.
+
+The result-status taxonomy is intentionally *not* `ACCEPTED` /
+`APPLY` / `DEPLOY` / `ENABLE_LIVE` / `GO_LIVE`:
+
+  - `PASS` — every expected action is observed; the scenario
+    passes.
+  - `WARN` — at least one expected action is missing AND the
+    scenario severity is P2 / P3.
+  - `FAIL` — at least one expected action is missing AND the
+    scenario severity is P0 / P1.
+  - `INSUFFICIENT_EVIDENCE` — the report's overall status when
+    zero scenarios were evaluated.
+
+Next-allowed-phase decision rule (brief-mandated):
+
+  - If `failed_count == 0` AND `len(p0_failures) == 0` AND
+    `len(p1_failures) == 0` AND `total_scenarios > 0`:
+    `next_allowed_phase = Strict Blind Walk-forward design
+    checkpoint (paper / read-only; requires human-owner-supplied
+    strict forward-only anti-lookahead blind-test design)`.
+  - Otherwise: `next_allowed_phase = Safety Matrix remediation
+    required (paper / read-only; remediate P0 / P1 blockers and
+    re-run)`.
+
+A successful Safety Matrix run with zero P0 / P1 failures only
+authorises the next allowed paper-only step (the *Strict Blind
+Walk-forward design checkpoint*). It does **NOT** authorise
+*Blind Walk-forward implementation*. It does **NOT** authorise
+live trading. It does **NOT** authorise auto-tuning. It does
+**NOT** authorise the DeepSeek hot path. It does **NOT**
+authorise Telegram live outbound. It does **NOT** open Phase 12.
+**Phase 12 remains FORBIDDEN.** Before Blind Walk-forward
+implementation can begin, the human owner MUST provide a
+finalized strict forward-only anti-lookahead blind-test design.
+This phase does not, and cannot, generate that design.
+
+`python -m pytest tests/unit/test_risk_execution_capital_safety_matrix.py -q`
+ships **32 PASSING** tests; `python -m pytest tests/unit -q`
+reports **3400 PASSING** tests, 0 failures (was 3368 before this
+phase; +32 from this phase). The phase is marked **IN_REVIEW**.
+Maintainer-led review of the implementation PR is the only path
+to **ACCEPTED**.
+
 ### Phase 11C.1D-B — Paper Shadow Strategy Validation v0 implementation: IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only).
