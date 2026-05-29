@@ -7,6 +7,113 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D-J — PR104 — Blind Runner Store Query Performance Fix: IN_REVIEW
+
+**Type:** Performance bugfix (paper / report / evidence-only
+infrastructure).
+**Runtime effect:** **none on real trading; no network; no Binance
+private API; no signed endpoint; no private websocket; no listenKey;
+no real exchange order; no real Telegram outbound; no DeepSeek / LLM
+call; no auto-tuning; no strategy logic; no decision callback.** PR104
+makes the PR100 Blind Walk-forward Runner consume a real
+`--historical-store-dir` with **bounded memory**. Before this PR a real
+public 7-day BTC/ETH store (24,192 records) replayed over a 1-day blind
+window drove RES to ~15.8 GB / ~96 % memory on an 8 vCPU / 16 GB host
+and produced no output directory for 10+ minutes.
+
+**Root cause.** The PR96 `ReplayFeedProvider` re-scanned the *entire*
+store on **every** 1-minute step (`store.query_records` per record type
+per tick), and each scan recorded one `NoLookaheadViolation` for every
+not-yet-available (future) record it passed. With ~6 of 7 days of
+klines in the future relative to a 1-day window, that is ~O(records ×
+steps) ≈ tens of millions of violation objects accumulated in the store,
+the provider diagnostics, the per-step batch snapshots, **and** the
+runner's violation / failure / invalidation ledgers — the actual memory
+bomb. (The PR103 "valid as-of fixture" passed only because it was hand-
+crafted so that no record is ever in the future at any tick.)
+
+**What changed.**
+
+  - `app/sim/historical_market_store.py` — added two **pure, additive,
+    read-only** accessors used to build a bounded replay index:
+    `iter_candidate_records(record_type, *, symbol=None)` and
+    `iter_symbol_status_records()`. Neither applies the time-wall gate
+    nor records any violation. The gated queries
+    (`query_records` / `query_klines` / `query_asof_universe`) are
+    **unchanged** (existing store tests stay byte-for-byte green).
+
+  - `app/sim/replay_feed_provider.py` — the hot path no longer calls
+    `store.query_*` per step. `_build_batch` now:
+      * builds a bounded **availability-ordered index once**
+        (`_ensure_replay_index`), sorted by `available_at`;
+      * advances a **forward-only cursor** (`bisect` on the
+        availability keys) so each step materialises only the records
+        that became newly visible since the previous tick
+        (`allow_reemit=False`), or the visible prefix when
+        `allow_reemit=True`;
+      * **withholds** future records silently — a not-yet-available
+        record is *not* a no-lookahead violation by itself, so no
+        per-step diagnostics explosion is generated (Constitution §5,
+        clarified);
+      * computes the as-of universe (`_compute_asof_universe`) from the
+        visible prefix of the (tiny) symbol-status set, recording no
+        violations. `TimeWallGuard` and the closed-candle
+        `CandleVisibilityGuard` belt-and-suspenders check **remain in
+        force** — no-lookahead protection is preserved, not bypassed.
+      * `reset()` rewinds the cursor; the index is rebuilt lazily.
+
+  - `scripts/run_blind_walk_forward.py` — **bounded loading**.
+    `load_records_jsonl(... max_available_at, min_available_at)` reads
+    the cheap `available_at` off each decoded JSON line and skips
+    out-of-window records *before* constructing the heavy PR95
+    dataclass. `load_historical_store_dir(...)` forwards the bounds.
+    `main()` bounds the load to `available_at <= --blind-end` by
+    default (records that can never become visible in the blind window
+    are never materialised); the new `--load-full-store` flag opts back
+    into the legacy full-store load. The per-run **output directory is
+    now created at run start**, and the runner emits a **progress
+    heartbeat** every `DEFAULT_HEARTBEAT_EVERY_STEPS` (500) steps via
+    `logging` (never stdout, so the operator JSON summary stays
+    machine-parseable). When a bound filters out every record the
+    result is still `INSUFFICIENT_EVIDENCE` (never fabricated data).
+
+  - `app/sim/blind_walk_forward_runner.py` — creates the output
+    directory at run start (`_resolve_output_dir`), logs a heartbeat
+    every N steps (configurable via `heartbeat_every_steps`), and logs
+    a window-start line. No change to scoring, safety flags, manifest
+    hashes, or no-lookahead handling.
+
+**Manifest hashes preserved.** `data_manifest_hash` (from
+`historical_data_manifest.json`) and `universe_manifest_hash` (from
+`universe_manifest.json`) are pinned exactly as in PR103; bounded
+loading does not touch them.
+
+**Tests.**
+
+  - `tests/unit/test_replay_feed_provider.py` — updated the three tests
+    that asserted the old "future record ⇒ per-step violation" behaviour
+    to the PR104 "withheld, not a violation" semantics; added
+    `test_pr104_provider_does_not_call_store_queries_per_step` (trip-
+    wire: provider must not invoke `store.query_*` while stepping;
+    `total_records_considered` is bounded by in-window records, not
+    records × steps) and
+    `test_pr104_one_day_window_over_seven_day_like_store_is_bounded`
+    (24,192-record store, 1-day 1m window completes with zero
+    violations and bounded work).
+  - `tests/unit/test_blind_walk_forward_runner.py` — added bounded-load
+    tests (`load_records_jsonl` / `load_historical_store_dir` window
+    bounds; all-future ⇒ `INSUFFICIENT_EVIDENCE`), an end-to-end
+    large-store completion test (`steps_run > 0`, `batches_consumed >
+    0`, `violations_count == 0`, `invalidations == []`, safety flags
+    intact, bounded scan), and a `main()` smoke that creates the output
+    directory and completes with zero violations on a big store.
+
+**Safety boundary (unchanged, still LOCKED):** `phase_12_forbidden=true`,
+`live_trading=false`, `exchange_live_orders=false`,
+`binance_private_api_enabled=false`, `telegram_outbound_enabled=false`,
+`auto_tuning_allowed=false`, `trade_authority=false`.
+
+
 ### Phase 11C.1D-D-I — PR103 — Blind Runner Historical Store Input Glue: IN_REVIEW
 
 **Type:** Bugfix / glue PR (paper / report / evidence-only

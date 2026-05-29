@@ -1050,6 +1050,92 @@ class HistoricalMarketStore:
         for r in records:
             self.add_record(r)
 
+    # ----- public API: bounded replay accessors (PR104) -----
+
+    def iter_candidate_records(
+        self,
+        record_type: str,
+        *,
+        symbol: Optional[str] = None,
+    ) -> List[_AnyRecord]:
+        """Return every stored record of ``record_type`` WITHOUT the
+        time-wall / closed-candle gate and WITHOUT recording any
+        :class:`NoLookaheadViolation`.
+
+        This is a **pure, read-only structural accessor** added in
+        Phase 11C.1D-D-J / PR104 (Blind Runner Store Query Performance
+        Fix). The PR96 :class:`ReplayFeedProvider` uses it to build a
+        bounded, availability-ordered replay index **once** at
+        construction time instead of re-scanning the entire store on
+        every 1m clock step (the old O(N x steps) hot path that blew
+        up RES to ~16 GB on a real 7-day BTC/ETH store).
+
+        Hard contract (no-lookahead protection is preserved by the
+        caller, NOT relaxed here):
+
+          * This accessor performs **no** ``available_at <=
+            simulated_time`` check. Visibility gating remains the
+            caller's responsibility and is still enforced at emit time
+            by the provider (it only ever emits records whose
+            ``available_at <= simulated_time``) and by the
+            :class:`CandleVisibilityGuard`.
+          * A not-yet-available (future) record that the provider
+            withholds is **not** a lookahead violation by itself
+            (PR104 clarification of Constitution §5). It only becomes a
+            violation if a consumer actually accesses / emits it; that
+            path is unchanged and still routed through
+            :meth:`query_records` / :meth:`query_klines` /
+            :class:`TimeWallGuard`.
+          * The result is returned in insertion order (unsorted); the
+            caller sorts by ``available_at`` to drive its cursor.
+
+        The companion gated queries (:meth:`query_records`,
+        :meth:`query_klines`, :meth:`query_asof_universe`) are
+        unchanged and continue to record future-record violations for
+        any explicit as-of query.
+        """
+        if record_type not in HistoricalMarketRecordType.ALLOWED:
+            raise ValueError(
+                f"record_type must be one of "
+                f"{sorted(HistoricalMarketRecordType.ALLOWED)}, got "
+                f"{record_type!r}"
+            )
+        out: List[_AnyRecord] = []
+        if record_type in HistoricalMarketRecordType.KLINE_TYPES:
+            interval_for_type = next(
+                k
+                for k, v in _INTERVAL_TO_KLINE_RECORD_TYPE.items()
+                if v == record_type
+            )
+            for k in self._klines:
+                if k.interval != interval_for_type:
+                    continue
+                if symbol is not None and k.symbol != symbol:
+                    continue
+                out.append(k)
+        elif record_type == HistoricalMarketRecordType.SYMBOL_STATUS:
+            for s in self._symbol_status:
+                if symbol is not None and s.symbol != symbol:
+                    continue
+                out.append(s)
+        else:
+            for r in self._records:
+                if r.record_type != record_type:
+                    continue
+                if symbol is not None and r.symbol != symbol:
+                    continue
+                out.append(r)
+        return out
+
+    def iter_symbol_status_records(self) -> Tuple[SymbolStatusRecord, ...]:
+        """Return every stored :class:`SymbolStatusRecord` (read-only).
+
+        Pure structural accessor (PR104). Used by the provider to build
+        the as-of universe incrementally without re-querying the whole
+        store every step. Records no violations and applies no gate.
+        """
+        return tuple(self._symbol_status)
+
     # ----- public API: queries -----
 
     def query_records(

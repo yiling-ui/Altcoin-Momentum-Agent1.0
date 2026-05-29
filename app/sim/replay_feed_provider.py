@@ -88,6 +88,7 @@ Telegram live outbound, or Phase 12. Phase 12 remains FORBIDDEN.
 
 from __future__ import annotations
 
+import bisect
 import copy
 import json
 from dataclasses import dataclass, field
@@ -229,6 +230,24 @@ def _record_sort_key(record: Any) -> Tuple[Any, ...]:
     symbol = getattr(record, "symbol", None) or ""
     record_id = getattr(record, "record_id", None) or ""
     return (event_time, available_at, symbol, record_id)
+
+
+def _availability_sort_key(record: Any) -> Tuple[Any, ...]:
+    """Sort key ordered by ``available_at`` first.
+
+    Used by the PR104 bounded replay index so a forward-only cursor can
+    advance over records strictly in the order they *become visible*.
+    ``available_at`` is mandatory on every PR95 record; the trailing
+    fields make the ordering total and deterministic regardless of
+    store insertion order.
+    """
+    available_at = getattr(record, "available_at", None)
+    event_time = getattr(record, "event_time", None) or getattr(
+        record, "open_time", None
+    )
+    symbol = getattr(record, "symbol", None) or ""
+    record_id = getattr(record, "record_id", None) or ""
+    return (available_at, event_time, symbol, record_id)
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +787,19 @@ class ReplayFeedProvider:
         )
         self._diagnostics: ReplayFeedDiagnostics = ReplayFeedDiagnostics()
         self._batch_counter: int = 0
+        # ----- PR104 bounded replay index (lazy) -----
+        # Built once from the store (NOT re-scanned every step). See
+        # :meth:`_ensure_replay_index`. ``_emit_sorted`` holds every
+        # in-scope record sorted by ``available_at``; ``_emit_idx`` is a
+        # forward-only cursor so each step only materialises the
+        # newly-visible slice ``_emit_sorted[_emit_idx:k]``. This is the
+        # core fix for the O(N x steps) full-scan / future-record
+        # diagnostics explosion (Phase 11C.1D-D-J / PR104).
+        self._index_built: bool = False
+        self._emit_sorted: List[Any] = []
+        self._emit_avail_keys: List[datetime] = []
+        self._emit_idx: int = 0
+        self._status_sorted: List[SymbolStatusRecord] = []
         # Defensive tripwires (mirrors PR94 / PR95 guards).
         self.sandbox_only: bool = True
         self.live_trading: bool = False
@@ -901,11 +933,13 @@ class ReplayFeedProvider:
                 raise ValueError(
                     "simulated_time exceeds config.end_time"
                 )
-        pre = len(self._store.violations)
-        out = tuple(self._store.query_asof_universe(sim))
-        for v in self._store.violations[pre:]:
-            self._diagnostics.record_violation(v)
-        return out
+        # PR104: compute the as-of universe from the bounded index
+        # (built lazily) instead of re-scanning the whole store and
+        # recording a future-record violation for every not-yet-visible
+        # symbol-status row. Survivorship bias remains forbidden; future
+        # rows are simply not yet visible (Constitution §9).
+        self._ensure_replay_index()
+        return tuple(self._compute_asof_universe(sim))
 
     def get_diagnostics(self) -> ReplayFeedDiagnostics:
         """Return a snapshot of the cumulative diagnostics."""
@@ -932,6 +966,9 @@ class ReplayFeedProvider:
         )
         self._diagnostics = ReplayFeedDiagnostics()
         self._batch_counter = 0
+        # PR104: rewind the bounded replay cursor (the index itself is
+        # unchanged because the store is unchanged).
+        self._emit_idx = 0
 
     def safety_payload(self) -> Dict[str, Any]:
         """Return the project-wide safety boundary payload."""
@@ -966,87 +1003,175 @@ class ReplayFeedProvider:
             self._cursor.replay_complete = True
         return self._build_batch(target)
 
-    def _build_batch(self, simulated_time: datetime) -> ReplayFeedBatch:
-        config = self._config
-        store = self._store
-        cursor = self._cursor
-        diagnostics = self._diagnostics
+    def _ensure_replay_index(self) -> None:
+        """Build the bounded availability-ordered replay index once.
 
+        PR104: instead of calling :meth:`HistoricalMarketStore.query_records`
+        for every record type on **every** 1m clock step (an
+        ``O(records x steps)`` full re-scan that materialised - and
+        re-diagnosed as a lookahead violation - every future record on
+        every tick), the provider pulls each in-scope record exactly
+        once via the pure :meth:`HistoricalMarketStore.iter_candidate_records`
+        accessor and sorts it by ``available_at``. A forward-only
+        cursor (:pyattr:`_emit_idx`) then exposes only the slice that
+        becomes newly visible at each step. The index is immutable for
+        the life of the provider (the store is frozen for a run); a
+        test-only :meth:`reset` rewinds the cursor without rebuilding.
+        """
+        if self._index_built:
+            return
+        config = self._config
         syms_filter: Optional[FrozenSet[str]] = (
             frozenset(config.symbols)
             if config.symbols is not None
             else None
         )
-
-        def _symbol_filter(rec: Any) -> bool:
-            if syms_filter is None:
-                return True
-            sym = getattr(rec, "symbol", None)
-            if sym is None:
-                # Records with no symbol scope (e.g., exchange info)
-                # are always included regardless of symbol filter.
-                return True
-            return sym in syms_filter
-
-        def _filter_dedup(recs: List[Any]) -> List[Any]:
-            out: List[Any] = []
-            for r in recs:
-                diagnostics.total_records_considered += 1
-                if not _symbol_filter(r):
-                    continue
-                rid = getattr(r, "record_id", None)
-                if not config.allow_reemit and rid in (
-                    cursor.emitted_record_ids
-                ):
-                    diagnostics.duplicate_record_skipped_count += 1
-                    continue
-                out.append(r)
-            return out
-
-        pre_violation_count = len(store.violations)
-
-        recs_by_type: Dict[str, List[Any]] = {}
+        emit: List[Any] = []
         for rt in config.include_record_types:
-            raw = store.query_records(rt, simulated_time=simulated_time)
-            recs_by_type[rt] = _filter_dedup(list(raw))
+            for rec in self._store.iter_candidate_records(rt):
+                sym = getattr(rec, "symbol", None)
+                # Records with no symbol scope (e.g. exchange info) are
+                # always included regardless of the symbol filter, to
+                # match the legacy _symbol_filter semantics.
+                if (
+                    syms_filter is not None
+                    and sym is not None
+                    and sym not in syms_filter
+                ):
+                    continue
+                emit.append(rec)
+        emit.sort(key=_availability_sort_key)
+        self._emit_sorted = emit
+        self._emit_avail_keys = [r.available_at for r in emit]
+        # The as-of universe (Constitution §9) is independent of
+        # include_record_types / the symbol filter (mirrors
+        # store.query_asof_universe). Build it from ALL symbol-status
+        # rows, sorted by availability so _compute_asof_universe can
+        # stop at the first not-yet-visible row. This set is tiny (one
+        # row per symbol-status change, NOT one per minute), so a
+        # per-step scan of the visible prefix is cheap and was never
+        # the source of the blow-up.
+        self._status_sorted = sorted(
+            self._store.iter_symbol_status_records(),
+            key=_availability_sort_key,
+        )
+        self._index_built = True
 
-        klines_1m = list(
-            recs_by_type.get(HistoricalMarketRecordType.KLINE_1M, [])
+    def _compute_asof_universe(
+        self, simulated_time: datetime
+    ) -> List[SymbolStatusRecord]:
+        """Compute the as-of universe at ``simulated_time``.
+
+        Pure, allocation-light mirror of
+        :meth:`HistoricalMarketStore.query_asof_universe` that
+        (a) only inspects symbol-status rows already visible
+        (``available_at <= simulated_time``) and (b) records **no**
+        :class:`NoLookaheadViolation` for not-yet-visible rows - a
+        withheld future row is not a lookahead violation by itself
+        (PR104). Survivorship bias remains forbidden: a future
+        listing / delisting simply is not yet visible.
+        """
+        per_symbol: Dict[str, SymbolStatusRecord] = {}
+        for s in self._status_sorted:
+            if s.available_at > simulated_time:
+                # _status_sorted is ordered by available_at, so every
+                # remaining row is also in the future.
+                break
+            cur = per_symbol.get(s.symbol)
+            key_new = (s.event_time, s.available_at, s.record_id or "")
+            if cur is None or key_new > (
+                cur.event_time,
+                cur.available_at,
+                cur.record_id or "",
+            ):
+                per_symbol[s.symbol] = s
+        out: List[SymbolStatusRecord] = [
+            s
+            for s in per_symbol.values()
+            if s.is_tradable_or_monitorable_at(simulated_time)
+        ]
+        out.sort(
+            key=lambda r: (r.symbol, r.listed_at, r.record_id or "")
         )
-        klines_5m = list(
-            recs_by_type.get(HistoricalMarketRecordType.KLINE_5M, [])
-        )
-        funding_rates = list(
-            recs_by_type.get(
-                HistoricalMarketRecordType.FUNDING_RATE, []
-            )
-        )
-        open_interest = list(
-            recs_by_type.get(
-                HistoricalMarketRecordType.OPEN_INTEREST, []
-            )
-        )
-        ticker_24h = list(
-            recs_by_type.get(
-                HistoricalMarketRecordType.TICKER_24H, []
-            )
-        )
-        symbol_status_events = list(
-            recs_by_type.get(
-                HistoricalMarketRecordType.SYMBOL_STATUS, []
-            )
-        )
+        return out
+
+    def _build_batch(self, simulated_time: datetime) -> ReplayFeedBatch:
+        config = self._config
+        cursor = self._cursor
+        diagnostics = self._diagnostics
+
+        # Lazily build the bounded availability-ordered index (once).
+        self._ensure_replay_index()
+
+        # ----- bounded, forward-only visible-record selection -----
+        # ``k`` is the number of records whose available_at <=
+        # simulated_time. With allow_reemit=False the cursor only
+        # materialises the records that became newly visible since the
+        # previous step; future records (available_at > simulated_time)
+        # are never touched, so there is no O(N x steps) re-scan and no
+        # per-step future-record diagnostics explosion (PR104).
+        k = bisect.bisect_right(self._emit_avail_keys, simulated_time)
+        if config.allow_reemit:
+            visible_slice = self._emit_sorted[:k]
+        else:
+            visible_slice = self._emit_sorted[self._emit_idx:k]
+            self._emit_idx = k
+
+        selected: List[Any] = []
+        for r in visible_slice:
+            diagnostics.total_records_considered += 1
+            rid = getattr(r, "record_id", None)
+            if (
+                not config.allow_reemit
+                and rid is not None
+                and rid in cursor.emitted_record_ids
+            ):
+                # Genuine duplicate record_id in the store (data
+                # anomaly). The forward cursor already guarantees each
+                # *position* is visited once; this guards against two
+                # records sharing an id.
+                diagnostics.duplicate_record_skipped_count += 1
+                continue
+            selected.append(r)
+
+        # Partition the selected records by record type (mirrors the
+        # legacy per-type batch fields). EXCHANGE_INFO / LISTING_STATUS
+        # / DELISTING_STATUS have no dedicated field and surface only in
+        # the catch-all ``records`` union, exactly as before.
+        klines_1m: List[Any] = []
+        klines_5m: List[Any] = []
+        funding_rates: List[Any] = []
+        open_interest: List[Any] = []
+        ticker_24h: List[Any] = []
+        symbol_status_events: List[Any] = []
+        for r in selected:
+            rt = getattr(r, "record_type", None)
+            if rt == HistoricalMarketRecordType.KLINE_1M:
+                klines_1m.append(r)
+            elif rt == HistoricalMarketRecordType.KLINE_5M:
+                klines_5m.append(r)
+            elif rt == HistoricalMarketRecordType.FUNDING_RATE:
+                funding_rates.append(r)
+            elif rt == HistoricalMarketRecordType.OPEN_INTEREST:
+                open_interest.append(r)
+            elif rt == HistoricalMarketRecordType.TICKER_24H:
+                ticker_24h.append(r)
+            elif rt == HistoricalMarketRecordType.SYMBOL_STATUS:
+                symbol_status_events.append(r)
 
         # Belt-and-suspenders: re-check candle visibility for each
-        # emitted kline. By construction, a HistoricalKlineRecord with
+        # emitted kline. By construction a HistoricalKlineRecord with
         # available_at <= simulated_time has a closed candle (because
-        # available_at >= close_time is enforced at construction). The
-        # explicit check protects against ill-shaped Mapping-style
-        # records that bypassed the dataclass.
+        # available_at >= close_time is enforced at construction), so
+        # this never trips for a well-formed dataclass record. It
+        # protects against ill-shaped Mapping-style records that
+        # bypassed the dataclass. TimeWallGuard / CandleVisibilityGuard
+        # stay fully in force (PR104 does NOT bypass no-lookahead
+        # protection).
         if config.strict_candle_visibility:
-            for k in klines_1m + klines_5m:
-                ot = getattr(k, "open_time", None)
-                interval = getattr(k, "interval", None)
+            for k_rec in klines_1m + klines_5m:
+                ot = getattr(k_rec, "open_time", None)
+                interval = getattr(k_rec, "interval", None)
                 if ot is None or interval is None:
                     continue
                 if not self._cv.is_candle_closed(
@@ -1058,9 +1183,9 @@ class ReplayFeedProvider:
                             field_name="close",
                             candle_open_time=ot,
                             interval=interval,
-                            record_id=getattr(k, "record_id", None),
-                            symbol=getattr(k, "symbol", None),
-                            source=getattr(k, "source", None),
+                            record_id=getattr(k_rec, "record_id", None),
+                            symbol=getattr(k_rec, "symbol", None),
+                            source=getattr(k_rec, "source", None),
                         )
                     )
                     diagnostics.record_violation(v)
@@ -1071,10 +1196,7 @@ class ReplayFeedProvider:
                     )
 
         # Aggregate the catch-all "records" union deterministically.
-        all_records: List[Any] = []
-        for rt in config.include_record_types:
-            all_records.extend(recs_by_type[rt])
-        all_records_sorted = sorted(all_records, key=_record_sort_key)
+        all_records_sorted = sorted(selected, key=_record_sort_key)
 
         # Update emitted_record_ids on ALL emitted records (including
         # re-emitted ones when allow_reemit=True).
@@ -1093,19 +1215,19 @@ class ReplayFeedProvider:
                         diagnostics.data_gap_flags.append(f)
 
         # As-of universe (Constitution §9). Always re-emitted
-        # (descriptive snapshot, not deduped).
+        # (descriptive snapshot, not deduped). Computed without
+        # touching future rows and without recording violations.
         asof: Tuple[SymbolStatusRecord, ...] = ()
         if config.include_asof_universe:
-            asof = tuple(
-                store.query_asof_universe(simulated_time)
-            )
+            asof = tuple(self._compute_asof_universe(simulated_time))
 
-        # Process every NoLookaheadViolation produced by this batch's
-        # store queries. Append to cumulative diagnostics; expose the
-        # batch-local subset on the batch object.
-        new_violations = list(store.violations[pre_violation_count:])
-        for v in new_violations:
-            diagnostics.record_violation(v)
+        # PR104: a normal forward replay that correctly withholds
+        # not-yet-available records produces NO no-lookahead
+        # violations. Any genuine violation (an ill-shaped unclosed
+        # candle) is raised above as a hard error, never silently
+        # folded into a per-step diagnostics list. The batch therefore
+        # carries an empty violation tuple on the happy path.
+        new_violations: List[NoLookaheadViolation] = []
 
         # Sort per-type lists deterministically too.
         klines_1m.sort(key=_record_sort_key)

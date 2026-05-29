@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -114,6 +115,12 @@ PHASE_NAME: str = (
 RECORDS_FILENAME: str = "records.jsonl"
 DATA_MANIFEST_FILENAME: str = "historical_data_manifest.json"
 UNIVERSE_MANIFEST_FILENAME: str = "universe_manifest.json"
+
+
+# PR104: progress logger for the operator entry point. Heartbeats and
+# load progress go through ``logging`` (NOT stdout) so the operator JSON
+# summary printed at the end stays machine-parseable.
+_LOGGER = logging.getLogger("scripts.run_blind_walk_forward")
 
 
 def _parse_iso(value: str) -> datetime:
@@ -248,24 +255,80 @@ def _record_from_dict(d: Mapping[str, Any]):
     )
 
 
-def load_records_jsonl(path: Any) -> List[Any]:
+def load_records_jsonl(
+    path: Any,
+    *,
+    max_available_at: Optional[datetime] = None,
+    min_available_at: Optional[datetime] = None,
+) -> List[Any]:
     """Load PR95 records from a PR101 ``records.jsonl`` dump.
 
     Returns a list of reconstructed record objects in file order.
     Blank lines are skipped. Raises :class:`FileNotFoundError` when the
     file is absent (the caller maps this to ``INSUFFICIENT_EVIDENCE`` -
     we never fabricate records for a missing file).
+
+    PR104 - bounded loading. When ``max_available_at`` /
+    ``min_available_at`` are supplied, a record is only *materialised*
+    (its heavy, fully-validated PR95 dataclass constructed) when its
+    ``available_at`` falls inside ``[min_available_at, max_available_at]``.
+    The cheap ``available_at`` string is read straight off the decoded
+    JSON line first, so records that can never become visible inside the
+    replay window (e.g. ~6 days of a 7-day store when only a 1-day blind
+    window is replayed) are skipped before they ever allocate a record
+    object. This is the load-side half of the fix that kept the blind
+    runner's RES from climbing to ~16 GB on a real public 7-day store.
+
+    The bound is applied ONLY to records that actually carry an
+    ``available_at``; a record with a missing/None ``available_at`` is
+    always kept (we never silently drop data we cannot place in time).
+    Both defaults are ``None`` => unbounded => byte-for-byte the legacy
+    behaviour.
     """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"records.jsonl not found: {p}")
+    bounded = max_available_at is not None or min_available_at is not None
     records: List[Any] = []
+    skipped_out_of_window = 0
+    seen_lines = 0
     with open(p, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
                 continue
-            records.append(_record_from_dict(json.loads(line)))
+            seen_lines += 1
+            d = json.loads(line)
+            if bounded:
+                av = _parse_opt_dt(d.get("available_at"))
+                if av is not None:
+                    if (
+                        max_available_at is not None
+                        and av > max_available_at
+                    ):
+                        skipped_out_of_window += 1
+                        continue
+                    if (
+                        min_available_at is not None
+                        and av < min_available_at
+                    ):
+                        skipped_out_of_window += 1
+                        continue
+            records.append(_record_from_dict(d))
+    if bounded and skipped_out_of_window:
+        _LOGGER.info(
+            "bounded record load: kept=%d skipped_out_of_window=%d "
+            "(min_available_at=%s max_available_at=%s) source=%s",
+            len(records),
+            skipped_out_of_window,
+            min_available_at.isoformat()
+            if min_available_at is not None
+            else None,
+            max_available_at.isoformat()
+            if max_available_at is not None
+            else None,
+            p,
+        )
     return records
 
 
@@ -312,6 +375,8 @@ def load_historical_store_dir(
     records_path: Optional[str] = None,
     data_manifest_path: Optional[str] = None,
     universe_manifest_path: Optional[str] = None,
+    max_available_at: Optional[datetime] = None,
+    min_available_at: Optional[datetime] = None,
 ) -> HistoricalStoreInput:
     """Load a PR101/PR102 Historical Data Store into a
     :class:`HistoricalMarketStore`.
@@ -332,6 +397,14 @@ def load_historical_store_dir(
         ``data_manifest_hash`` is simply absent (NEVER fabricated).
       * Missing ``universe_manifest.json`` -> WARN; kline-only short
         smoke is NOT blocked.
+
+    PR104 - bounded loading. ``max_available_at`` / ``min_available_at``
+    are forwarded to :func:`load_records_jsonl` so records that can
+    never become visible inside the replay window are skipped before
+    they allocate a record object. Both default to ``None`` (unbounded,
+    legacy behaviour). When a bound filters every record out, the result
+    is still ``INSUFFICIENT_EVIDENCE`` (no visible evidence in window) -
+    we never fabricate data to fill the gap.
     """
     warnings: List[str] = []
     if store_dir is not None:
@@ -359,13 +432,25 @@ def load_historical_store_dir(
             detail=f"records.jsonl missing: {rp}",
             warnings=warnings,
         )
-    records = load_records_jsonl(rp)
+    records = load_records_jsonl(
+        rp,
+        max_available_at=max_available_at,
+        min_available_at=min_available_at,
+    )
     if not records:
+        bounded = (
+            max_available_at is not None or min_available_at is not None
+        )
+        detail = (
+            f"records.jsonl has no records inside replay window: {rp}"
+            if bounded
+            else f"records.jsonl empty: {rp}"
+        )
         return HistoricalStoreInput(
             store=HistoricalMarketStore(),
             record_count=0,
             status=BlindRunStatus.INSUFFICIENT_EVIDENCE,
-            detail=f"records.jsonl empty: {rp}",
+            detail=detail,
             warnings=warnings,
         )
     store = build_historical_store_from_records(records)
@@ -500,6 +585,19 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--load-full-store",
+        action="store_true",
+        help=(
+            "PR104: load EVERY record in the store regardless of the "
+            "blind window. By default the loader is bounded to records "
+            "whose available_at <= --blind-end so a 1-day blind window "
+            "over a multi-day store does not materialise (or scan) the "
+            "out-of-window tail. Use this flag only for an explicit "
+            "full-store smoke; it can re-introduce the large-memory "
+            "load on big stores."
+        ),
+    )
+    p.add_argument(
         "--records-path",
         default=None,
         help=(
@@ -529,6 +627,16 @@ def _build_argparser() -> argparse.ArgumentParser:
 
 def main(argv: List[str] = None) -> int:
     args = _build_argparser().parse_args(argv)
+    # PR104: surface runner heartbeats / bounded-load progress at INFO.
+    # basicConfig is a no-op if logging is already configured (e.g. by a
+    # test harness), so it never clobbers an existing setup and never
+    # writes to stdout (default stream is stderr) - the operator JSON
+    # summary printed below stays machine-parseable.
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
     train_start = _parse_iso(args.train_start)
     train_end = _parse_iso(args.train_end)
     blind_start = _parse_iso(args.blind_start)
@@ -553,11 +661,21 @@ def main(argv: List[str] = None) -> int:
         or args.universe_manifest_path
     )
     if use_historical:
+        # PR104: bound the loader to the replay window unless the
+        # operator explicitly opts into a full-store load. We bound the
+        # UPPER edge by blind_end (records whose available_at is after
+        # blind_end can never become visible during the blind window).
+        # We deliberately do NOT set a lower bound: records available
+        # before blind_start (e.g. the as-of symbol-status universe and
+        # any warm-up klines) remain visible at the first tick and are
+        # still needed.
+        load_max_available_at = None if args.load_full_store else blind_end
         historical_input = load_historical_store_dir(
             store_dir=args.historical_store_dir,
             records_path=args.records_path,
             data_manifest_path=args.historical_data_manifest_path,
             universe_manifest_path=args.universe_manifest_path,
+            max_available_at=load_max_available_at,
         )
         if (
             historical_input.status

@@ -1780,3 +1780,258 @@ def test_pr103_runner_config_rejects_non_sha256_hash_override():
     )
     assert cfg.data_manifest_hash == "sha256:" + "e" * 64
     assert cfg.universe_manifest_hash == "sha256:" + "f" * 64
+
+
+
+# ---------------------------------------------------------------------------
+# PR104 - Blind Runner Store Query Performance Fix
+# ---------------------------------------------------------------------------
+
+
+def _pr104_wide_records(
+    *,
+    symbols=("BTCUSDT", "ETHUSDT"),
+    total_minutes: int,
+    include_5m: bool = True,
+) -> List[Any]:
+    """Records spanning ``total_minutes`` from _PR103_T0 for each
+    symbol, so most are FUTURE relative to a short blind window.
+    """
+    recs: List[Any] = [_pr103_symbol_status(s) for s in symbols]
+    for sym in symbols:
+        for i in range(total_minutes):
+            ot = _PR103_T0 + timedelta(minutes=i)
+            recs.append(
+                _pr103_kline(
+                    ot, 100.0 + (i % 10) * 0.1,
+                    f"k1m_{sym}_{i}", symbol=sym, interval="1m",
+                )
+            )
+        if include_5m:
+            for j in range(total_minutes // 5):
+                ot = _PR103_T0 + timedelta(minutes=j * 5)
+                recs.append(
+                    _pr103_kline(
+                        ot, 100.0 + (j % 10) * 0.1,
+                        f"k5m_{sym}_{j}", symbol=sym, interval="5m",
+                    )
+                )
+    return recs
+
+
+def test_pr104_load_records_jsonl_bounded_by_available_at(tmp_path):
+    """The PR101 loader skips out-of-window records before they ever
+    allocate a record object (bounded memory at load time).
+    """
+    records = _pr104_wide_records(total_minutes=360)  # 6h span
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        records,
+        write_data_manifest=False,
+        write_universe_manifest=False,
+    )
+    rp = store_dir / "records.jsonl"
+
+    # Unbounded = legacy behaviour: every record materialised.
+    full = bwf_cli.load_records_jsonl(rp)
+    assert len(full) == len(records)
+
+    # Bounded to a 30m window: only records available_at <= cap survive
+    # (plus the symbol-status rows, whose available_at is 30d earlier).
+    cap = _PR103_T0 + timedelta(minutes=30)
+    bounded = bwf_cli.load_records_jsonl(rp, max_available_at=cap)
+    assert 0 < len(bounded) < len(full)
+    assert all(
+        getattr(r, "available_at", None) is None
+        or r.available_at <= cap
+        for r in bounded
+    )
+    # The symbol-status universe (needed for as-of) is retained.
+    assert any(
+        getattr(r, "record_type", None) == "SYMBOL_STATUS"
+        for r in bounded
+    )
+
+
+def test_pr104_load_historical_store_dir_bounds_to_window(tmp_path):
+    records = _pr104_wide_records(total_minutes=360)
+    store_dir = _pr103_write_store_dir(tmp_path / "store", records)
+    cap = _PR103_T0 + timedelta(minutes=30)
+    loaded = bwf_cli.load_historical_store_dir(
+        store_dir=str(store_dir), max_available_at=cap
+    )
+    assert loaded.status is None
+    assert 0 < loaded.record_count < len(records)
+    # data_manifest_hash still pinned from the manifest (not fabricated).
+    assert loaded.data_manifest_hash is not None
+
+
+def test_pr104_load_store_dir_all_future_is_insufficient(tmp_path):
+    """If the window excludes every record, return INSUFFICIENT_EVIDENCE
+    (never fabricate data)."""
+    records = _pr104_wide_records(
+        symbols=("BTCUSDT",), total_minutes=60, include_5m=False
+    )
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        records,
+        write_data_manifest=False,
+        write_universe_manifest=False,
+    )
+    # Cap strictly before the earliest available_at (symbol status is
+    # 30d before T0, klines available from ~T0+1m). Use a cap well
+    # before listed_at so nothing qualifies.
+    cap = _PR103_T0 - timedelta(days=60)
+    loaded = bwf_cli.load_historical_store_dir(
+        store_dir=str(store_dir), max_available_at=cap
+    )
+    assert loaded.status == BlindRunStatus.INSUFFICIENT_EVIDENCE
+    assert loaded.record_count == 0
+
+
+def _pr104_make_runner_with_store(
+    *, tmpdir: Path, store, blind_minutes: int
+) -> BlindWalkForwardRunner:
+    blind_end = _T0 + timedelta(minutes=blind_minutes)
+    clock = SimulationClock(
+        start_time_utc=_T0,
+        end_time_utc=blind_end,
+        monotonic_forward_only=True,
+    )
+    provider = ReplayFeedProvider(
+        store=store,
+        clock=clock,
+        config=ReplayFeedProviderConfig(
+            start_time=_T0,
+            end_time=blind_end,
+            step_interval=timedelta(minutes=1),
+            allow_reemit=False,
+            include_asof_universe=True,
+        ),
+    )
+    cfg = BlindWalkForwardRunnerConfig(
+        window=BlindWalkForwardWindow(
+            train_start=_T0 - timedelta(minutes=5),
+            train_end=_T0,
+            blind_start=_T0,
+            blind_end=blind_end,
+            reference_window="60d",
+        ),
+        config_artefact={"ver": 1, "label": "pr104"},
+        rule_artefact={"rules": ["a", "b"]},
+        feature_schema_artefact={"schema": ["close", "high"]},
+        data_manifest_artefact={"data": "v0"},
+        universe_manifest_artefact={"universe": ["BTCUSDT", "ETHUSDT"]},
+        fee_model_artefact={"taker_bps": 4.0},
+        slippage_model_artefact={"bps": 5.0},
+        latency_model_artefact={"bps": 1.0},
+        outage_model_artefact={"min_gap_seconds": 0},
+        fill_model_artefact={"policy": "WORST_CASE"},
+        code_commit="pr104commit123456",
+        run_id="bwf_pr104_run",
+        report_root=str(tmpdir / "reports"),
+        ai_post_window_summary_enabled=False,
+    )
+    return BlindWalkForwardRunner(
+        config=cfg,
+        replay_provider=provider,
+        capital_flow=_make_capital_flow(),
+        mock_exchange=_make_mock_exchange(),
+        telegram_sandbox=_make_telegram(tmpdir),
+        heartbeat_every_steps=10,
+    )
+
+
+def _build_runner_store_spanning(*, total_minutes: int):
+    store = HistoricalMarketStore()
+    store.add_record(_pr103_symbol_status("BTCUSDT"))
+    store.add_record(_pr103_symbol_status("ETHUSDT"))
+    for sym in ("BTCUSDT", "ETHUSDT"):
+        for i in range(total_minutes):
+            ot = _T0 + timedelta(minutes=i)
+            store.add_record(
+                _pr103_kline(
+                    ot, 100.0 + (i % 10) * 0.1,
+                    f"k1m_{sym}_{i}", symbol=sym, interval="1m",
+                )
+            )
+        for j in range(total_minutes // 5):
+            ot = _T0 + timedelta(minutes=j * 5)
+            store.add_record(
+                _pr103_kline(
+                    ot, 100.0 + (j % 10) * 0.1,
+                    f"k5m_{sym}_{j}", symbol=sym, interval="5m",
+                )
+            )
+    return store
+
+
+def test_pr104_blind_runner_completes_on_large_store_bounded(tmp_path):
+    """End-to-end: a large store (mostly future records) replayed over
+    a short blind window completes with bounded scanning, zero
+    violations and intact safety flags.
+    """
+    # 6h of 1m+5m for 2 symbols => ~1.5k records, vast majority FUTURE
+    # relative to the 60-minute blind window.
+    store = _build_runner_store_spanning(total_minutes=360)
+    total_records = store.record_count
+    runner = _pr104_make_runner_with_store(
+        tmpdir=tmp_path, store=store, blind_minutes=60
+    )
+    result = runner.run()
+    score = result["score"]
+
+    assert score["status"] in (
+        BlindRunStatus.EVIDENCE_GENERATED,
+        BlindRunStatus.PARTIAL_EVIDENCE,
+    )
+    assert runner.steps_run == 60
+    assert runner.batches_consumed > 0
+    assert runner.batches_consumed == runner.steps_run
+    # violations_count == 0 and invalidations == []
+    assert len(runner.violations) == 0
+    assert list(runner.invalidations) == []
+    assert score["no_lookahead_violation_count"] == 0
+
+    # Bounded scan: future records were never considered.
+    diag = runner._replay_provider.get_diagnostics()
+    assert diag.violations == []
+    assert 0 < diag.total_records_considered < total_records
+
+    # Safety boundary flags intact in the emitted manifest.
+    manifest = result["manifest"]
+    assert manifest["phase_12_forbidden"] is True
+    assert manifest["live_trading"] is False
+    assert manifest["exchange_live_orders"] is False
+    assert manifest["binance_private_api_enabled"] is False
+    assert manifest["telegram_outbound_enabled"] is False
+    assert manifest["auto_tuning_allowed"] is False
+    assert manifest["trade_authority"] is False
+
+
+def test_pr104_main_creates_output_dir_and_completes_on_big_store(
+    tmp_path,
+):
+    """main() bounds the load to the window, creates the output dir and
+    completes with zero violations even when the store is large.
+    """
+    records = _pr104_wide_records(total_minutes=720)  # 12h span
+    store_dir = _pr103_write_store_dir(tmp_path / "store", records)
+    report_root = tmp_path / "reports"
+    # Short 5-minute blind window: the loader drops the ~12h tail, the
+    # provider withholds the rest. Run must complete (rc 0).
+    rc = bwf_cli.main(
+        _pr103_cli_args(
+            store_dir, report_root, run_id="pr104big", blind_minutes=5
+        )
+    )
+    assert rc == 0
+    run_dir = report_root / "pr104big"
+    assert run_dir.is_dir()
+    viol = json.loads(
+        (run_dir / "no_lookahead_violations.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert viol["violations"] == []
+    assert viol["invalidations"] == []
