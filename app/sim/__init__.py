@@ -254,6 +254,29 @@ from app.sim.simulation_clock import (
     ensure_utc_aware,
     parse_interval_seconds,
 )
+from app.sim.telegram_sandbox_outbox import (
+    PHASE_NAME as TELEGRAM_SANDBOX_OUTBOX_PHASE_NAME,
+)
+from app.sim.telegram_sandbox_outbox import (
+    DEFAULT_OUTPUT_JSONL_PATH as TELEGRAM_SANDBOX_DEFAULT_OUTPUT_JSONL_PATH,
+)
+from app.sim.telegram_sandbox_outbox import (
+    DEFAULT_OUTPUT_MARKDOWN_PATH as TELEGRAM_SANDBOX_DEFAULT_OUTPUT_MARKDOWN_PATH,
+)
+from app.sim.telegram_sandbox_outbox import (
+    MANDATORY_LABELS as TELEGRAM_SANDBOX_MANDATORY_LABELS,
+)
+from app.sim.telegram_sandbox_outbox import (
+    NO_LIVE_ORDER_LABEL,
+    NO_REAL_CAPITAL_LABEL,
+    NO_TELEGRAM_COMMAND_AUTHORITY_LABEL,
+    SIMULATED_HISTORICAL_BLIND_TEST_LABEL,
+    TelegramSandboxMessage,
+    TelegramSandboxMessageType,
+    TelegramSandboxOutbox,
+    TelegramSandboxOutboxConfig,
+    TelegramSandboxSeverity,
+)
 from app.sim.trade_ledger import (
     PHASE_NAME as TRADE_LEDGER_PHASE_NAME,
 )
@@ -283,6 +306,19 @@ __all__ = [
     "PESSIMISTIC_FILL_MODEL_PHASE_NAME",
     "SIMULATED_CAPITAL_FLOW_PHASE_NAME",
     "TRADE_LEDGER_PHASE_NAME",
+    "TELEGRAM_SANDBOX_OUTBOX_PHASE_NAME",
+    "TELEGRAM_SANDBOX_DEFAULT_OUTPUT_JSONL_PATH",
+    "TELEGRAM_SANDBOX_DEFAULT_OUTPUT_MARKDOWN_PATH",
+    "TELEGRAM_SANDBOX_MANDATORY_LABELS",
+    "NO_LIVE_ORDER_LABEL",
+    "NO_REAL_CAPITAL_LABEL",
+    "NO_TELEGRAM_COMMAND_AUTHORITY_LABEL",
+    "SIMULATED_HISTORICAL_BLIND_TEST_LABEL",
+    "TelegramSandboxMessage",
+    "TelegramSandboxMessageType",
+    "TelegramSandboxOutbox",
+    "TelegramSandboxOutboxConfig",
+    "TelegramSandboxSeverity",
     "FORBIDDEN_OUTPUT_FIELDS",
     "AmbiguousIntrabarPolicy",
     "CandleVisibilityGuard",

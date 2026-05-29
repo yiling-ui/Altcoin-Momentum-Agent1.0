@@ -8417,6 +8417,141 @@ Phase 12 remains **FORBIDDEN**.
 
 
 
+## Open phase: Phase 11C.1D-D-F / Telegram Sandbox Outbox v0 (PR99, IN_REVIEW)
+
+> **Status:** IN_REVIEW after this implementation PR; not
+> ACCEPTED until maintainer review.
+> **Phase identity string:**
+> `Phase 11C.1D-D-F / PR99 / Telegram Sandbox Outbox v0`.
+
+### Purpose
+
+Phase 11C.1D-D-F ships the **sixth** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack
+defined by Phase 11C.1D-D (PR93). PR98's engineering route
+explicitly authorises ONLY this PR (PR99) to begin the next
+paper-only step. PR99 introduces one small, deterministic,
+pure-Python module (`app/sim/telegram_sandbox_outbox.py`) that
+exposes a closed-vocabulary, file-only, paper-only Telegram
+notification surface for blind-run evidence and operator review.
+
+### Scope (Phase 11C.1D-D-F / PR99)
+
+  - `app/sim/telegram_sandbox_outbox.py` (new module): defines
+    `TelegramSandboxMessageType` (closed taxonomy of exactly 13
+    values), `TelegramSandboxSeverity` (closed taxonomy: `INFO` /
+    `NOTICE` / `WARNING` / `CRITICAL`), the four mandatory
+    simulated / no-live transcript labels
+    (`SIMULATED_HISTORICAL_BLIND_TEST_LABEL`,
+    `NO_LIVE_ORDER_LABEL`, `NO_REAL_CAPITAL_LABEL`,
+    `NO_TELEGRAM_COMMAND_AUTHORITY_LABEL`, exposed as
+    `MANDATORY_LABELS`), `TelegramSandboxMessage` (frozen, with
+    hard-pinned `sandbox_only=True`,
+    `no_live_order_assertion=True`,
+    `no_real_capital_assertion=True`,
+    `no_telegram_command_authority=True`,
+    `phase_12_forbidden=True`, `trade_authority=False`,
+    `auto_tuning_allowed=False`),
+    `TelegramSandboxOutboxConfig` (frozen, with hard-pinned
+    `sandbox_only=True`, `telegram_outbound_enabled=False`,
+    `telegram_live_command_authority=False`,
+    `telegram_production_channel_enabled=False`,
+    `command_authority=False`), and `TelegramSandboxOutbox`
+    (paper-only / file-only writer with `append_message` /
+    `append_messages` / `render_message` / `write_jsonl` /
+    `write_markdown_transcript` / `list_messages` / `reset` /
+    `safety_payload` / `to_dict`).
+  - `app/sim/__init__.py` (extended): re-exports the new public
+    surface alongside PR94 / PR95 / PR96 / PR97 / PR98.
+  - `tests/unit/test_telegram_sandbox_outbox.py` (new): the
+    23-test PR99 safety contract — 21 brief-mandated tests plus 2
+    defensive extras (closed-taxonomy + phase-name-string
+    presence; `reset()` clears the in-memory list but does NOT
+    truncate any on-disk artefact).
+  - `docs/PHASE_11C_1D_D_F_TELEGRAM_SANDBOX_OUTBOX.md` (new): the
+    phase design / acceptance doc.
+  - `docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+    `docs/CHANGELOG.md` (updated).
+
+### Out-of-scope (Phase 11C.1D-D-F)
+
+  - **Blind Walk-forward Runner** (PR100). Forbidden by this
+    phase alone.
+  - Any change under `app/risk/`, `app/execution/`,
+    `app/exchanges/`, `app/telegram/`, `app/config/`, or other
+    runtime hot-path packages. The existing Phase 10D Telegram
+    fake / refusal boundary in `app/telegram/` is **NOT** reused
+    by PR99; PR99 has its own separate sandbox path that NEVER
+    touches the real outbound transport.
+  - Any modification of the existing PR94 / PR95 / PR96 / PR97 /
+    PR98 sources.
+  - Any real Telegram outbound, real Telegram bot token, real
+    production / live Telegram channel, or Telegram command
+    authority.
+  - Any real account / signed endpoint / private websocket /
+    listenKey access.
+  - Any LLM, DeepSeek, Telegram, or Binance network call.
+  - Any auto-tuning of any parameter or rule.
+  - Any entry into Phase 12.
+
+### Hard safety boundary (Phase 11C.1D-D-F / PR99)
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `simulated_only` | `True` |
+| `no_live_order` | `True` |
+| `no_live_order_assertion` | `True` |
+| `no_real_capital_assertion` | `True` |
+| `no_telegram_command_authority` | `True` |
+| `live_trading` | `False` |
+| `live_capital_enabled` | `False` |
+| `exchange_live_orders` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_outbound_enabled` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `telegram_production_channel_enabled` | `False` |
+| `ai_trade_authority` | `False` |
+| `trade_authority` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+### Allowed transitions out of Phase 11C.1D-D-F
+
+| From | To | Authorised by |
+| --- | --- | --- |
+| Phase 11C.1D-D-F IN_REVIEW | Phase 11C.1D-D-F ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-D-F IN_REVIEW | PR100 — Blind Walk-forward Runner v0 | After a successful PR99 acceptance; PR100 itself opens its own gate. |
+| Phase 11C.1D-D-F IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** A complete blind walk-forward run requires PR94 → PR100 to have been accepted in order. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+### Inheritance
+
+Phase 11C.1D-D-F inherits, verbatim, every Phase 1, Phase 11C,
+Phase 11C.1A, Phase 11C.1B, Phase 11C.1C-A through Phase
+11C.1C-C-B-B-B-E-D, Phase AI-1 through Phase AI-CHECKPOINT, Phase
+11C / Offline Rule Sandbox Replay, Phase 11C.1D-B *Paper Shadow
+Strategy Validation*, Phase 11C.1D-C *Risk / Execution / Capital
+Safety Matrix*, Phase 11C.1D-D *Strict Blind Walk-forward Sim-Live
+Constitution*, Phase 11C.1D-D-A *SimulationClock + Time-Wall
+Guard*, Phase 11C.1D-D-B *Historical Market Store v0*, Phase
+11C.1D-D-C *ReplayFeedProvider v0*, Phase 11C.1D-D-D *MockExchange
++ Pessimistic Fill Model v0*, and Phase 11C.1D-D-E *Simulated
+Capital Flow + Trade Ledger v0* forbidden item.
+
+The Risk Engine remains the single trade-decision gate.
+Phase 12 remains **FORBIDDEN**.
+
 ## Open phase: Phase 11C.1D-D-E / Simulated Capital Flow + Trade Ledger v0 (PR98, IN_REVIEW)
 
 > **Status:** IN_REVIEW after this implementation PR; not
@@ -8508,7 +8643,7 @@ timeseries.
 | From | To | Authorised by |
 | --- | --- | --- |
 | Phase 11C.1D-D-E IN_REVIEW | Phase 11C.1D-D-E ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
-| Phase 11C.1D-D-E IN_REVIEW | PR99 — Telegram Sandbox Outbox v0 | After a successful PR98 acceptance; PR99 itself opens its own gate. |
+| Phase 11C.1D-D-E IN_REVIEW | PR99 — Telegram Sandbox Outbox v0 | PR99 has now opened its own gate (Phase 11C.1D-D-F, IN_REVIEW); see the open-phase block above. |
 | Phase 11C.1D-D-E IN_REVIEW | PR100 — Blind Walk-forward Runner v0 | **FORBIDDEN by this phase alone.** Requires successful PR99 acceptance first. |
 | Phase 11C.1D-D-E IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** A complete blind walk-forward run requires PR94 → PR100 to have been accepted in order. |
 | any | Phase 12 | **FORBIDDEN.** |
