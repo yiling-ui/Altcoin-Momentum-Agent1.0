@@ -78,8 +78,60 @@ time substrate.
         ``available_at <= simulated_time`` / closed-candle
         visibility / as-of universe rule.
 
+  * Phase 11C.1D-D-D / PR97 - MockExchange + Pessimistic Fill Model v0:
+
+      - :class:`MockOrderType` - closed taxonomy of mock order types
+        (``MARKET`` / ``LIMIT`` / ``STOP_MARKET`` /
+        ``TAKE_PROFIT_MARKET`` / ``FORCED_EXIT``),
+      - :class:`MockOrderSide` - closed taxonomy of mock order sides
+        (``BUY`` / ``SELL``); paper-only field, NEVER an AI /
+        strategy recommendation,
+      - :class:`MockOrderStatus` - closed taxonomy of mock order
+        statuses (``CREATED`` / ``ACCEPTED`` / ``PARTIALLY_FILLED``
+        / ``FILLED`` / ``REJECTED`` / ``CANCELED`` / ``EXPIRED`` /
+        ``STALE`` / ``AMBIGUOUS_INTRABAR_PATH``),
+      - :class:`MockOrder` - mutable mock order with hard-pinned
+        ``simulated_only=True`` / ``no_live_order=True`` /
+        ``phase_12_forbidden=True`` / ``trade_authority=False``,
+      - :class:`MockFill` - frozen mock fill with conservative-
+        assumption markers (``TAKER_FEE_APPLIED`` /
+        ``SLIPPAGE_APPLIED`` / ``LATENCY_PENALTY_APPLIED`` /
+        ``LIMIT_PENETRATION_REQUIRED`` / ``STOP_ADVERSE_FILL`` /
+        ``TAKE_PROFIT_CONSERVATIVE_FILL`` /
+        ``FORCED_EXIT_CONSERVATIVE_FILL`` /
+        ``AMBIGUOUS_INTRABAR_WORST_CASE`` / ``PARTIAL_FILL`` /
+        ``NO_OPTIMISTIC_FILL_ON_INSUFFICIENT_DATA``),
+      - :class:`MockExchangeConfig` - frozen taker / maker fee bps,
+        slippage / latency bps, ``reject_if_no_visible_price`` (default
+        ``True``), ``limit_touch_fill_policy`` (default
+        ``NO_FILL_ON_TOUCH``), ``ambiguous_intrabar_policy`` (default
+        ``WORST_CASE``), ``partial_fill_enabled`` /
+        ``max_fill_fraction_per_batch``, hard-pinned
+        ``sandbox_only=True`` / ``live_order_enabled=False``,
+      - :class:`PessimisticFillModel` - pure / deterministic /
+        pessimistic fill model: market / forced-exit pay taker fee +
+        slippage + latency adverse to side; limit refuses fill on
+        touch and requires penetration; stop fills at the adverse
+        stop price plus taker fee + slippage; take-profit fills
+        conservatively; same-candle stop + take-profit triggers fall
+        back to ``WORST_CASE`` (stop fires, TP canceled) or
+        ``AMBIGUOUS_INTRABAR_PATH`` per
+        :class:`AmbiguousIntrabarPolicy`; insufficient visible price
+        data NEVER produces an optimistic fill,
+      - :class:`OrderRequest` - frozen request shape used by
+        :meth:`MockExchange.submit_order`,
+      - :class:`MockExchangeDiagnostics` - cumulative counters,
+      - :class:`MockExchange` - paper-only simulated exchange with
+        ``submit_order`` / ``cancel_order`` / ``expire_order`` /
+        ``process_batch`` / ``get_order`` / ``list_open_orders`` /
+        ``list_all_orders`` / ``list_fills`` / ``reset`` /
+        ``safety_payload`` / ``to_dict``. NEVER calls a real
+        exchange, NEVER advertises a real exchange order id, NEVER
+        opens a private websocket, NEVER touches the Binance private
+        API.
+
 Hard safety boundaries (Phase 11C.1D-D-A / PR94 + Phase 11C.1D-D-B /
-PR95 + Phase 11C.1D-D-C / PR96):
+PR95 + Phase 11C.1D-D-C / PR96 + Phase 11C.1D-D-D / PR97):
 
   - mode = paper
   - sandbox_only = True
@@ -121,10 +173,11 @@ This package MUST NOT:
   - enter Phase 12
 
 PR96 acceptance authorises ONLY PR97 (*MockExchange + Pessimistic
-Fill Model v0*) to begin its own gate. PR96 does NOT implement, and
-does NOT authorise:
+Fill Model v0*) to begin its own gate. PR97 acceptance authorises
+ONLY PR98 (*Simulated Capital Flow + Trade Ledger v0*) to begin its
+own gate. Neither PR96 nor PR97 implements, and neither PR96 nor
+PR97 authorises:
 
-  - the MockExchange + Pessimistic Fill Model (PR97),
   - the Simulated Capital Flow + Trade Ledger (PR98),
   - the Telegram Sandbox Outbox (PR99),
   - the Blind Walk-forward Runner (PR100),
@@ -145,6 +198,31 @@ from app.sim.historical_market_store import (
     HistoricalMarketStore,
     SymbolStatus,
     SymbolStatusRecord,
+)
+from app.sim.mock_exchange import (
+    PHASE_NAME as MOCK_EXCHANGE_PHASE_NAME,
+)
+from app.sim.mock_exchange import (
+    MockExchange,
+    MockExchangeDiagnostics,
+    OrderRequest,
+)
+from app.sim.pessimistic_fill_model import (
+    PHASE_NAME as PESSIMISTIC_FILL_MODEL_PHASE_NAME,
+)
+from app.sim.pessimistic_fill_model import (
+    AmbiguousIntrabarPolicy,
+    ConservativeAssumption,
+    FillModelDecision,
+    FillReason,
+    LimitTouchFillPolicy,
+    MockExchangeConfig,
+    MockFill,
+    MockOrder,
+    MockOrderSide,
+    MockOrderStatus,
+    MockOrderType,
+    PessimisticFillModel,
 )
 from app.sim.replay_feed_provider import (
     PHASE_NAME as REPLAY_FEED_PROVIDER_PHASE_NAME,
@@ -177,18 +255,35 @@ __all__ = [
     "PHASE_NAME",
     "HISTORICAL_MARKET_STORE_PHASE_NAME",
     "REPLAY_FEED_PROVIDER_PHASE_NAME",
+    "MOCK_EXCHANGE_PHASE_NAME",
+    "PESSIMISTIC_FILL_MODEL_PHASE_NAME",
     "FORBIDDEN_OUTPUT_FIELDS",
+    "AmbiguousIntrabarPolicy",
     "CandleVisibilityGuard",
+    "ConservativeAssumption",
     "DataCompletenessState",
     "DataQualityFlag",
+    "FillModelDecision",
+    "FillReason",
     "HistoricalKlineRecord",
     "HistoricalMarketRecord",
     "HistoricalMarketRecordType",
     "HistoricalMarketStore",
     "HistoricalRecordTime",
+    "LimitTouchFillPolicy",
+    "MockExchange",
+    "MockExchangeConfig",
+    "MockExchangeDiagnostics",
+    "MockFill",
+    "MockOrder",
+    "MockOrderSide",
+    "MockOrderStatus",
+    "MockOrderType",
     "NoLookaheadViolation",
     "NoLookaheadViolationReason",
     "NoLookaheadViolationSeverity",
+    "OrderRequest",
+    "PessimisticFillModel",
     "ReplayFeedBatch",
     "ReplayFeedCursor",
     "ReplayFeedDiagnostics",

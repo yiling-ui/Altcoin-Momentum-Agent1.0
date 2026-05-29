@@ -8256,3 +8256,161 @@ Phase 11C.1D-D-B *Historical Market Store v0* forbidden item.
 
 The Risk Engine remains the single trade-decision gate.
 Phase 12 remains **FORBIDDEN**.
+
+
+## Open phase: Phase 11C.1D-D-D / MockExchange + Pessimistic Fill Model v0 (PR97, IN_REVIEW)
+
+**Status:** IN_REVIEW (after this implementation PR; not
+`ACCEPTED` until maintainer review).
+
+**Type:** **Implementation PR** (paper / report / evidence-only
+infrastructure).
+
+**Phase identifier:**
+`Phase 11C.1D-D-D / PR97 / MockExchange + Pessimistic Fill Model v0`.
+
+**Parent:** Phase 11C.1D-D *Strict Blind Walk-forward Sim-Live
+Constitution* (PR93, merged), Phase 11C.1D-D-A
+*SimulationClock + Time-Wall Guard* (PR94, merged), Phase
+11C.1D-D-B *Historical Market Store v0* (PR95, merged), and
+Phase 11C.1D-D-C *ReplayFeedProvider v0* (PR96, merged).
+Phase 11C.1D-D-D ships the **fourth** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack.
+The constitution's PR93 §19 engineering route explicitly
+authorises ONLY this PR (PR97) to begin the next paper-only
+step. PR97 introduces a small, deterministic, pure-Python
+in-memory simulated exchange and a conservative fill model
+that consume only PR96 :class:`ReplayFeedBatch` / PR95
+:class:`HistoricalKlineRecord` visible market data.
+
+### Scope (Phase 11C.1D-D-D / PR97)
+
+Authorised:
+
+  - the public surface listed in §0 of
+    `docs/PHASE_11C_1D_D_D_MOCK_EXCHANGE_PESSIMISTIC_FILL_MODEL.md`
+    (`MockOrderType`, `MockOrderSide`, `MockOrderStatus`,
+    `AmbiguousIntrabarPolicy`, `LimitTouchFillPolicy`,
+    `FillReason`, `ConservativeAssumption`, `MockOrder`,
+    `MockFill`, `MockExchangeConfig`, `FillModelDecision`,
+    `PessimisticFillModel`, `OrderRequest`,
+    `MockExchangeDiagnostics`, `MockExchange`),
+  - the matching unit-test module
+    `tests/unit/test_mock_exchange_pessimistic_fill_model.py`
+    (the 25-test PR97 safety contract: 22 brief-mandated
+    scenarios plus 3 defensive extras),
+  - the docs trio
+    (`docs/PHASE_11C_1D_D_D_MOCK_EXCHANGE_PESSIMISTIC_FILL_MODEL.md`,
+    `docs/PROJECT_STATUS.md` current-phase block,
+    `docs/PHASE_GATE.md` this section,
+    `docs/CHANGELOG.md` entry).
+
+Files explicitly NOT touched:
+
+  - `app/risk/**`, `app/execution/**`, `app/exchanges/**`,
+    `app/telegram/**`, `app/config/**`,
+  - `app/sim/simulation_clock.py`,
+    `app/sim/time_wall_guard.py`,
+    `app/sim/historical_market_store.py`,
+    `app/sim/replay_feed_provider.py` (PR94 + PR95 + PR96
+    contracts are reused verbatim; not modified),
+  - `app/safety/**`, `app/ai/**`, `app/replay/**`,
+    `app/reflection/**`, `app/paper_shadow/**`,
+    `app/sandbox/**`, `app/state_machine/**`,
+    `app/scanner/**`, `app/regime/**`,
+    `app/market_data/**`, `app/market_data_public/**`,
+    `app/universe/**`, `app/liquidity/**`,
+    `app/manipulation/**`, `app/monitoring/**`,
+    `app/database/**`, `app/exports/**`,
+    `app/incidents/**`, `app/learning/**`,
+    `app/llm/**`, `app/paper_run/**`,
+    `app/reconciliation/**`, `app/confirmation/**`,
+    `app/capital/**`, `app/core/**`, `app/main.py`,
+  - `scripts/**`, `configs/**`, `data/**`,
+    `requirements.txt`, `pyproject.toml`, `.env*`.
+
+### Forbidden by this phase
+
+  - Do NOT modify `app/risk/**`, `app/execution/**`,
+    `app/exchanges/**`, `app/telegram/**`, `app/config/**`.
+  - Do NOT modify the PR94 / PR95 / PR96 sources.
+  - Do NOT implement the Simulated Capital Flow + Trade
+    Ledger (PR98).
+  - Do NOT implement the Telegram Sandbox Outbox (PR99).
+  - Do NOT implement the Blind Walk-forward Runner (PR100).
+  - Do NOT enable live orders.
+  - Do NOT connect to Binance private API.
+  - Do NOT add any signed endpoint.
+  - Do NOT add any private websocket / listenKey.
+  - Do NOT advertise a real exchange order id, an api key,
+    an api secret, or a signed-endpoint reference.
+  - Do NOT enable any real Telegram outbound.
+  - Do NOT call DeepSeek / LLM / any network transport.
+  - Do NOT auto-tune anything.
+  - Do NOT enter Phase 12.
+
+### Acceptance criteria
+
+  - PR97 is marked **IN_REVIEW**.
+  - Promotion to `ACCEPTED` requires a separate docs-closeout
+    PR after maintainer review. **Phase 12 remains
+    FORBIDDEN.**
+  - All 25 tests in
+    `tests/unit/test_mock_exchange_pessimistic_fill_model.py`
+    pass; the full suite reports **3504 PASSING** tests, 0
+    failures (was 3479 before this phase; +25 from this
+    phase).
+
+**Hard safety boundary (Phase 11C.1D-D-D / PR97).**
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `simulated_only` | `True` |
+| `no_live_order` | `True` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_outbound_enabled` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `ai_trade_authority` | `False` |
+| `trade_authority` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+### Allowed transitions out of Phase 11C.1D-D-D
+
+| From | To | Authorised by |
+| --- | --- | --- |
+| Phase 11C.1D-D-D IN_REVIEW | Phase 11C.1D-D-D ACCEPTED | Only via a separate docs-closeout PR after maintainer review. |
+| Phase 11C.1D-D-D IN_REVIEW | PR98 — Simulated Capital Flow + Trade Ledger v0 | After a successful PR97 acceptance; PR98 itself opens its own gate. |
+| Phase 11C.1D-D-D IN_REVIEW | PR99 — Telegram Sandbox Outbox | **FORBIDDEN by this phase alone.** Requires successful PR98 acceptance first. |
+| Phase 11C.1D-D-D IN_REVIEW | PR100 — Blind Walk-forward Runner v0 | **FORBIDDEN by this phase alone.** Requires successful PR99 acceptance first. |
+| Phase 11C.1D-D-D IN_REVIEW | Blind Walk-forward implementation | **FORBIDDEN by this phase alone.** A complete blind walk-forward run requires PR94 → PR100 to have been accepted in order. |
+| any | Phase 12 | **FORBIDDEN.** |
+
+### Inheritance
+
+Phase 11C.1D-D-D inherits, verbatim, every Phase 1, Phase
+11C, Phase 11C.1A, Phase 11C.1B, Phase 11C.1C-A through
+Phase 11C.1C-C-B-B-B-E-D, Phase AI-1 through Phase
+AI-CHECKPOINT, Phase 11C / Offline Rule Sandbox Replay,
+Phase 11C.1D-B *Paper Shadow Strategy Validation*, Phase
+11C.1D-C *Risk / Execution / Capital Safety Matrix*, Phase
+11C.1D-D *Strict Blind Walk-forward Sim-Live Constitution*,
+Phase 11C.1D-D-A *SimulationClock + Time-Wall Guard*, Phase
+11C.1D-D-B *Historical Market Store v0*, and Phase
+11C.1D-D-C *ReplayFeedProvider v0* forbidden item.
+
+The Risk Engine remains the single trade-decision gate.
+Phase 12 remains **FORBIDDEN**.
