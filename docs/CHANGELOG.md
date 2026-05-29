@@ -7,6 +7,320 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D-C — ReplayFeedProvider v0 (PR96): IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence-only
+infrastructure). **Runtime effect:** **none on real trading.**
+One new module `app/sim/replay_feed_provider.py`, one
+extended `app/sim/__init__.py` re-exporting the new public
+surface alongside the PR94 + PR95 substrate, one new unit-test
+module `tests/unit/test_replay_feed_provider.py` (26 PASSING
+tests covering all 21 brief-mandated scenarios plus 5
+defensive extras: config validation sweep, `replay_complete` +
+`StopIteration`, symbol filter, `reset()` requires
+non-monotonic clock, `data_quality_flags` propagation), and
+one new phase doc
+`docs/PHASE_11C_1D_D_C_REPLAY_FEED_PROVIDER.md`. No file
+under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, `app/safety/`, `app/ai/`,
+`app/replay/`, `app/reflection/`, `app/paper_shadow/`,
+`app/sandbox/`, `app/state_machine/`, `app/scanner/`,
+`app/regime/`, `app/market_data/`, `app/market_data_public/`,
+`app/universe/`, `app/liquidity/`, `app/manipulation/`,
+`app/monitoring/`, `app/database/`, `app/exports/`,
+`app/incidents/`, `app/learning/`, `app/llm/`,
+`app/paper_run/`, `app/reconciliation/`, `app/confirmation/`,
+`app/capital/`, `app/core/`, `app/main.py` is touched. The
+existing PR94 / PR95 sources
+(`app/sim/simulation_clock.py`,
+`app/sim/time_wall_guard.py`,
+`app/sim/historical_market_store.py`) are reused **verbatim**
+and are NOT modified by this PR. No event type wired into the
+runtime hot path. No database schema / migration. The new
+module has NO I/O, NO network, NO real data fetch, NO
+authority over the Risk Engine, the Execution FSM, or the
+Capital Flow Engine.
+
+**What this PR ships.** The **third** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack
+defined by Phase 11C.1D-D (PR93, the *Strict Blind Walk-forward
+Sim-Live Constitution*). PR93 §19's engineering route
+explicitly authorises ONLY this PR (PR96) to begin the next
+paper-only step after PR95. PR96 implements the deterministic,
+forward-only feed substrate that all later (separately gated)
+PR97..PR100 modules MUST consume so that the Constitution §5 /
+§6 / §9 / §10 / §E rules become machine-enforceable at the
+feed layer.
+
+**Public surface added.**
+
+  - :class:`ReplayFeedProviderConfig` — frozen replay-window
+    config with closed-taxonomy validation. Fields:
+    `start_time` (UTC-aware), `end_time` (UTC-aware,
+    `>= start_time`), `step_interval` (timedelta /
+    number-of-seconds / interval-string; coerced and validated
+    `> 0`), `include_record_types` (default = full
+    Constitution §10 v0 minimum:
+    `KLINE_1M, KLINE_5M, FUNDING_RATE, OPEN_INTEREST,
+    TICKER_24H, EXCHANGE_INFO, SYMBOL_STATUS, LISTING_STATUS,
+    DELISTING_STATUS`; rejects unknown / empty / duplicate
+    values), optional `symbols` filter (non-empty tuple of
+    non-empty strings), `include_asof_universe` (default
+    `True`), `allow_reemit` (default `False`),
+    `strict_time_wall` (default `True`),
+    `strict_candle_visibility` (default `True`).
+  - :class:`ReplayFeedCursor` — forward-only cursor:
+    `start_time`, `end_time`, `step_interval`, `current_time`,
+    `emitted_record_ids`, `replay_complete`. Cannot move
+    backward, cannot fall below `start_time`, cannot exceed
+    `end_time`. `advance_to(new_time)` raises on backward
+    motion. `to_dict()` re-pins safety boundary.
+  - :class:`ReplayFeedDiagnostics` — cumulative counters:
+    `total_records_considered`, `emitted_record_count`,
+    `future_records_rejected_count`,
+    `missing_available_at_count`,
+    `unclosed_candle_violation_count`,
+    `duplicate_record_skipped_count`, `data_gap_flags`
+    (closed `DataQualityFlag.*` taxonomy), and the
+    cumulative `NoLookaheadViolation` audit list.
+    `record_violation(v)` classifies by reason (closed PR94
+    taxonomy: `FUTURE_AVAILABLE_AT` →
+    `future_records_rejected_count`; `MISSING_AVAILABLE_AT`
+    → `missing_available_at_count`;
+    `UNCLOSED_CANDLE_FIELD_ACCESS` →
+    `unclosed_candle_violation_count`;
+    `INGESTED_AT_USED_AS_AVAILABILITY` and
+    `OUTCOME_LABEL_DURING_BLIND_WINDOW` preserved in
+    `violations` only). `record_data_quality_flag(f)`
+    enforces the closed taxonomy. `snapshot()` returns a deep
+    copy used by every :class:`ReplayFeedBatch`.
+    `to_dict()` JSON-serialisable; re-pins safety boundary.
+  - :class:`ReplayFeedBatch` — frozen, JSON-serialisable
+    per-tick batch. Fields: `batch_id` (deterministic
+    `"replay_batch_{counter:06d}"`), `simulated_time`
+    (UTC-aware), `records` (deterministic catch-all union
+    sorted by `(event_time, available_at, symbol,
+    record_id)`), `klines_1m`, `klines_5m`, `funding_rates`,
+    `open_interest`, `ticker_24h`, `symbol_status`,
+    `asof_universe` (snapshot, NEVER deduped against
+    `cursor.emitted_record_ids`), `diagnostics` (snapshot of
+    cumulative provider diagnostics), `violations` (per-batch
+    slice of `store.violations`), `replay_complete`, plus
+    hard-pinned `phase_12_forbidden=True`,
+    `auto_tuning_allowed=False`, `trade_authority=False`.
+    Construction refuses any attempt to flip the safety
+    flags. `to_dict()` JSON-serialisable; re-pins safety
+    boundary.
+  - :class:`ReplayFeedProvider` — deterministic forward-only
+    feed provider. Constructed with a
+    :class:`HistoricalMarketStore`, a :class:`SimulationClock`,
+    and a :class:`ReplayFeedProviderConfig`; verifies
+    clock window contains config window; snaps clock to
+    `config.start_time`. Public methods: `next_batch()`
+    (advance clock by `config.step_interval`, return batch;
+    raises `StopIteration` after `replay_complete=True`),
+    `advance_and_get_batch(delta)` (advance clock by `delta`;
+    `delta` may be `timedelta` / `int|float` seconds /
+    interval string), `batch_at(simulated_time)` (advance
+    clock to `simulated_time`, which MUST be `>=
+    cursor.current_time`), `get_asof_universe()` (also
+    forward-only), `get_diagnostics()` (returns a snapshot),
+    `reset()` (test-only; requires
+    `monotonic_forward_only=False` on the clock),
+    `safety_payload()`, `to_dict()`. Public properties:
+    `store`, `clock`, `config`, `cursor`, `diagnostics`,
+    `time_wall_guard`, `candle_visibility_guard`,
+    `replay_complete`, plus the defensive tripwires
+    `sandbox_only`, `live_trading`, `exchange_live_orders`,
+    `binance_private_api_enabled`,
+    `telegram_outbound_enabled`, `ai_trade_authority`,
+    `trade_authority`, `auto_tuning_allowed`,
+    `phase_12_forbidden`.
+
+**Strict blind walk-forward semantics.**
+
+  - Every emitted record obeys
+    `available_at <= simulated_time`, delegated to PR95
+    :meth:`HistoricalMarketStore.query_records`, which
+    delegates to PR94
+    :meth:`TimeWallGuard.validate_no_lookahead`. Future
+    records produce :class:`NoLookaheadViolation` audit
+    objects accumulated on `store.violations`; PR96 reads the
+    per-batch slice and (a) records each via
+    :meth:`ReplayFeedDiagnostics.record_violation` and (b)
+    exposes the slice as :pyattr:`ReplayFeedBatch.violations`.
+    `ingested_at` is NEVER substituted for `available_at`.
+  - Closed-candle visibility is enforced by construction in
+    PR95 (`HistoricalKlineRecord.available_at >= close_time`)
+    and re-checked at query time via
+    :meth:`CandleVisibilityGuard.is_candle_closed` when
+    `strict_candle_visibility=True`. If a kline somehow lands
+    on an unclosed candle relative to `simulated_time`, PR96
+    mints an `UNCLOSED_CANDLE_FIELD_ACCESS` violation via
+    :meth:`TimeWallGuard.make_unclosed_candle_field_access_violation`
+    and refuses to emit the batch.
+  - The as-of universe is delegated to
+    :meth:`HistoricalMarketStore.query_asof_universe`
+    (Constitution §9: `listed_at <= T` AND
+    (`delisted_at is None` OR `delisted_at > T`) AND
+    `available_at <= T` AND `status` is in
+    `SymbolStatus.TRADABLE_OR_MONITORABLE`). The provider
+    NEVER consults the *current* symbol list; an empty store
+    at any `simulated_time` returns an empty universe.
+  - All batch contents are deterministically sorted (records
+    by `(event_time, available_at, symbol, record_id)`;
+    per-type lists by the same key; as-of universe by
+    `(symbol, listed_at, record_id)`). Two providers fed
+    identical (store, clock, config) produce byte-identical
+    batch sequences (verified by
+    `test_deterministic_output_from_same_store_clock_config`).
+  - All record / batch / cursor / diagnostics / config /
+    provider `to_dict()` outputs are JSON-serialisable.
+
+**Hard safety boundary (Phase 11C.1D-D-C / PR96).**
+
+| flag | value |
+| --- | --- |
+| `mode` | `paper` |
+| `sandbox_only` | `True` |
+| `live_trading` | `False` |
+| `exchange_live_orders` | `False` |
+| `binance_private_api_enabled` | `False` |
+| `signed_endpoint_reachable` | `False` |
+| `private_websocket_reachable` | `False` |
+| `account_endpoint_reachable` | `False` |
+| `order_endpoint_reachable` | `False` |
+| `position_endpoint_reachable` | `False` |
+| `leverage_endpoint_reachable` | `False` |
+| `margin_endpoint_reachable` | `False` |
+| `real_exchange_order_path` | `False` |
+| `real_capital` | `False` |
+| `telegram_outbound_enabled` | `False` |
+| `telegram_live_command_authority` | `False` |
+| `ai_trade_authority` | `False` |
+| `trade_authority` | `False` |
+| `auto_tuning_allowed` | `False` |
+| `phase_12_forbidden` | **`True`** |
+
+The Risk Engine remains the single trade-decision gate.
+
+**No-network / no-LLM / no-Telegram / no-Binance assertions.**
+The unit suite AST-walks `app/sim/__init__.py` and
+`app/sim/replay_feed_provider.py` and asserts that they do
+**NOT** import `app.risk` / `app.execution` / `app.exchanges` /
+`app.telegram` / `app.config`, do **NOT** import any
+`deepseek` / `openai` / `anthropic` / `telegram` / `binance` /
+`ccxt` / `websocket` / `websockets` / `httpx` / `aiohttp` /
+`requests` / `urllib.request` / `http.client` / `grpc` /
+`boto3` / `socket` module, and do **NOT** reference any
+`requests.get` / `requests.post` / `urllib.request` /
+`socket.connect` / `socket.create_connection` identifier.
+Importing the `app.sim` package and the new
+`app.sim.replay_feed_provider` module is also asserted at
+runtime (via `sys.modules` diffing) to not pull any forbidden
+module.
+
+**No-trade-verb public surface assertion.** A dedicated test
+asserts that no public method on
+:class:`ReplayFeedProvider`, :class:`ReplayFeedBatch`,
+:class:`ReplayFeedCursor`, :class:`ReplayFeedDiagnostics`, or
+:class:`ReplayFeedProviderConfig` exposes any of the trade
+verbs `buy`, `sell`, `place_order`, `submit_order`, `long`,
+`short`, `open_position`, `close_position`, `set_leverage`,
+`set_stop`, `set_target`, `apply_change`, `deploy`,
+`enable_live`.
+
+**Forbidden-field guard.** Every record / batch / cursor /
+diagnostics / config / provider `to_dict()` boundary runs
+through the recursive `assert_no_forbidden_fields` guard
+before returning. `ReplayFeedBatch` construction additionally
+refuses any attempt to flip `phase_12_forbidden`,
+`auto_tuning_allowed`, or `trade_authority` away from their
+hard-pinned values.
+
+**Forbidden by this PR (verbatim).**
+
+  - Do not modify `app/risk/**`, `app/execution/**`,
+    `app/exchanges/**`, `app/telegram/**`, `app/config/**`.
+  - Do not modify `app/sim/simulation_clock.py`,
+    `app/sim/time_wall_guard.py`, or
+    `app/sim/historical_market_store.py` (PR94 + PR95
+    contracts are reused verbatim).
+  - Do not implement the MockExchange + Pessimistic Fill
+    Model (PR97).
+  - Do not implement the Simulated Capital Flow + Trade
+    Ledger (PR98).
+  - Do not implement the Telegram Sandbox Outbox (PR99).
+  - Do not implement the Blind Walk-forward Runner (PR100).
+  - Do not enable live orders.
+  - Do not connect to Binance private API.
+  - Do not enable any real Telegram outbound.
+  - Do not call DeepSeek / LLM / any network transport.
+  - Do not auto-tune anything.
+  - Do not enter Phase 12.
+
+**Tests.** `python -m pytest
+tests/unit/test_replay_feed_provider.py -q` ships **26
+PASSING** tests; `python -m pytest tests/unit -q` reports
+**3479 PASSING** tests, 0 failures (was 3453 before this
+phase; +26 from this phase).
+
+**Files added / modified by this PR.**
+
+  - Added: `app/sim/replay_feed_provider.py`.
+  - Modified: `app/sim/__init__.py` (re-exports the new
+    public surface alongside the PR94 + PR95 substrate; no
+    PR94 or PR95 symbol removed).
+  - Added: `tests/unit/test_replay_feed_provider.py`.
+  - Added: `docs/PHASE_11C_1D_D_C_REPLAY_FEED_PROVIDER.md`.
+  - Modified: `docs/PROJECT_STATUS.md` (current-phase block
+    prepended; prior 11C.1D-D-B entry preserved verbatim as
+    *Prior status*).
+  - Modified: `docs/PHASE_GATE.md` (new
+    *Open phase: Phase 11C.1D-D-C / ReplayFeedProvider v0
+    (PR96, IN_REVIEW)* section appended; Phase 12 row in the
+    *Open / Reserved phases* table at the top of the file is
+    unchanged).
+  - Modified: `docs/CHANGELOG.md` (this entry).
+
+**Files explicitly NOT touched.**
+
+  - `app/risk/**`, `app/execution/**`, `app/exchanges/**`,
+    `app/telegram/**`, `app/config/**`, `app/safety/**`,
+    `app/ai/**`, `app/replay/**`, `app/reflection/**`,
+    `app/paper_shadow/**`, `app/sandbox/**`,
+    `app/state_machine/**`, `app/scanner/**`,
+    `app/regime/**`, `app/market_data/**`,
+    `app/market_data_public/**`, `app/universe/**`,
+    `app/liquidity/**`, `app/manipulation/**`,
+    `app/monitoring/**`, `app/database/**`,
+    `app/exports/**`, `app/incidents/**`,
+    `app/learning/**`, `app/llm/**`, `app/paper_run/**`,
+    `app/reconciliation/**`, `app/confirmation/**`,
+    `app/capital/**`, `app/core/**`, `app/main.py`,
+    `app/sim/simulation_clock.py`,
+    `app/sim/time_wall_guard.py`,
+    `app/sim/historical_market_store.py`.
+  - `scripts/**`, `configs/**`, `data/**`,
+    `requirements.txt`, `pyproject.toml`, `.env*`.
+
+**Next-allowed-phase decision rule.**
+
+  - PR96 acceptance only authorises **PR97 — MockExchange +
+    Pessimistic Fill Model v0** to begin. PR97 itself opens
+    its own gate.
+  - PR96 acceptance does **NOT** authorise PR98, PR99, PR100,
+    the *Blind Walk-forward Runner*, live trading,
+    auto-tuning, the DeepSeek hot path, Telegram live
+    outbound, or Phase 12. Phase 12 remains **FORBIDDEN**.
+
+**Phase taxonomy clarification.** The status taxonomy for this
+phase is intentionally **NOT** `ACCEPTED` / `APPLY` / `DEPLOY`
+/ `ENABLE_LIVE` / `GO_LIVE`. The phase is marked
+**IN_REVIEW**; promotion to `ACCEPTED` requires a separate
+docs-closeout PR after maintainer review. Phase 12 remains
+**FORBIDDEN**.
+
 ### Phase 11C.1D-D-B — Historical Market Store v0 (PR95): IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only
