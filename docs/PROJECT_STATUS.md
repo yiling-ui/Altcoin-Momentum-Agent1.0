@@ -22,6 +22,29 @@ intentionally short. The full phase-gate ledger lives in
 > LLM call, no auto-tuning, and no authority over the Risk
 > Engine, the Execution FSM, or the Capital Flow Engine.
 
+> **Active sub-task: PR101-A — Binance Public Kline File Adapter
+> Fix (IN_REVIEW).** Fixes the PR101 ingestion scanner / parser so
+> that `source_type = BINANCE_PUBLIC_KLINE_FILE` correctly scans and
+> parses **real** Binance public futures kline daily CSV dumps laid
+> out as
+> `klines/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv`
+> with the 12-column header
+> `open_time,open,high,low,close,volume,close_time,quote_volume,
+> count,taker_buy_volume,taker_buy_quote_volume,ignore`. Before the
+> fix, real Binance CSV input returned `INSUFFICIENT_EVIDENCE`
+> (`ingested_record_count=0`, `source_files=[]`); after the fix it
+> returns `EVIDENCE_GENERATED` with `event_time = close_time`,
+> `available_at = close_time + lag` (never `ingested_at`), the
+> header row skipped (never parsed as data), and malformed rows
+> rejected with warnings (never fabricated). Scope touches only
+> `app/sim/historical_data_ingestion.py`,
+> `tests/unit/test_historical_data_ingestion.py`, and the three
+> status docs; **nothing** under `app/risk/`, `app/execution/`,
+> `app/exchanges/`, `app/telegram/`, `app/config/`, the Blind
+> Runner, `MockExchange`, or Capital Flow is touched. Still
+> `historical_blind_sim_live` / paper-only. **Phase 12 remains
+> FORBIDDEN.**
+
 PR101 ships the **eighth** anti-future-lookahead infrastructure
 block of the strict blind walk-forward stack defined by Phase
 11C.1D-D (PR93). It turns **local files** into the PR95 record

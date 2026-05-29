@@ -7,6 +7,86 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D-H — PR101-A — Binance Public Kline File Adapter Fix: IN_REVIEW
+
+**Type:** Bugfix PR (paper / report / evidence-only infrastructure).
+**Runtime effect:** **none on real trading; no real data download; no
+network; no Binance private API; no signed endpoint; no private
+websocket; no listenKey; no real exchange order; no real Telegram
+outbound; no DeepSeek / LLM call; no auto-tuning.** PR101-A fixes the
+PR101 ingestion scanner / parser so that `source_type =
+BINANCE_PUBLIC_KLINE_FILE` correctly scans and parses **real Binance
+public futures kline daily CSV dumps**. Before this fix, real Binance
+CSV input produced `INSUFFICIENT_EVIDENCE` with
+`ingested_record_count=0` and `source_files=[]` because the scanner
+only recognised single `*.jsonl` / `*.json` fixture files and the
+parser only handled JSON rows — it did not understand the nested
+daily-CSV directory layout, the 12-column header, or millisecond
+epoch timestamps.
+
+**Files changed (allowed scope only).**
+
+  - `app/sim/historical_data_ingestion.py` — added a Binance public
+    futures kline daily-CSV adapter:
+      * new nested-path scanner that discovers
+        `klines/<SYMBOL>/<INTERVAL>/<SYMBOL>-<INTERVAL>-YYYY-MM-DD.csv`
+        (supports both `<root>/klines/...` and the
+        `<root>/binance_um/klines/...` Binance dump layout) and
+        auto-discovers symbols from the nested tree;
+      * `import csv` (standard library only) plus `_read_csv_rows`,
+        `_is_binance_kline_header_row`,
+        `_binance_kline_csv_row_to_dict` helpers, and a
+        `_load_binance_kline_csv_dir` engine method that parses every
+        daily CSV in sorted (deterministic) order;
+      * the 12-column header
+        `open_time,open,high,low,close,volume,close_time,
+        quote_volume,count,taker_buy_volume,taker_buy_quote_volume,
+        ignore` is detected and the header row is **skipped, never
+        parsed as data**;
+      * `open_time` / `close_time` millisecond epochs are converted to
+        timezone-aware UTC datetimes via the existing
+        `parse_kline_row` path; `event_time` is now pinned to the
+        candle `close_time`; `available_at` remains `close_time +
+        default_availability_lag_seconds` and is **NEVER** derived
+        from `ingested_at`;
+      * malformed rows (wrong column count, non-numeric ms timestamp,
+        non-numeric OHLCV) are **rejected with a warning** and never
+        fabricated; the CSV path takes precedence over JSON/JSONL only
+        when a real CSV directory exists, so existing fixture-mode
+        ingestion is unchanged.
+  - `tests/unit/test_historical_data_ingestion.py` — added 14 new
+    tests (all PASSING) covering the nested CSV path scan, the
+    `binance_um` layout + symbol auto-discovery, 12-column header
+    parsing, header-row skipping, ms→UTC conversion, 1m / 5m record
+    creation, non-empty `source_files`, positive
+    `ingested_record_count`, `available_at = close_time + lag` (not
+    `ingested_at`), malformed-row rejection, missing-input
+    `INSUFFICIENT_EVIDENCE`, pinned safety flags, and a focused
+    no-network / no-private-API import scan (stdlib `csv` only).
+  - `docs/CHANGELOG.md`, `docs/PROJECT_STATUS.md`,
+    `docs/PHASE_GATE.md` — this entry / status note.
+
+**Out of scope (NOT touched).** No file under `app/risk/`,
+`app/execution/`, `app/exchanges/`, `app/telegram/`, `app/config/`;
+no Blind Runner logic; no `MockExchange`; no Capital Flow; no Strategy
+/ AI / Risk logic. No Binance private API. No live orders. No real
+Telegram. No auto-tuning. No 30D / 60D / 90D / 2Y blind runner.
+**Phase 12 remains FORBIDDEN.**
+
+**Tests.** `python -m pytest
+tests/unit/test_historical_data_ingestion.py -q` → **44 passed** (30
+prior + 14 new). Full `python -m pytest tests/unit -q` → **3628
+passed**. Operator smoke run of
+`scripts/run_historical_data_ingestion.py --source-type
+BINANCE_PUBLIC_KLINE_FILE` over a real-shaped nested Binance kline
+CSV tree returned `status=EVIDENCE_GENERATED`,
+`ingested_record_count=5`, `rejected_record_count=0`, header row
+counted as `skipped_record_count=1`, every record carrying
+`source=BINANCE_PUBLIC_KLINE_FILE`, `event_time == close_time`,
+`available_at == close_time + lag`, `ingested_at=null`, and all
+safety flags pinned. The system remains
+`historical_blind_sim_live` / paper-only.
+
 ### Phase 11C.1D-D-H — Historical Data Ingestion / Backfill v0 (PR101): IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only
