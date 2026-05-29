@@ -427,6 +427,18 @@ class BlindWalkForwardRunnerConfig:
         default_factory=dict
     )
     fill_model_artefact: Mapping[str, Any] = field(default_factory=dict)
+    # Optional pre-computed manifest hashes (PR103 - Blind Runner
+    # Historical Store Input Glue). When an operator wires a real
+    # PR101/PR102 Historical Data Store into the runner, the
+    # data / universe manifests already carry their own deterministic
+    # ``sha256:`` content hashes. Passing them here makes
+    # :meth:`prepare_manifest` pin those *real* hashes onto the
+    # :class:`BlindRunManifest` instead of hashing the (empty) inline
+    # artefact bundle. They are NEVER fabricated: when ``None`` the
+    # runner falls back to ``compute_artefact_hash`` of the inline
+    # artefact, exactly as before.
+    data_manifest_hash: Optional[str] = None
+    universe_manifest_hash: Optional[str] = None
     code_commit: str = "unknown"
     run_id: Optional[str] = None
     report_root: str = DEFAULT_REPORT_ROOT
@@ -502,6 +514,18 @@ class BlindWalkForwardRunnerConfig:
             if not isinstance(v, Mapping):
                 raise TypeError(
                     f"{fname} must be a Mapping; got {type(v)!r}"
+                )
+        # PR103: optional pre-computed manifest hashes must, when
+        # provided, be canonical ``sha256:`` strings. We never accept a
+        # fabricated / non-hash sentinel here.
+        for fname in ("data_manifest_hash", "universe_manifest_hash"):
+            v = getattr(self, fname)
+            if v is None:
+                continue
+            if not isinstance(v, str) or not v.startswith("sha256:"):
+                raise ValueError(
+                    f"{fname}, when provided, must be a non-empty "
+                    f"'sha256:'-prefixed string; got {v!r}"
                 )
         object.__setattr__(self, "base_clock_step", bcs)
         object.__setattr__(self, "allowed_timeframes", atf)
@@ -724,11 +748,17 @@ class BlindWalkForwardRunner:
             feature_schema_hash=compute_artefact_hash(
                 cfg.feature_schema_artefact
             ),
-            data_manifest_hash=compute_artefact_hash(
-                cfg.data_manifest_artefact
+            data_manifest_hash=(
+                cfg.data_manifest_hash
+                if cfg.data_manifest_hash is not None
+                else compute_artefact_hash(cfg.data_manifest_artefact)
             ),
-            universe_manifest_hash=compute_artefact_hash(
-                cfg.universe_manifest_artefact
+            universe_manifest_hash=(
+                cfg.universe_manifest_hash
+                if cfg.universe_manifest_hash is not None
+                else compute_artefact_hash(
+                    cfg.universe_manifest_artefact
+                )
             ),
             simulation_clock_start=cfg.window.blind_start,
             simulation_clock_end=cfg.window.blind_end,
