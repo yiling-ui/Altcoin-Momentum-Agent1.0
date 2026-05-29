@@ -7,6 +7,164 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D-E — Simulated Capital Flow + Trade Ledger v0 (PR98): IN_REVIEW
+
+**Type:** Implementation PR (paper / report / evidence-only
+infrastructure). **Runtime effect:** **none on real trading.**
+Two new modules `app/sim/simulated_capital_flow.py` and
+`app/sim/trade_ledger.py`, one extended `app/sim/__init__.py`
+re-exporting the new public surface alongside the PR94 + PR95 +
+PR96 + PR97 substrate, one new unit-test module
+`tests/unit/test_simulated_capital_flow_trade_ledger.py` (26
+PASSING tests covering all 24 brief-mandated scenarios plus
+closed-taxonomy enforcement and phase-name-string presence), and
+one new phase doc
+`docs/PHASE_11C_1D_D_E_SIMULATED_CAPITAL_FLOW_TRADE_LEDGER.md`. No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, `app/safety/`, `app/ai/`,
+`app/replay/`, `app/reflection/`, `app/paper_shadow/`,
+`app/sandbox/`, `app/state_machine/`, `app/scanner/`,
+`app/regime/`, `app/market_data/`, `app/market_data_public/`,
+`app/universe/`, `app/liquidity/`, `app/manipulation/`,
+`app/monitoring/`, `app/database/`, `app/exports/`,
+`app/incidents/`, `app/learning/`, `app/llm/`, `app/paper_run/`,
+`app/reconciliation/`, `app/confirmation/`, `app/capital/`,
+`app/core/`, `app/main.py` is touched. The existing PR94 / PR95 /
+PR96 / PR97 sources (`app/sim/simulation_clock.py`,
+`app/sim/time_wall_guard.py`, `app/sim/historical_market_store.py`,
+`app/sim/replay_feed_provider.py`, `app/sim/mock_exchange.py`,
+`app/sim/pessimistic_fill_model.py`) are reused **verbatim** and
+are NOT modified by this PR. No event type wired into the runtime
+hot path. No database schema / migration. The new modules have NO
+I/O, NO network, NO real data fetch, NO real exchange API, NO
+signed endpoint, NO private websocket, NO API key, NO API secret,
+NO real account id, NO authority over the Risk Engine, the
+Execution FSM, or the Capital Flow Engine.
+
+**What this PR ships.** The **fifth** anti-future-lookahead
+infrastructure block of the strict blind walk-forward stack
+defined by Phase 11C.1D-D (PR93, the *Strict Blind Walk-forward
+Sim-Live Constitution*). PR93 §19's engineering route explicitly
+authorises ONLY this PR (PR98) to begin the next paper-only step
+after PR97. PR98 implements the simulated capital state, simulated
+position book, trade ledger, and equity timeseries that consume
+:class:`MockFill` outputs from PR97's :class:`MockExchange`. PR99
+*Telegram Sandbox Outbox* and PR100 *Blind Walk-forward Runner v0*
+remain **FORBIDDEN by this phase alone**.
+
+**Public surface added.**
+
+  - `SimulatedCapitalConfig` — frozen capital / risk-budget /
+    freeze-threshold configuration with hard-pinned
+    `sandbox_only=True` / `live_capital_enabled=False`.
+  - `SimulatedPosition` — mutable simulated position book entry
+    (`position_id`, `symbol`, `side` (`LONG` / `SHORT`,
+    paper-only descriptor), `qty`, `avg_entry_price`,
+    `opened_at_simulated`, `updated_at_simulated`,
+    `realized_pnl`, `unrealized_pnl`, `fees_paid`,
+    `slippage_paid`, `funding_paid`, `status` (`OPEN` /
+    `CLOSED`), `evidence_refs`, `max_favorable_excursion`,
+    `max_drawdown_during_trade`) with hard-pinned
+    `simulated_only=True` / `no_live_order=True` /
+    `live_capital_enabled=False` / `phase_12_forbidden=True` /
+    `trade_authority=False` / `auto_tuning_allowed=False`.
+  - `SimulatedCapitalState` — frozen capital snapshot
+    (`timestamp`, `initial_capital`, `exchange_equity`,
+    `locked_profit`, `open_risk`, `unrealized_pnl`,
+    `realized_pnl`, `total_lifetime_equity`, `drawdown`,
+    `active_positions`, `risk_state`, `capital_frozen`,
+    `freeze_reason`).
+  - `EquityTimeseriesPoint` — frozen equity-curve sample
+    (`timestamp`, `exchange_equity`, `locked_profit`, `open_risk`,
+    `unrealized_pnl`, `realized_pnl`, `total_lifetime_equity`,
+    `drawdown`, `active_positions`, `risk_state`),
+    JSON-serialisable.
+  - `TradeLedgerEntry` — frozen trade-ledger record
+    (`trade_id`, `symbol`, `entry_time`, `exit_time`,
+    `entry_reason`, `exit_reason`, `regime_state`,
+    `candidate_rank`, `risk_decision`, `order_type`,
+    `requested_qty`, `filled_qty`, `avg_fill_price`,
+    `slippage_bps`, `fee`, `max_drawdown_during_trade`,
+    `max_favorable_excursion`, `net_pnl`, `locked_profit_delta`,
+    `failure_flags`, `evidence_refs`, `outcome`).
+  - `TradeLedger` — append-only deterministic ledger of
+    :class:`TradeLedgerEntry` with symbol query, time-range
+    query, and deterministic summary metrics.
+  - `TradeLedgerSummary` — frozen summary (`trade_count`,
+    `win_count`, `loss_count`, `breakeven_count`,
+    `total_realized_pnl`, `total_fees`, `total_slippage_bps`,
+    `max_drawdown`, `median_mfe`, `median_mae`).
+  - `SimulatedCapitalFlowEngine` — the deterministic, paper-only
+    capital-flow engine with `consume_fill(...)` /
+    `apply_mark_prices(...)` / `apply_replay_batch(...)` /
+    `apply_funding(...)` / `forced_exit(...)` /
+    `freeze_capital(...)` / `unfreeze_capital()` /
+    `get_state(...)` / `get_positions()` / `get_ledger()` /
+    `get_equity_timeseries()` /
+    `available_capital_for_new_exposure()` / `to_dict()` /
+    `safety_payload()`. NEVER calls a real exchange, NEVER
+    advertises a real account / order id, NEVER opens a private
+    websocket, NEVER touches the Binance private API.
+  - Closed taxonomies: `PositionSide` (`LONG` / `SHORT`),
+    `PositionStatus` (`OPEN` / `CLOSED`), `RiskFreezeReason`
+    (`NORMAL` / `MAX_DRAWDOWN_EXCEEDED` /
+    `CONSECUTIVE_LOSS_PAUSE` / `LIQUIDATION_STRESS` /
+    `MANUAL_FREEZE`), `TradeOutcome` (`WIN` / `LOSS` /
+    `BREAKEVEN`), `TradeFailureFlag` (`NONE` /
+    `PARTIAL_FILL_ONLY` / `AMBIGUOUS_INTRABAR_PATH` /
+    `FORCED_EXIT_TRIGGERED` / `DRAWDOWN_FREEZE_ACTIVE` /
+    `CONSECUTIVE_LOSS_FREEZE_ACTIVE` /
+    `LIQUIDATION_STRESS_TRIGGERED`).
+  - `CapitalFrozenError` — raised when a caller attempts to open
+    a NEW simulated position while the simulated capital is
+    frozen.
+
+**Hard safety boundary (Phase 11C.1D-D-E / PR98)**: `mode=paper`,
+`sandbox_only=True`, `simulated_only=True`, `no_live_order=True`,
+`live_trading=False`, `live_capital_enabled=False`,
+`exchange_live_orders=False`, `binance_private_api_enabled=False`,
+`signed_endpoint_reachable=False`,
+`private_websocket_reachable=False`,
+`account_endpoint_reachable=False`,
+`order_endpoint_reachable=False`,
+`position_endpoint_reachable=False`,
+`leverage_endpoint_reachable=False`,
+`margin_endpoint_reachable=False`,
+`real_exchange_order_path=False`, `real_capital=False`,
+`telegram_outbound_enabled=False`,
+`telegram_live_command_authority=False`,
+`ai_trade_authority=False`, `trade_authority=False`,
+`auto_tuning_allowed=False`, `phase_12_forbidden=True`. **Phase
+12 remains FORBIDDEN.**
+
+**Forbidden output fields (rejected at serialisation time)**: the
+project-wide `FORBIDDEN_OUTPUT_FIELDS` set plus
+`runtime_config_patch`, `symbol_limit_patch`, `threshold_patch`,
+`candidate_pool_patch`, `regime_weight_patch`,
+`strategy_parameter_patch`, `apply_change`, `deploy_change`,
+`enable_live`, `live_ready`, `trading_approved`, `real_order_id`,
+`exchange_order_id`, `real_account_id`, `api_key`, `api_secret`,
+`signed_request`, `signed_endpoint_url`, `listen_key`,
+`listenkey`, `private_websocket_url`, `binance_signed`.
+
+**Tests.**
+
+```
+python -m pytest tests/unit/test_simulated_capital_flow_trade_ledger.py -q
+# 26 PASSED
+python -m pytest tests/unit -q
+# 3530 PASSED, 0 failures (was 3504 before this phase; +26 from
+# this phase)
+```
+
+**Successor allowed by this phase.** A successful PR98 only
+authorises **PR99 — Telegram Sandbox Outbox v0** to begin its own
+gate. It does NOT authorise the Blind Walk-forward Runner (PR100),
+live trading, auto-tuning, real Telegram outbound, real Binance
+private API access, or any runtime config write. The Risk Engine
+remains the single trade-decision gate. Phase 12 remains
+**FORBIDDEN**.
+
 ### Phase 11C.1D-D-D — MockExchange + Pessimistic Fill Model v0 (PR97): IN_REVIEW
 
 **Type:** Implementation PR (paper / report / evidence-only

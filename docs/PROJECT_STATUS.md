@@ -7,6 +7,65 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-E — Simulated Capital Flow + Trade Ledger v0
+> (*Strict blind walk-forward simulated capital accounting,
+> position book, trade ledger, and equity timeseries / 严格前向
+> Sim-Live 模拟资金流与交易流水 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no I/O, no network, no real data
+> fetch, no real exchange API, no signed endpoint, no private
+> websocket, no API key, no API secret, no real account, and
+> no authority over the Risk Engine, the Execution FSM, or the
+> Capital Flow Engine.
+
+PR98 ships the **fifth** anti-future-lookahead infrastructure block
+of the strict blind walk-forward stack defined by Phase 11C.1D-D
+(PR93). It implements the deterministic paper-only simulated
+capital state, simulated position book, trade ledger, and equity
+timeseries that consume :class:`MockFill` outputs from PR97. Two
+new modules `app/sim/simulated_capital_flow.py` and
+`app/sim/trade_ledger.py`, one extended `app/sim/__init__.py`
+re-exporting the new public surface alongside the PR94 / PR95 /
+PR96 / PR97 substrate, one new unit-test module
+`tests/unit/test_simulated_capital_flow_trade_ledger.py` (26
+PASSING tests covering all 24 brief-mandated scenarios plus closed-
+taxonomy enforcement and phase-name-string presence), and one new
+phase doc
+`docs/PHASE_11C_1D_D_E_SIMULATED_CAPITAL_FLOW_TRADE_LEDGER.md`. No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/`, `app/safety/`, `app/ai/`,
+`app/replay/`, `app/reflection/`, `app/paper_shadow/`,
+`app/sandbox/`, `app/state_machine/`, `app/scanner/`,
+`app/regime/`, `app/market_data/`, `app/market_data_public/`,
+`app/universe/`, `app/liquidity/`, `app/manipulation/`,
+`app/monitoring/`, `app/database/`, `app/exports/`,
+`app/incidents/`, `app/learning/`, `app/llm/`, `app/paper_run/`,
+`app/reconciliation/`, `app/confirmation/`, `app/capital/`,
+`app/core/`, `app/main.py` is touched. The existing PR94 / PR95 /
+PR96 / PR97 sources (`app/sim/simulation_clock.py`,
+`app/sim/time_wall_guard.py`, `app/sim/historical_market_store.py`,
+`app/sim/replay_feed_provider.py`, `app/sim/mock_exchange.py`,
+`app/sim/pessimistic_fill_model.py`) are reused **verbatim** and
+are NOT modified by this PR.
+
+Hard safety boundary held: `mode=paper`, `sandbox_only=True`,
+`simulated_only=True`, `no_live_order=True`, `live_trading=False`,
+`live_capital_enabled=False`, `exchange_live_orders=False`,
+`binance_private_api_enabled=False`, no signed endpoint, no
+private websocket, no account / order / position / leverage /
+margin endpoint, no real exchange order, no real capital, no real
+account id, no real Telegram outbound, AI trade authority `False`,
+trade authority `False`, auto-tuning allowed `False`,
+`phase_12_forbidden=True`. **Phase 12 remains FORBIDDEN.**
+
+A successful PR98 only authorises **PR99 — Telegram Sandbox Outbox
+v0** to begin its own gate. It does NOT authorise the Blind
+Walk-forward Runner (PR100), live trading, auto-tuning, real
+Telegram outbound, or Phase 12.
+
 > **Phase 11C.1D-D-D — MockExchange + Pessimistic Fill Model v0
 > (*Strict blind walk-forward simulated exchange + conservative
 > fill model / 严格前向 Sim-Live 模拟交易所与保守成交模型 v0*).**
