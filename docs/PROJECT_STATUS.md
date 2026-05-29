@@ -7,6 +7,117 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D-H — Historical Data Ingestion / Backfill v0
+> (*Strict blind walk-forward historical data ingestion / 严格前向
+> Sim-Live 历史数据导入 / 回填 v0*).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: implementation PR (paper / report / evidence-only
+> infrastructure).** No runtime hot-path wiring, no new event
+> types, no schema migration, no network, no real data download,
+> no real exchange API, no Binance private API, no signed
+> endpoint, no private websocket, no listenKey, no API key, no
+> API secret, no real account, no real exchange order, no real
+> Telegram outbound, no Telegram command authority, no DeepSeek /
+> LLM call, no auto-tuning, and no authority over the Risk
+> Engine, the Execution FSM, or the Capital Flow Engine.
+
+PR101 ships the **eighth** anti-future-lookahead infrastructure
+block of the strict blind walk-forward stack defined by Phase
+11C.1D-D (PR93). It turns **local files** into the PR95 record
+types and produces the data / universe manifests + coverage / gap
+audit that later strict forward-only blind walk-forward runs (the
+PR100 runner) will consume:
+
+  - `HistoricalDataSourceType` — closed taxonomy of **public /
+    file** source types (`BINANCE_PUBLIC_KLINE_FILE`,
+    `BINANCE_PUBLIC_FUNDING_FILE`,
+    `BINANCE_PUBLIC_OPEN_INTEREST_FILE`,
+    `BINANCE_PUBLIC_TICKER_FILE`, `EXCHANGE_INFO_FILE`,
+    `SYMBOL_STATUS_FILE`, `MANUAL_FIXTURE_FILE`). NEVER a private /
+    signed / account / order / position / leverage / margin
+    endpoint, a private websocket, or a listenKey.
+  - `DataIngestionStatus` — closed taxonomy (`EVIDENCE_GENERATED`,
+    `PARTIAL_EVIDENCE`, `INSUFFICIENT_EVIDENCE`,
+    `FAILED_SCHEMA_VALIDATION`, `INVALIDATED_TIME_FIELDS`). None of
+    these is a strategy-effectiveness conclusion.
+  - `HistoricalDataIngestionConfig` — frozen config
+    (`input_root`, `output_root`, `start_time`, `end_time`,
+    `symbols`, `intervals`, include-flags, `source_type`,
+    `default_availability_lag_seconds`, `strict_utc`,
+    `strict_available_at`, `fixture_mode`) with hard-pinned
+    `sandbox_only=True`, `phase_12_forbidden=True`.
+  - `HistoricalDataManifest` — frozen manifest (`manifest_id`,
+    `generated_at_utc`, `input_root`, `start_time`, `end_time`,
+    `symbols`, `intervals`, `record_counts_by_type`,
+    `coverage_by_symbol`, `data_gap_summary`, `late_arrival_count`,
+    `revised_record_count`, `data_manifest_hash`, `source_files`,
+    `warnings`) with a deterministic `sha256:<hex>` hash over the
+    content (excluding wall-clock `generated_at_utc`).
+  - `UniverseManifest` — frozen as-of universe manifest
+    (`symbol_status_records`, `listed_count`, `delisted_count`,
+    `status_unknown_count`, `universe_manifest_hash`,
+    `survivorship_bias_guard=True`) that retains delisted symbols
+    and reconstructs the as-of universe from the listing /
+    delisting timeline (never the current symbol list).
+  - `HistoricalDataIngestionResult` — frozen result (`status`,
+    `ingested_record_count`, `skipped_record_count`,
+    `rejected_record_count`, `manifest`, `universe_manifest`,
+    `coverage_report_path`, `data_gap_report_path`, `records_path`,
+    `warnings`, `next_allowed_step`).
+  - Row parsers (`parse_kline_row`, `parse_funding_row`,
+    `parse_open_interest_row`, `parse_ticker_24h_row`,
+    `parse_symbol_status_row`) computing `event_time` /
+    `available_at` / `ingested_at` and enforcing timezone-aware
+    UTC. `available_at` is derived from `close_time`/`event_time`/
+    `listed_at` + lag (or an explicit `available_at`) and is
+    **NEVER** taken from `ingested_at`.
+  - `HistoricalDataIngestion` — the engine
+    (`ingest` / `build_store` / `coverage_report` /
+    `data_gap_report` / `write_outputs`) producing the manifests,
+    the coverage / gap audit, and a `records.jsonl` dump.
+
+PR101 reads **local files only**; it NEVER downloads data, NEVER
+opens a network socket, NEVER calls the Binance private API /
+Telegram / DeepSeek / any LLM, NEVER places a real order, NEVER
+fabricates real market data (missing input yields
+`INSUFFICIENT_EVIDENCE`), and NEVER presents a coverage report as a
+strategy-effectiveness conclusion. A deterministic synthetic
+dataset is produced **only** when `fixture_mode` is explicitly
+enabled and is clearly marked synthetic.
+
+Two new modules
+(`app/sim/historical_data_manifest.py`,
+`app/sim/historical_data_ingestion.py`), one extended
+`app/sim/__init__.py` re-exporting the new public surface alongside
+the PR94..PR100 substrate, one new operator entry point
+`scripts/run_historical_data_ingestion.py`, one new unit-test
+module `tests/unit/test_historical_data_ingestion.py` (30 PASSING
+tests covering all 25 brief-mandated scenarios plus 5 defensive
+extras), and one new phase doc
+`docs/PHASE_11C_1D_D_H_HISTORICAL_DATA_INGESTION_BACKFILL.md`. No
+file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/` is touched, and no existing PR94..PR100
+`app/sim/` source is modified except `app/sim/__init__.py` (export
+wiring only).
+
+Hard safety boundary held: `mode=historical_blind_sim_live`,
+`sandbox_only=True`, `simulated_only=True`, `no_live_order=True`,
+`live_trading=False`, `exchange_live_orders=False`,
+`binance_private_api_enabled=False`, no signed endpoint, no private
+websocket, no account / order / position / leverage / margin
+endpoint, no real exchange order, no real capital, no real account
+id, no real Telegram outbound, no Telegram command authority, AI
+trade authority `False`, trade authority `False`, auto-tuning
+allowed `False`, `phase_12_forbidden=True`. **Phase 12 remains
+FORBIDDEN.**
+
+A successful PR101 only authorises a **Historical Data Coverage
+Checkpoint / short-window no-lookahead trial preparation**. It does
+NOT authorise live trading, auto-tuning, real Telegram outbound,
+real exchange orders, the Binance private API, the 30D / 60D / 90D /
+2Y runner, or Phase 12.
+
 > **Phase 11C.1D-D-G — Blind Walk-forward Runner v0
 > (*Strict blind walk-forward orchestrator / 严格前向 Sim-Live
 > blind walk-forward runner v0*).**

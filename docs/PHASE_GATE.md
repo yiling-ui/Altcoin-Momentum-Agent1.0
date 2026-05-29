@@ -8815,3 +8815,127 @@ Capital Flow + Trade Ledger v0*, and Phase 11C.1D-D-F
 
 The Risk Engine remains the single trade-decision gate.
 Phase 12 remains **FORBIDDEN**.
+
+
+## Open phase: Phase 11C.1D-D-H / Historical Data Ingestion / Backfill v0 (PR101, IN_REVIEW)
+
+> **Title:** Historical Data Ingestion / Backfill v0
+> **Status:** IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).
+> **Type:** implementation PR (paper / report / evidence-only
+> infrastructure).
+> **Phase 12:** **FORBIDDEN** (no change).
+
+PR101 ships the **eighth** anti-future-lookahead infrastructure
+block of the strict blind walk-forward stack defined by Phase
+11C.1D-D (PR93). It turns **local files** into the PR95 record
+types (`HistoricalKlineRecord`, `HistoricalMarketRecord`,
+`SymbolStatusRecord`) and produces the data / universe manifests +
+coverage / gap audit that later strict forward-only blind
+walk-forward runs (the PR100 runner) will consume. It feeds the
+PR100 `BlindRunManifest` `data_manifest_hash` /
+`universe_manifest_hash`.
+
+PR101 reads **local files only**. It does NOT download data, does
+NOT open a network socket, does NOT call the Binance private API /
+Telegram / DeepSeek / any LLM, does NOT place a real order, and does
+NOT fabricate real market data. Missing input yields
+`INSUFFICIENT_EVIDENCE`; a deterministic synthetic dataset is
+produced ONLY when `fixture_mode` is explicitly enabled and is
+clearly marked synthetic. A coverage report is NEVER presented as a
+strategy-effectiveness conclusion. It does NOT implement the
+30D / 60D / 90D / 2Y runner.
+
+### Public surface (Phase 11C.1D-D-H / PR101)
+
+  - `HistoricalDataSourceType` — closed taxonomy of **public /
+    file** source types.
+  - `DataIngestionStatus` — `EVIDENCE_GENERATED` /
+    `PARTIAL_EVIDENCE` / `INSUFFICIENT_EVIDENCE` /
+    `FAILED_SCHEMA_VALIDATION` / `INVALIDATED_TIME_FIELDS`.
+  - `HistoricalDataIngestionConfig`,
+    `HistoricalDataIngestionResult`.
+  - `HistoricalDataManifest` (deterministic `data_manifest_hash`),
+    `UniverseManifest` (as-of universe, `survivorship_bias_guard`).
+  - Row parsers + `HistoricalDataIngestion` engine.
+
+### Gate flags (Phase 11C.1D-D-H / PR101)
+
+  - mode = `historical_blind_sim_live`
+  - sandbox_only = `True`
+  - simulated_only = `True`
+  - no_live_order = `True`
+  - live_trading = `False`
+  - exchange_live_orders = `False`
+  - binance_private_api_enabled = `False`
+  - signed_endpoint_reachable = `False`
+  - private_websocket_reachable = `False`
+  - account_endpoint_reachable = `False`
+  - order_endpoint_reachable = `False`
+  - position_endpoint_reachable = `False`
+  - leverage_endpoint_reachable = `False`
+  - margin_endpoint_reachable = `False`
+  - real_exchange_order_path = `False`
+  - real_capital = `False`
+  - telegram_outbound_enabled = `False`
+  - telegram_live_command_authority = `False`
+  - ai_trade_authority = `False`
+  - trade_authority = `False`
+  - auto_tuning_allowed = `False`
+  - phase_12_forbidden = `True`
+
+### What this PR does NOT authorise
+
+  - Do NOT authorise live trading.
+  - Do NOT authorise auto-tuning (no runtime config patch, no
+    threshold patch, no symbol limit patch, no candidate pool
+    patch, no regime weight patch, no strategy parameter patch).
+  - Do NOT authorise real Telegram outbound or Telegram command
+    authority.
+  - Do NOT authorise the Binance private API, a signed endpoint, a
+    private websocket, or a listenKey.
+  - Do NOT authorise a real exchange order or real capital.
+  - Do NOT authorise DeepSeek / LLM calls or any network call path.
+  - Do NOT present a coverage report as a strategy-effectiveness
+    conclusion.
+  - Do NOT authorise the 30D / 60D / 90D / 2Y runner.
+  - Do NOT authorise Phase 12.
+
+### Allowed transitions
+
+| From                           | To                                                                       | Notes                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Phase 11C.1D-D-H IN_REVIEW     | Phase 11C.1D-D-H ACCEPTED                                                | Only via a separate docs-closeout PR after maintainer review. Acceptance authorises ONLY the next item. |
+| Phase 11C.1D-D-H ACCEPTED      | Historical Data Coverage Checkpoint / short-window no-lookahead trial preparation | Paper-only, sandbox-only. NEVER authorises live trading, auto-tuning, real Telegram outbound, real exchange orders, the Binance private API, the 30D / 60D / 90D / 2Y runner, or Phase 12. |
+| any                            | Phase 12                                                                 | **FORBIDDEN.**                                                                                          |
+
+### Tests
+
+`tests/unit/test_historical_data_ingestion.py` ships **30 PASSING
+tests** covering all 25 brief-mandated scenarios plus 5 defensive
+extras. The full unit suite remains green
+(`python -m pytest tests/unit -q` — 3613 PASSING).
+
+### Files shipped
+
+  - `app/sim/historical_data_manifest.py` (NEW)
+  - `app/sim/historical_data_ingestion.py` (NEW)
+  - `app/sim/__init__.py` (EXTENDED — re-exports)
+  - `scripts/run_historical_data_ingestion.py` (NEW)
+  - `tests/unit/test_historical_data_ingestion.py` (NEW)
+  - `docs/PHASE_11C_1D_D_H_HISTORICAL_DATA_INGESTION_BACKFILL.md` (NEW)
+  - `docs/PROJECT_STATUS.md` (UPDATED)
+  - `docs/PHASE_GATE.md` (this section appended)
+  - `docs/CHANGELOG.md` (UPDATED)
+
+No file under `app/risk/`, `app/execution/`, `app/exchanges/`,
+`app/telegram/`, `app/config/` is touched, and no existing
+PR94..PR100 `app/sim/` source is modified except
+`app/sim/__init__.py` (export wiring only).
+
+### Inheritance
+
+Phase 11C.1D-D-H inherits, verbatim, every prior forbidden item
+through Phase 11C.1D-D-G *Blind Walk-forward Runner v0*. The Risk
+Engine remains the single trade-decision gate. Phase 12 remains
+**FORBIDDEN**.

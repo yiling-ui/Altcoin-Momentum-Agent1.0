@@ -199,6 +199,36 @@ from app.sim.historical_market_store import (
     SymbolStatus,
     SymbolStatusRecord,
 )
+from app.sim.historical_data_manifest import (
+    PHASE_NAME as HISTORICAL_DATA_INGESTION_PHASE_NAME,
+)
+from app.sim.historical_data_manifest import (
+    DataIngestionStatus,
+    HistoricalDataManifest,
+    HistoricalDataSourceType,
+    UniverseManifest,
+)
+from app.sim.historical_data_ingestion import (
+    SUPPORTED_KLINE_INTERVALS as HISTORICAL_DATA_SUPPORTED_KLINE_INTERVALS,
+)
+from app.sim.historical_data_ingestion import (
+    HistoricalDataIngestion,
+    HistoricalDataIngestionConfig,
+    HistoricalDataIngestionResult,
+    IngestionSchemaError,
+    IngestionTimeFieldError,
+    parse_funding_row,
+    parse_kline_row,
+    parse_open_interest_row,
+    parse_symbol_status_row,
+    parse_ticker_24h_row,
+)
+from app.sim.historical_data_manifest import (
+    compute_artefact_hash as historical_data_compute_artefact_hash,
+)
+from app.sim.historical_data_manifest import (
+    safety_payload as historical_data_safety_payload,
+)
 from app.sim.mock_exchange import (
     PHASE_NAME as MOCK_EXCHANGE_PHASE_NAME,
 )
@@ -334,6 +364,8 @@ from app.sim.blind_walk_forward_runner import (
 __all__ = [
     "PHASE_NAME",
     "HISTORICAL_MARKET_STORE_PHASE_NAME",
+    "HISTORICAL_DATA_INGESTION_PHASE_NAME",
+    "HISTORICAL_DATA_SUPPORTED_KLINE_INTERVALS",
     "REPLAY_FEED_PROVIDER_PHASE_NAME",
     "MOCK_EXCHANGE_PHASE_NAME",
     "PESSIMISTIC_FILL_MODEL_PHASE_NAME",
@@ -376,6 +408,22 @@ __all__ = [
     "ConservativeAssumption",
     "DataCompletenessState",
     "DataQualityFlag",
+    "DataIngestionStatus",
+    "HistoricalDataIngestion",
+    "HistoricalDataIngestionConfig",
+    "HistoricalDataIngestionResult",
+    "HistoricalDataManifest",
+    "HistoricalDataSourceType",
+    "UniverseManifest",
+    "IngestionSchemaError",
+    "IngestionTimeFieldError",
+    "parse_kline_row",
+    "parse_funding_row",
+    "parse_open_interest_row",
+    "parse_ticker_24h_row",
+    "parse_symbol_status_row",
+    "historical_data_compute_artefact_hash",
+    "historical_data_safety_payload",
     "EquityTimeseriesPoint",
     "FillModelDecision",
     "FillReason",
