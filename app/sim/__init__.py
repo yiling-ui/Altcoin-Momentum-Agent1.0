@@ -44,8 +44,42 @@ time substrate.
         ``available_at <= simulated_time`` enforcement, closed-candle
         visibility, and as-of universe query.
 
+  * Phase 11C.1D-D-C / PR96 - ReplayFeedProvider v0:
+
+      - :class:`ReplayFeedProviderConfig` - frozen replay window /
+        record-type filter / behaviour switches
+        (``include_asof_universe``, ``allow_reemit``,
+        ``strict_time_wall``, ``strict_candle_visibility``),
+      - :class:`ReplayFeedCursor` - forward-only cursor (start /
+        end / current / step_interval / emitted_record_ids /
+        replay_complete),
+      - :class:`ReplayFeedDiagnostics` - cumulative counters
+        (``total_records_considered`` /
+        ``emitted_record_count`` /
+        ``future_records_rejected_count`` /
+        ``missing_available_at_count`` /
+        ``unclosed_candle_violation_count`` /
+        ``duplicate_record_skipped_count`` /
+        ``data_gap_flags`` / preserved
+        :class:`NoLookaheadViolation` objects),
+      - :class:`ReplayFeedBatch` - per-tick batch (``batch_id`` /
+        ``simulated_time`` / ``records`` / ``klines_1m`` /
+        ``klines_5m`` / ``funding_rates`` / ``open_interest`` /
+        ``ticker_24h`` / ``symbol_status`` / ``asof_universe`` /
+        ``diagnostics`` / ``violations`` / hard-pinned
+        ``phase_12_forbidden=True``,
+        ``auto_tuning_allowed=False``,
+        ``trade_authority=False``),
+      - :class:`ReplayFeedProvider` - the deterministic, forward-only
+        feed substrate that consumes a
+        :class:`HistoricalMarketStore` and a
+        :class:`SimulationClock` and emits
+        :class:`ReplayFeedBatch` batches obeying every
+        ``available_at <= simulated_time`` / closed-candle
+        visibility / as-of universe rule.
+
 Hard safety boundaries (Phase 11C.1D-D-A / PR94 + Phase 11C.1D-D-B /
-PR95):
+PR95 + Phase 11C.1D-D-C / PR96):
 
   - mode = paper
   - sandbox_only = True
@@ -86,10 +120,10 @@ This package MUST NOT:
   - authorize live trading or auto-tuning
   - enter Phase 12
 
-PR95 acceptance authorises ONLY PR96 (*ReplayFeedProvider*) to begin
-its own gate. PR95 does NOT implement, and does NOT authorise:
+PR96 acceptance authorises ONLY PR97 (*MockExchange + Pessimistic
+Fill Model v0*) to begin its own gate. PR96 does NOT implement, and
+does NOT authorise:
 
-  - the ReplayFeedProvider (PR96),
   - the MockExchange + Pessimistic Fill Model (PR97),
   - the Simulated Capital Flow + Trade Ledger (PR98),
   - the Telegram Sandbox Outbox (PR99),
@@ -112,6 +146,16 @@ from app.sim.historical_market_store import (
     SymbolStatus,
     SymbolStatusRecord,
 )
+from app.sim.replay_feed_provider import (
+    PHASE_NAME as REPLAY_FEED_PROVIDER_PHASE_NAME,
+)
+from app.sim.replay_feed_provider import (
+    ReplayFeedBatch,
+    ReplayFeedCursor,
+    ReplayFeedDiagnostics,
+    ReplayFeedProvider,
+    ReplayFeedProviderConfig,
+)
 from app.sim.simulation_clock import (
     PHASE_NAME,
     HistoricalRecordTime,
@@ -132,6 +176,7 @@ from app.sim.time_wall_guard import (
 __all__ = [
     "PHASE_NAME",
     "HISTORICAL_MARKET_STORE_PHASE_NAME",
+    "REPLAY_FEED_PROVIDER_PHASE_NAME",
     "FORBIDDEN_OUTPUT_FIELDS",
     "CandleVisibilityGuard",
     "DataCompletenessState",
@@ -144,6 +189,11 @@ __all__ = [
     "NoLookaheadViolation",
     "NoLookaheadViolationReason",
     "NoLookaheadViolationSeverity",
+    "ReplayFeedBatch",
+    "ReplayFeedCursor",
+    "ReplayFeedDiagnostics",
+    "ReplayFeedProvider",
+    "ReplayFeedProviderConfig",
     "SimulationClock",
     "SymbolStatus",
     "SymbolStatusRecord",
