@@ -1164,3 +1164,619 @@ def test_score_insufficient_evidence_on_empty_run():
         failure_ledger_entry_count=0,
     )
     assert score.status == BlindRunStatus.INSUFFICIENT_EVIDENCE
+
+
+
+# ===========================================================================
+# PR103 - Blind Runner Historical Store Input Glue
+# (Phase 11C.1D-D-I)
+#
+# These tests cover wiring a PR101/PR102 Historical Data Store
+# (records.jsonl + historical_data_manifest.json + universe_manifest.json)
+# into the PR100 Blind Walk-forward Runner CLI. They never relax the
+# PR94 TimeWallGuard / PR96 ReplayFeedProvider gates and never fabricate
+# data.
+# ===========================================================================
+
+from scripts import run_blind_walk_forward as bwf_cli  # noqa: E402
+
+
+_PR103_T0 = datetime(2026, 5, 2, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def _pr103_kline(
+    open_time: datetime,
+    close_price: float,
+    record_id: str,
+    *,
+    symbol: str = "BTCUSDT",
+    interval: str = "1m",
+) -> HistoricalKlineRecord:
+    seconds = 60 if interval == "1m" else 300
+    return HistoricalKlineRecord(
+        symbol=symbol,
+        interval=interval,
+        open_time=open_time,
+        open=close_price - 0.1,
+        high=close_price + 0.2,
+        low=close_price - 0.3,
+        close=close_price,
+        volume=12.34,
+        available_at=open_time + timedelta(seconds=seconds),
+        source="binance_public",
+        record_id=record_id,
+    )
+
+
+def _pr103_symbol_status(symbol: str = "BTCUSDT") -> SymbolStatusRecord:
+    listed = _PR103_T0 - timedelta(days=30)
+    return SymbolStatusRecord(
+        symbol=symbol,
+        market_type="PERP",
+        listed_at=listed,
+        status=SymbolStatus.TRADING,
+        available_at=listed,
+        min_notional=10.0,
+        tick_size=0.01,
+        step_size=0.001,
+        contract_type="USDT_PERP",
+        source="binance_public",
+    )
+
+
+def _pr103_valid_records(symbol: str = "BTCUSDT") -> List[Any]:
+    """As-of fixture whose every record is available by the first
+    replay tick (blind_start + 1m).
+
+    Because no record is ever ``available_at > simulated_time`` at any
+    tick, the strict forward-only replay raises **zero** no-lookahead
+    violations - this is the canonical "valid as-of fixture".
+    """
+    recs: List[Any] = [_pr103_symbol_status(symbol)]
+    base = 100.0
+    # open_time T0-5m .. T0  =>  available_at (= close_time) <= T0+1m.
+    for i in range(-5, 1):
+        recs.append(
+            _pr103_kline(
+                _PR103_T0 + timedelta(minutes=i),
+                base + i * 0.5,
+                f"{symbol}_k_{i}",
+                symbol=symbol,
+            )
+        )
+    return recs
+
+
+def _pr103_write_store_dir(
+    base_dir: Path,
+    records: List[Any],
+    *,
+    write_data_manifest: bool = True,
+    write_universe_manifest: bool = True,
+    data_manifest_hash: str = None,
+    universe_manifest_hash: str = None,
+    source_files: Tuple[str, ...] = ("BTCUSDT-1m.csv",),
+    record_counts: Dict[str, int] = None,
+) -> Path:
+    """Write a PR101-style Historical Data Store directory."""
+    store_dir = Path(base_dir)
+    store_dir.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(r.to_dict(), sort_keys=True) for r in records]
+    (store_dir / "records.jsonl").write_text(
+        "\n".join(lines) + ("\n" if lines else ""),
+        encoding="utf-8",
+    )
+    if write_data_manifest:
+        dm = {
+            "data_manifest_hash": (
+                data_manifest_hash or ("sha256:" + "a" * 64)
+            ),
+            "source_files": list(source_files),
+            "record_counts_by_type": dict(
+                record_counts or {"KLINE_1M": 6, "SYMBOL_STATUS": 1}
+            ),
+            "is_historical_data_manifest": True,
+        }
+        (store_dir / "historical_data_manifest.json").write_text(
+            json.dumps(dm, sort_keys=True), encoding="utf-8"
+        )
+    if write_universe_manifest:
+        um = {
+            "universe_manifest_hash": (
+                universe_manifest_hash or ("sha256:" + "b" * 64)
+            ),
+            "is_universe_manifest": True,
+        }
+        (store_dir / "universe_manifest.json").write_text(
+            json.dumps(um, sort_keys=True), encoding="utf-8"
+        )
+    return store_dir
+
+
+def _pr103_cli_args(
+    store_dir,
+    report_root: Path,
+    *,
+    run_id: str = "pr103_run",
+    blind_minutes: int = 3,
+    extra: List[str] = None,
+) -> List[str]:
+    args = [
+        "--train-start",
+        (_PR103_T0 - timedelta(minutes=5)).isoformat(),
+        "--train-end",
+        _PR103_T0.isoformat(),
+        "--blind-start",
+        _PR103_T0.isoformat(),
+        "--blind-end",
+        (_PR103_T0 + timedelta(minutes=blind_minutes)).isoformat(),
+        "--reference-window",
+        "60d",
+        "--report-root",
+        str(report_root),
+        "--run-id",
+        run_id,
+        "--base-clock-step",
+        "1m",
+        "--initial-capital",
+        "10000",
+        "--no-ai-post-window-summary",
+    ]
+    if store_dir is not None:
+        args += ["--historical-store-dir", str(store_dir)]
+    if extra:
+        args += extra
+    return args
+
+
+# ---- 1. CLI accepts --historical-store-dir (+ the explicit overrides) ----
+
+
+def test_pr103_cli_accepts_historical_store_dir():
+    parser = bwf_cli._build_argparser()
+    ns = parser.parse_args(
+        _pr103_cli_args("data/historical_market_store/x", Path("/tmp/r"))
+    )
+    assert ns.historical_store_dir == "data/historical_market_store/x"
+    # The explicit override flags are also accepted.
+    ns2 = parser.parse_args(
+        [
+            "--train-start",
+            _PR103_T0.isoformat(),
+            "--train-end",
+            _PR103_T0.isoformat(),
+            "--blind-start",
+            _PR103_T0.isoformat(),
+            "--blind-end",
+            (_PR103_T0 + timedelta(minutes=1)).isoformat(),
+            "--records-path",
+            "x/records.jsonl",
+            "--historical-data-manifest-path",
+            "x/historical_data_manifest.json",
+            "--universe-manifest-path",
+            "x/universe_manifest.json",
+        ]
+    )
+    assert ns2.records_path == "x/records.jsonl"
+    assert (
+        ns2.historical_data_manifest_path
+        == "x/historical_data_manifest.json"
+    )
+    assert ns2.universe_manifest_path == "x/universe_manifest.json"
+
+
+# ---- 2. CLI loads records.jsonl from the historical store dir ----
+
+
+def test_pr103_load_records_jsonl_restores_record_types(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+    records = bwf_cli.load_records_jsonl(store_dir / "records.jsonl")
+    assert len(records) == 7  # 1 symbol status + 6 klines
+    klines = [
+        r for r in records if isinstance(r, HistoricalKlineRecord)
+    ]
+    statuses = [
+        r for r in records if isinstance(r, SymbolStatusRecord)
+    ]
+    assert len(klines) == 6
+    assert len(statuses) == 1
+    # Round-trip fidelity: a restored kline serialises identically.
+    src = _pr103_valid_records()
+    by_id = {r.record_id: r for r in records}
+    for orig in src:
+        assert orig.to_dict() == by_id[orig.record_id].to_dict()
+
+
+# ---- 3. HistoricalKlineRecord JSONL restores into HistoricalMarketStore --
+
+
+def test_pr103_records_restore_into_historical_market_store(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+    records = bwf_cli.load_records_jsonl(store_dir / "records.jsonl")
+    store = bwf_cli.build_historical_store_from_records(records)
+    assert isinstance(store, HistoricalMarketStore)
+    assert store.kline_count == 6
+    assert store.symbol_status_count == 1
+    assert store.record_count == 7
+
+
+# ---- 4. Blind runner consumes real records through ReplayFeedProvider ----
+
+
+def test_pr103_blind_runner_consumes_records_via_replay_provider(
+    tmp_path,
+):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+    loaded = bwf_cli.load_historical_store_dir(store_dir=str(store_dir))
+    assert loaded.status is None
+    blind_end = _PR103_T0 + timedelta(minutes=3)
+    clock = SimulationClock(
+        start_time_utc=_PR103_T0,
+        end_time_utc=blind_end,
+        monotonic_forward_only=True,
+    )
+    provider = ReplayFeedProvider(
+        store=loaded.store,
+        clock=clock,
+        config=ReplayFeedProviderConfig(
+            start_time=_PR103_T0,
+            end_time=blind_end,
+            step_interval=timedelta(minutes=1),
+            allow_reemit=False,
+            include_asof_universe=True,
+        ),
+    )
+    total_klines = 0
+    total_violations = 0
+    while not provider.replay_complete:
+        batch = provider.next_batch()
+        if batch is None:
+            break
+        total_klines += len(batch.klines_1m)
+        total_violations += len(batch.violations)
+    assert total_klines == 6, "runner must see the real restored klines"
+    assert total_violations == 0
+
+
+# ---- 5. Missing records.jsonl returns INSUFFICIENT_EVIDENCE (no fake) ----
+
+
+def test_pr103_missing_records_jsonl_insufficient_evidence(tmp_path):
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    loaded = bwf_cli.load_historical_store_dir(store_dir=str(empty_dir))
+    assert loaded.status == BlindRunStatus.INSUFFICIENT_EVIDENCE
+    assert loaded.record_count == 0
+    assert loaded.data_manifest_hash is None
+    # End-to-end: main() reports INSUFFICIENT_EVIDENCE and exit code 3.
+    rc = bwf_cli.main(
+        _pr103_cli_args(empty_dir, tmp_path / "reports", run_id="miss")
+    )
+    assert rc == 3
+
+
+# ---- 6. Empty records.jsonl returns INSUFFICIENT_EVIDENCE ----
+
+
+def test_pr103_empty_records_jsonl_insufficient_evidence(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        [],
+        write_data_manifest=False,
+        write_universe_manifest=False,
+    )
+    assert (store_dir / "records.jsonl").read_text() == ""
+    loaded = bwf_cli.load_historical_store_dir(store_dir=str(store_dir))
+    assert loaded.status == BlindRunStatus.INSUFFICIENT_EVIDENCE
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, tmp_path / "reports", run_id="empty")
+    )
+    assert rc == 3
+
+
+# ---- 7. data_manifest_hash from manifest appears in BlindRunManifest ----
+
+
+def test_pr103_data_manifest_hash_in_blind_run_manifest(tmp_path):
+    dm_hash = "sha256:" + "c" * 64
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        _pr103_valid_records(),
+        data_manifest_hash=dm_hash,
+    )
+    report_root = tmp_path / "reports"
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, report_root, run_id="dmhash")
+    )
+    assert rc == 0
+    manifest = json.loads(
+        (report_root / "dmhash" / "blind_run_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["data_manifest_hash"] == dm_hash
+
+
+# ---- 8. universe_manifest_hash appears when universe_manifest exists ----
+
+
+def test_pr103_universe_manifest_hash_in_blind_run_manifest(tmp_path):
+    um_hash = "sha256:" + "d" * 64
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        _pr103_valid_records(),
+        universe_manifest_hash=um_hash,
+    )
+    report_root = tmp_path / "reports"
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, report_root, run_id="umhash")
+    )
+    assert rc == 0
+    manifest = json.loads(
+        (report_root / "umhash" / "blind_run_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["universe_manifest_hash"] == um_hash
+
+
+# ---- 8b. Missing universe_manifest WARNs but does not block kline-only ----
+
+
+def test_pr103_missing_universe_manifest_does_not_block(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        _pr103_valid_records(),
+        write_universe_manifest=False,
+    )
+    loaded = bwf_cli.load_historical_store_dir(store_dir=str(store_dir))
+    assert loaded.status is None
+    assert loaded.universe_manifest_hash is None
+    assert any("universe_manifest" in w for w in loaded.warnings)
+    report_root = tmp_path / "reports"
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, report_root, run_id="nouvm")
+    )
+    assert rc == 0
+
+
+# ---- 8c. Missing data_manifest WARNs but does not fabricate a hash ----
+
+
+def test_pr103_missing_data_manifest_warns_no_fabricated_hash(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store",
+        _pr103_valid_records(),
+        write_data_manifest=False,
+    )
+    loaded = bwf_cli.load_historical_store_dir(store_dir=str(store_dir))
+    assert loaded.status is None
+    assert loaded.data_manifest_hash is None
+    assert any(
+        "historical_data_manifest" in w for w in loaded.warnings
+    )
+
+
+# ---- 9. No-lookahead violations remain zero for valid as-of fixture ----
+
+
+def test_pr103_no_lookahead_violations_zero_for_valid_fixture(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+    report_root = tmp_path / "reports"
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, report_root, run_id="zeroviol")
+    )
+    assert rc == 0
+    run_dir = report_root / "zeroviol"
+    viol = json.loads(
+        (run_dir / "no_lookahead_violations.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert viol["violations"] == []
+    assert viol["invalidations"] == []
+    score = json.loads(
+        (run_dir / "blind_walk_forward_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    # The report embeds the score; violation count must be zero.
+    assert score.get("no_lookahead_violation_count", 0) == 0
+
+
+# ---- 10-16. Safety boundary flags pinned in the BlindRunManifest ----
+
+
+def test_pr103_safety_flags_pinned_in_manifest_and_summary(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+    report_root = tmp_path / "reports"
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, report_root, run_id="safety")
+    )
+    assert rc == 0
+    manifest = json.loads(
+        (report_root / "safety" / "blind_run_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["phase_12_forbidden"] is True
+    assert manifest["live_trading"] is False
+    assert manifest["exchange_live_orders"] is False
+    assert manifest["binance_private_api_enabled"] is False
+    assert manifest["telegram_outbound_enabled"] is False
+    assert manifest["auto_tuning_allowed"] is False
+    assert manifest["trade_authority"] is False
+    # The historical-store sidecar carries the same boundary.
+    sidecar = json.loads(
+        (
+            report_root / "safety" / "historical_store_input.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert sidecar["phase_12_forbidden"] is True
+    assert sidecar["live_trading"] is False
+    assert sidecar["exchange_live_orders"] is False
+    assert sidecar["binance_private_api_enabled"] is False
+    assert sidecar["telegram_outbound_enabled"] is False
+    assert sidecar["auto_tuning_allowed"] is False
+    assert sidecar["trade_authority"] is False
+
+
+# ---- 17. The CLI script imports no app.exchanges / app.telegram /
+#          app.config (nor app.risk / app.execution / app.ai) ----
+
+
+def _pr103_script_path() -> Path:
+    return (
+        _project_root()
+        / "scripts"
+        / "run_blind_walk_forward.py"
+    )
+
+
+def test_pr103_script_imports_no_forbidden_app_modules():
+    forbidden_prefixes = (
+        "app.risk",
+        "app.execution",
+        "app.exchanges",
+        "app.telegram",
+        "app.config",
+        "app.ai",
+    )
+    mods = _collect_imports(
+        _pr103_script_path().read_text(encoding="utf-8")
+    )
+    for m in mods:
+        for fp in forbidden_prefixes:
+            assert not (m == fp or m.startswith(fp + ".")), (
+                f"run_blind_walk_forward.py imports forbidden "
+                f"module {m!r}"
+            )
+
+
+# ---- 18. No network / private API / DeepSeek / LLM call path ----
+
+
+def test_pr103_script_imports_no_network_or_llm_modules():
+    forbidden_substrings = (
+        "deepseek",
+        "openai",
+        "anthropic",
+        "requests",
+        "httpx",
+        "urllib",
+        "http.client",
+        "socket",
+        "websocket",
+        "aiohttp",
+        "ccxt",
+        "binance",
+        "telegram",
+    )
+    mods = _collect_imports(
+        _pr103_script_path().read_text(encoding="utf-8")
+    )
+    for m in mods:
+        lo = m.lower()
+        for s in forbidden_substrings:
+            assert s not in lo, (
+                f"run_blind_walk_forward.py imports {m!r} which "
+                f"contains forbidden substring {s!r}"
+            )
+
+
+# ---- 19. Forbidden fields absent from serialized PR103 outputs ----
+
+
+def test_pr103_forbidden_fields_absent_from_outputs(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+    report_root = tmp_path / "reports"
+    rc = bwf_cli.main(
+        _pr103_cli_args(store_dir, report_root, run_id="nofbd")
+    )
+    assert rc == 0
+    run_dir = report_root / "nofbd"
+    for name in (
+        "blind_run_manifest.json",
+        "blind_walk_forward_report.json",
+        "historical_store_input.json",
+        "no_lookahead_violations.json",
+    ):
+        payload = json.loads(
+            (run_dir / name).read_text(encoding="utf-8")
+        )
+        # Should not raise.
+        assert_no_forbidden_fields(payload)
+        keys = set(_walk_keys(payload))
+        assert not (keys & FORBIDDEN_OUTPUT_FIELDS)
+        # No real exchange / account / secret leakage either.
+        for banned in (
+            "api_key",
+            "api_secret",
+            "real_exchange_order_id",
+            "exchange_order_id",
+            "real_account_id",
+            "listen_key",
+        ):
+            assert banned not in keys
+
+
+# ---- 20. Deterministic output with a fixed fixture ----
+
+
+def test_pr103_deterministic_output_with_fixed_fixture(tmp_path):
+    store_dir = _pr103_write_store_dir(
+        tmp_path / "store", _pr103_valid_records()
+    )
+
+    def _run(tag: str) -> Dict[str, Any]:
+        report_root = tmp_path / f"reports_{tag}"
+        rc = bwf_cli.main(
+            _pr103_cli_args(
+                store_dir, report_root, run_id="bwf_pr103_det"
+            )
+        )
+        assert rc == 0
+        return json.loads(
+            (
+                report_root
+                / "bwf_pr103_det"
+                / "blind_run_manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+
+    manifest_a = _run("a")
+    manifest_b = _run("b")
+    assert manifest_a == manifest_b
+    assert manifest_a["data_manifest_hash"] == "sha256:" + "a" * 64
+    assert manifest_a["universe_manifest_hash"] == "sha256:" + "b" * 64
+
+
+# ---- Config-level: explicit hash overrides validated as sha256 ----
+
+
+def test_pr103_runner_config_rejects_non_sha256_hash_override():
+    with pytest.raises(ValueError):
+        BlindWalkForwardRunnerConfig(
+            window=_make_window(blind_minutes=3),
+            data_manifest_hash="not-a-hash",
+        )
+    # A valid sha256 override is accepted and pinned onto the manifest.
+    cfg = BlindWalkForwardRunnerConfig(
+        window=_make_window(blind_minutes=3),
+        data_manifest_hash="sha256:" + "e" * 64,
+        universe_manifest_hash="sha256:" + "f" * 64,
+    )
+    assert cfg.data_manifest_hash == "sha256:" + "e" * 64
+    assert cfg.universe_manifest_hash == "sha256:" + "f" * 64

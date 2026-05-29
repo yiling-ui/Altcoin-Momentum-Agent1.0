@@ -7,6 +7,72 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D-I — PR103 — Blind Runner Historical Store Input Glue: IN_REVIEW
+
+**Type:** Bugfix / glue PR (paper / report / evidence-only
+infrastructure).
+**Runtime effect:** **none on real trading; no network; no Binance
+private API; no signed endpoint; no private websocket; no listenKey;
+no real exchange order; no real Telegram outbound; no DeepSeek / LLM
+call; no auto-tuning; no strategy logic; no decision callback.** PR103
+wires the PR101/PR102 Historical Data Store output into the PR100
+Blind Walk-forward Runner CLI so that `--historical-store-dir` is a
+recognised argument and the runner replays **real** ingested
+`records.jsonl` instead of an empty fixture. Before this PR the cloud
+run failed with `unrecognized arguments: --historical-store-dir`.
+
+**What changed.**
+
+  - `scripts/run_blind_walk_forward.py` — added the
+    `--historical-store-dir` / `--records-path` /
+    `--historical-data-manifest-path` / `--universe-manifest-path`
+    CLI arguments and the input-glue helpers: `_parse_opt_dt`,
+    `_record_from_dict` (restores `HistoricalKlineRecord` /
+    `HistoricalMarketRecord` / `SymbolStatusRecord` from the PR101
+    `records.jsonl` `to_dict()` shape, dispatching on the explicit
+    `is_*` marker with a `record_type` fallback; never fabricates a
+    field), `load_records_jsonl`, `build_historical_store_from_records`,
+    the `HistoricalStoreInput` dataclass, and `load_historical_store_dir`.
+    `main()` now loads the store, builds the PR96 `ReplayFeedProvider`
+    over it, pins the **real** `data_manifest_hash` /
+    `universe_manifest_hash` (read from the PR101 manifests) onto the
+    `BlindRunManifest`, writes a `historical_store_input.json` sidecar
+    (`ingested_record_count`, `record_counts_by_type`, `source_files`,
+    hashes, warnings), and returns exit code `3` with
+    `status = INSUFFICIENT_EVIDENCE` when `records.jsonl` is missing or
+    empty (no fabricated data). Missing `historical_data_manifest.json`
+    / `universe_manifest.json` produce a WARN, never a fabricated hash,
+    and never block a kline-only short smoke.
+  - `app/sim/blind_walk_forward_runner.py` —
+    `BlindWalkForwardRunnerConfig` gains optional
+    `data_manifest_hash` / `universe_manifest_hash` fields (validated
+    to be canonical `sha256:` strings). `prepare_manifest` uses them
+    when provided, otherwise falls back to hashing the inline artefact
+    exactly as in PR100. No other runner behaviour changes.
+  - `tests/unit/test_blind_walk_forward_runner.py` — added 17 PR103
+    tests (all PASSING) covering CLI argument acceptance, JSONL
+    load/restore round-trip, restore into `HistoricalMarketStore`,
+    runner consumption through the `ReplayFeedProvider`, missing/empty
+    `records.jsonl` → `INSUFFICIENT_EVIDENCE`, real
+    `data_manifest_hash` / `universe_manifest_hash` in the manifest,
+    missing-universe-manifest does not block kline-only smoke,
+    zero no-lookahead violations for a valid as-of fixture, every
+    pinned safety flag, no forbidden fields, no forbidden / network /
+    LLM imports in the CLI, and deterministic output.
+  - `docs/CHANGELOG.md`, `docs/PROJECT_STATUS.md`,
+    `docs/PHASE_GATE.md`, `docs/PHASE_11C_1D_D_I_BLIND_RUNNER_HISTORICAL_STORE_GLUE.md`
+    — this entry / status note / new phase doc.
+
+**Out of scope (NOT touched).** No file under `app/risk/`,
+`app/execution/`, `app/exchanges/`, `app/telegram/`, `app/config/`;
+no strategy logic; no AI / DeepSeek decision logic; no Binance private
+API; no live-order path; no new blind testing system; no new strategy;
+no 30D / 60D / 90D / 2Y runner. Still `historical_blind_sim_live` /
+paper-only. **Phase 12 remains FORBIDDEN.**
+
+**Tests:** `tests/unit/test_blind_walk_forward_runner.py` 48/48 PASS
+(17 new PR103 tests); full `tests/unit` 3645/3645 PASS.
+
 ### Phase 11C.1D-D-H — PR101-A — Binance Public Kline File Adapter Fix: IN_REVIEW
 
 **Type:** Bugfix PR (paper / report / evidence-only infrastructure).

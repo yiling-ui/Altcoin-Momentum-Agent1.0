@@ -7,9 +7,44 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
-> **Phase 11C.1D-D-H — Historical Data Ingestion / Backfill v0
-> (*Strict blind walk-forward historical data ingestion / 严格前向
-> Sim-Live 历史数据导入 / 回填 v0*).**
+> **Phase 11C.1D-D-I — Blind Runner Historical Store Input Glue
+> (*Blind Runner 历史数据存储输入接线 / 最小 glue*; PR103).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: bugfix / glue PR (paper / report / evidence-only
+> infrastructure).** Wires the PR101/PR102 Historical Data Store
+> output (`records.jsonl` + `historical_data_manifest.json` +
+> `universe_manifest.json`) into the PR100 Blind Walk-forward
+> Runner CLI. Adds the `--historical-store-dir` /
+> `--records-path` / `--historical-data-manifest-path` /
+> `--universe-manifest-path` arguments; restores the PR95 record
+> types from `records.jsonl` into a `HistoricalMarketStore`;
+> builds the PR96 `ReplayFeedProvider` over that store; lets the
+> PR100 runner consume real records; and pins the **real**
+> `data_manifest_hash` / `universe_manifest_hash` onto the
+> `BlindRunManifest`. Missing / empty `records.jsonl` returns
+> `INSUFFICIENT_EVIDENCE` (never fabricated data); missing
+> manifests WARN but never fabricate a hash and never block a
+> kline-only short smoke. No runtime hot-path wiring, no new event
+> types, no schema migration, no network, no real exchange API, no
+> Binance private API, no signed endpoint, no private websocket, no
+> listenKey, no real exchange order, no real Telegram outbound, no
+> DeepSeek / LLM call, no auto-tuning, no strategy logic, no
+> decision callback, and no authority over the Risk Engine, the
+> Execution FSM, or the Capital Flow Engine. Scope touches only
+> `scripts/run_blind_walk_forward.py`,
+> `app/sim/blind_walk_forward_runner.py`,
+> `tests/unit/test_blind_walk_forward_runner.py`, and the docs;
+> **nothing** under `app/risk/`, `app/execution/`,
+> `app/exchanges/`, `app/telegram/`, `app/config/`. PR94
+> `TimeWallGuard` and PR96 `ReplayFeedProvider` are NOT bypassed.
+> Still `historical_blind_sim_live` / paper-only. **Phase 12
+> remains FORBIDDEN.** See
+> `docs/PHASE_11C_1D_D_I_BLIND_RUNNER_HISTORICAL_STORE_GLUE.md`.
+
+> **Predecessor: Phase 11C.1D-D-H — Historical Data Ingestion /
+> Backfill v0 (*Strict blind walk-forward historical data ingestion
+> / 严格前向 Sim-Live 历史数据导入 / 回填 v0*).**
 > **Status: IN_REVIEW (after this implementation PR; not
 > `ACCEPTED` until maintainer review).**
 > **Type: implementation PR (paper / report / evidence-only
