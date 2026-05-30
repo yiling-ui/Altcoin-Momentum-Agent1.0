@@ -26,6 +26,9 @@ data/reports/
 # Phase 11C.1C-C-B-B-B-D-A.1 - Historical Market Store builder output
 # is regenerated locally; do NOT commit the JSONL / manifests / exchange_info.
 data/historical_market_store/
+# PR114 - Live operator persistent state (runtime mode / confirmation /
+# capital profile / kill switch). Regenerated locally; never commit.
+data/live_state/
 *.db
 *.db-wal
 *.db-shm

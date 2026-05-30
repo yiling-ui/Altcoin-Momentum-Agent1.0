@@ -217,3 +217,64 @@ LIVE_CAPITAL_RISK_VERSION = "v0"
 LIVE_CAPITAL_RISK_PR = "PR112"
 
 __all__ += ["LIVE_CAPITAL_RISK_VERSION", "LIVE_CAPITAL_RISK_PR"]
+
+# ---------------------------------------------------------------------------
+# PR114 - Telegram Operator Console v0 + Live Funding Attribution +
+# Operator Workflow + Blind/Replay/Sim Isolation hardening.
+#
+# PR114 layers the real Telegram operator console (commands + cards +
+# optional gated outbound), a first version of funding/commission
+# attribution to the live ledger, file-based persistent live state, and a
+# stronger live-source isolation boundary, on top of PR110-PR113. A
+# Telegram command can NEVER place a naked order, bypass the Risk Engine /
+# Execution Gateway / Capital Profile / kill switch, nor be driven by a
+# non-LIVE source. LIVE_SHADOW remains the default; LIVE_LIMITED needs the
+# confirmation handshake; exchange_live_orders / trade_authority /
+# ai_trade_authority stay False by default.
+#
+# These modules are imported directly (e.g. ``from
+# app.live.telegram_operator import TelegramOperatorConsole``) rather than
+# re-exported here, EXCEPT for the small, unambiguous surfaces below. In
+# particular PR114's command/runtime modules are NOT re-exported so they
+# never shadow PR110's path-isolation ``LiveOrderIntent`` that this
+# package exports.
+from app.core.errors import (  # noqa: E402
+    LiveSourceRejected,
+    TelegramUnauthorizedCommand,
+)
+from app.live.funding_attribution import (  # noqa: E402
+    AttributedIncome,
+    FillRef,
+    FundingAttributionOutcome,
+    FundingAttributionResult,
+    PositionInterval,
+    attribute_funding_events,
+)
+from app.live.telegram_auth import (  # noqa: E402
+    LiveSourceGuard,
+    TelegramAuthGuard,
+)
+from app.live.telegram_state import (  # noqa: E402
+    LiveOperatorState,
+    LiveOperatorStateStore,
+)
+
+LIVE_OPERATOR_CONSOLE_VERSION = "v0"
+LIVE_OPERATOR_CONSOLE_PR = "PR114"
+
+__all__ += [
+    "LiveSourceRejected",
+    "TelegramUnauthorizedCommand",
+    "AttributedIncome",
+    "FillRef",
+    "FundingAttributionOutcome",
+    "FundingAttributionResult",
+    "PositionInterval",
+    "attribute_funding_events",
+    "LiveSourceGuard",
+    "TelegramAuthGuard",
+    "LiveOperatorState",
+    "LiveOperatorStateStore",
+    "LIVE_OPERATOR_CONSOLE_VERSION",
+    "LIVE_OPERATOR_CONSOLE_PR",
+]

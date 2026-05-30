@@ -205,3 +205,30 @@ class LiveApiError(ExchangeError):
     WARN status. The error text is sanitised so it never carries a
     secret, token, or full request signature.
     """
+
+
+# ---------------------------------------------------------------------------
+# PR114 - Telegram Operator Console + Blind/Replay/Sim Isolation hardening
+# ---------------------------------------------------------------------------
+class TelegramUnauthorizedCommand(SafetyViolation):
+    """Raised when a Telegram command arrives from an unauthorised chat id.
+
+    PR114 enforces the operator allow-list on the live operator console.
+    A command from a chat id not in ``AMA_TELEGRAM_ALLOWED_CHAT_IDS`` is
+    refused and recorded as ``TELEGRAM_UNAUTHORIZED_COMMAND``; it can
+    never change live mode / profile / risk / execution. It subclasses
+    :class:`SafetyViolation` so the broader safety handlers catch it.
+    """
+
+
+class LiveSourceRejected(SafetyViolation):
+    """Raised when a non-LIVE source attempts to affect live operation.
+
+    PR114 hardens the PR110 path isolation boundary beyond just the order
+    gateway: a ``SIM`` / ``BLIND`` / ``REPLAY`` / ``PAPER_SHADOW`` /
+    ``BACKTEST`` / ``OFFLINE_AI`` / ``TELEGRAM_SANDBOX`` source that tries
+    to change the live runtime mode, capital profile, risk state, kill
+    switch, or request an execution-gateway action is refused and
+    recorded as ``LIVE_SOURCE_REJECTED``. Only ``OrderSource.LIVE`` may
+    drive live operation. A :class:`SafetyViolation` subclass.
+    """

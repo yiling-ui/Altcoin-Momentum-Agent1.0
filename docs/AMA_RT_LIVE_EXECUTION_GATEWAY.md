@@ -242,3 +242,31 @@ stays green, so PR110 / PR111 / PR112 are unaffected.
 ## 10. Status
 
 **Current status = PR113 IN_REVIEW.**
+
+
+---
+
+## PR114 follow-on — Telegram Operator Console (IN_REVIEW)
+
+PR114 adds the live Telegram operator console
+(`docs/AMA_RT_TELEGRAM_OPERATOR_CONSOLE.md`). It is a **consumer** of this
+gateway's safety posture, never a bypass:
+
+- The operator console holds **no** `BinanceExecutionAdapter` and exposes
+  **no** path that flips `exchange_live_orders` / `trade_authority`. A
+  Telegram command can never compose or send a real order; it can only
+  switch live mode (behind the confirmation handshake), pause/resume, arm
+  the kill switch, and reflect status.
+- Arming `LIVE_LIMITED` from Telegram does **not** satisfy the 15-point
+  `evaluate_execution_permission` gate. A real order still requires
+  `exchange_live_orders` + `trade_authority` + private trade + an approved
+  `LiveRiskDecision` with `real_order_allowed=true` + `source=LIVE` + the
+  kill switch off, exactly as documented above.
+- The PR110/PR113 source isolation is unchanged: a non-`LIVE` source
+  reaching this gateway is still rejected (`SOURCE_NOT_LIVE` /
+  `LivePathIsolationViolation` → `LIVE_PATH_BLOCKED`). PR114 additionally
+  refuses a non-`LIVE` source attempting to change live **mode / profile /
+  risk / kill switch** via the console (`LIVE_SOURCE_REJECTED`).
+- If a future kill-switch cancel/exit path is wired, it MUST route through
+  this gateway and its safety gate; PR114's `/kill_all` only arms the kill
+  switch + alerts.

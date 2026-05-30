@@ -1154,6 +1154,78 @@ class EventType(str, Enum):
     LIVE_EXIT_FILLED = "LIVE_EXIT_FILLED"
     LIVE_ORDER_ADAPTER_BLOCKED = "LIVE_ORDER_ADAPTER_BLOCKED"
 
+    # ------------------------------------------------------------------
+    # PR114 - Telegram Operator Console v0 + Live Funding Attribution +
+    # Operator Workflow + Blind/Replay/Sim Isolation hardening.
+    #
+    # PR114 adds the real Telegram operator console (commands + cards +
+    # optional real outbound to allowed chat ids), a first version of
+    # account-level funding/commission attribution to the live order /
+    # position / trade ledger, file-based persistent live mode /
+    # confirmation / profile / kill-switch state, and a stronger
+    # isolation boundary between the blind/replay/sim/paper-shadow stack
+    # and live operation.
+    #
+    # PR114 boundary - every payload below MUST be safe for logs:
+    #   - no API key / secret / bot token / full request signature; the
+    #     Telegram outbound layer redacts before send.
+    #   - Telegram commands CANNOT bypass the Risk Engine, the Execution
+    #     Gateway, the Capital Profile, the kill switch, or the live path
+    #     isolation guard. They cannot place a naked order.
+    #   - LIVE_LIMITED is never armed by default and never on a bare
+    #     restart; arming requires the persisted confirmation handshake.
+    #   - exchange_live_orders / trade_authority / ai_trade_authority /
+    #     live_trading remain False by default; phase_12_forbidden=True.
+    #
+    #   TELEGRAM_COMMAND_RECEIVED         - an inbound command was parsed
+    #     from an authorised chat id (reuses the Phase 10D event).
+    #   TELEGRAM_UNAUTHORIZED_COMMAND     - an inbound command came from a
+    #     chat id NOT in the allow-list; it was refused and recorded.
+    #   TELEGRAM_OUTBOUND_MESSAGE_SENT    - a real outbound operator
+    #     message / card was delivered (outbound enabled + allowed chat).
+    #   TELEGRAM_OUTBOUND_SUPPRESSED      - outbound disabled / dry-run;
+    #     no network was contacted (pairs with TELEGRAM_OUTBOUND_DISABLED).
+    #   LIVE_MODE_CHANGED                 - the live runtime mode changed
+    #     (shadow<->limited) through the operator console. Persisted.
+    #   LIVE_PAUSED                       - the operator paused NEW entries
+    #     (existing positions are not force-closed).
+    #   LIVE_RESUMED                      - the operator resumed scanning /
+    #     new signals; mode / risk / order gates are NOT bypassed.
+    #   LIVE_KILL_SWITCH_ARM_REQUESTED    - /kill_all requested; a second
+    #     confirmation (/confirm_kill CODE) is required.
+    #   LIVE_KILL_SWITCH                  - the kill switch was armed (or a
+    #     controlled cancel/exit was requested through the gateway).
+    #   CAPITAL_PROFILE_CHANGE_REQUESTED  - operator requested a profile
+    #     change via /profile set. Never auto-applied above a higher-risk
+    #     profile without acknowledgement.
+    #   PROFILE_CHANGE_REJECTED           - a profile change was refused
+    #     (unknown profile, unauthorised, higher-risk without ack).
+    #   CAPITAL_PROFILE_MISMATCH          - operator-facing mismatch card
+    #     (equity left the active profile band). Never auto-escalates.
+    #   CAPITAL_EVENT_DETECTED            - a real balance change was
+    #     surfaced to the operator (deposit not strategy pnl; withdrawal
+    #     not strategy loss).
+    #   FUNDING_EVENT_ATTRIBUTED          - a funding / commission income
+    #     row was attributed to a trade / position / order, or kept
+    #     account-level when it cannot be linked.
+    #   LIVE_SOURCE_REJECTED              - a non-LIVE source (SIM / BLIND /
+    #     REPLAY / PAPER_SHADOW / BACKTEST / OFFLINE_AI / TELEGRAM_SANDBOX)
+    #     attempted to affect live mode / profile / risk / execution and
+    #     was refused. Pairs with LIVE_PATH_BLOCKED at the order gateway.
+    TELEGRAM_UNAUTHORIZED_COMMAND = "TELEGRAM_UNAUTHORIZED_COMMAND"
+    TELEGRAM_OUTBOUND_MESSAGE_SENT = "TELEGRAM_OUTBOUND_MESSAGE_SENT"
+    TELEGRAM_OUTBOUND_SUPPRESSED = "TELEGRAM_OUTBOUND_SUPPRESSED"
+    LIVE_MODE_CHANGED = "LIVE_MODE_CHANGED"
+    LIVE_PAUSED = "LIVE_PAUSED"
+    LIVE_RESUMED = "LIVE_RESUMED"
+    LIVE_KILL_SWITCH_ARM_REQUESTED = "LIVE_KILL_SWITCH_ARM_REQUESTED"
+    LIVE_KILL_SWITCH = "LIVE_KILL_SWITCH"
+    CAPITAL_PROFILE_CHANGE_REQUESTED = "CAPITAL_PROFILE_CHANGE_REQUESTED"
+    PROFILE_CHANGE_REJECTED = "PROFILE_CHANGE_REJECTED"
+    CAPITAL_PROFILE_MISMATCH = "CAPITAL_PROFILE_MISMATCH"
+    CAPITAL_EVENT_DETECTED = "CAPITAL_EVENT_DETECTED"
+    FUNDING_EVENT_ATTRIBUTED = "FUNDING_EVENT_ATTRIBUTED"
+    LIVE_SOURCE_REJECTED = "LIVE_SOURCE_REJECTED"
 
 
 # Capital-flow event types per Issue #2 / Spec §28.3.

@@ -237,3 +237,44 @@ capital profile status when income history is available.
   `CONFIG_INVALID_CAPITAL_PROFILE` (never a silent fallback). This fixes
   the PR111 bug where `AMA_LIVE_CAPITAL_PROFILE=L1_10U_PROBE` was ignored
   and the health output still showed `L0_SHADOW`.
+
+
+---
+
+## PR114 follow-on — Funding attribution + operator console (IN_REVIEW)
+
+PR114 closes the first version of the PR112/PR113 funding-attribution
+handoff (the `UNATTRIBUTED_PENDING_POSITION_LINK` placeholder) and surfaces
+the live capital / risk / PnL view through the Telegram operator console
+(`docs/AMA_RT_TELEGRAM_OPERATOR_CONSOLE.md`).
+
+### Funding attribution (`app/live/funding_attribution.py`)
+
+`attribute_funding_events(income_events, positions=[PositionInterval],
+fills=[FillRef])` re-buckets already-read Binance income rows onto the
+live order / position / trade ledger, **without dropping any funding
+event**:
+
+- **Commission** rows attach to a fill / order by `trade_id`, else by
+  `symbol` + nearest timestamp, else stay account-level.
+- **Funding** rows whose time falls inside a position's
+  `[entry_time, exit_time]` attach to that trade / position. A row outside
+  every interval stays account-level. A row over multiple overlapping
+  same-symbol positions is `AMBIGUOUS_MULTIPLE_POSITIONS` and allocated
+  deterministically by notional weight.
+- Per-row outcomes: `ATTRIBUTED_TO_TRADE`, `ATTRIBUTED_TO_POSITION`,
+  `ATTRIBUTED_TO_ORDER`, `ACCOUNT_LEVEL_ONLY`,
+  `AMBIGUOUS_MULTIPLE_POSITIONS`, `UNATTRIBUTED_PENDING_POSITION_LINK`.
+- `net_pnl = gross_realized − commission + funding` still holds; the
+  attributed + account-level funding totals always sum to the full
+  funding total (nothing is lost). Funding income is positive; funding fee
+  is negative.
+
+### Operator PnL display
+
+`/pnl` and the `LIVE_EXIT_FILLED` card always show gross PnL, commission,
+funding, and net PnL together, plus the funding attribution status. A
+`CAPITAL_EVENT_DETECTED` card marks a deposit as **not** strategy profit
+and a withdrawal as **not** strategy loss. None of this changes the PR112
+rule that external flows never enter strategy PnL and the profile is never
+auto-escalated.

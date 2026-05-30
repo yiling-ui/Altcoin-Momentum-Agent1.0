@@ -7,6 +7,93 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR114 — Telegram Operator Console v0 + Live Funding Attribution + Operator Workflow + Blind/Replay/Sim Isolation: IN_REVIEW
+
+**Type:** Real Telegram operator desk (gated outbound) + first
+funding/commission attribution to the live ledger. **The console can
+NEVER place a naked order.** **No real order by default.** **No bypass of
+risk / execution / capital-profile / kill-switch.** **LIVE_SHADOW is the
+default.** **Not the final 10U launch (PR116).**
+
+**Runtime effect on trading:** none by default. The console reflects and
+switches live mode behind a confirmation handshake; it holds no execution
+adapter and exposes no path that flips `exchange_live_orders` /
+`trade_authority`.
+
+**Added — `app/live/` package:**
+
+  - `telegram_operator.py` — `TelegramOperatorConsole` (inbound update →
+    auth → command handler → card → gated outbound), `InboundUpdate`,
+    `OutboundResult`, `HandledUpdate`, `poll_once`, `status_snapshot`
+    (`no_real_order_sent=true`). Outbound disabled unless
+    `AMA_TELEGRAM_OUTBOUND_ENABLED=true` and not `--dry-run`; suppressed
+    otherwise. Redaction + `assert_no_forbidden_substrings` before send.
+  - `telegram_commands.py` — `TelegramCommandHandler` + `parse_command`.
+    Commands: `/help`, `/status`, `/mode`, `/mode shadow`,
+    `/mode live_limited`, `/confirm_live CODE`, `/positions`, `/pnl`,
+    `/risk`, `/capital`, `/profile`, `/profile set <ID>`, `/pause`,
+    `/resume`, `/kill_all`, `/confirm_kill CODE`. State-changing commands
+    require an `OrderSource.LIVE` actor; higher-risk profile changes need a
+    confirmation token; `LiveConsoleDataProvider` supplies read-only
+    snapshots.
+  - `telegram_formatters.py` — operator cards (`SHADOW_ENTRY_PLAN` /
+    `SHADOW_EXIT_PLAN` / `SHADOW_RISK_REJECT` / `LIVE_*` / status / pnl /
+    risk / capital / profile / mode / `CAPITAL_EVENT_DETECTED` /
+    `FUNDING_EVENT_ATTRIBUTED` / kill switch / pause). Redact-then-stamp so
+    safety markers stay visible. Re-exports PR113 execution payloads.
+  - `telegram_state.py` — `LiveOperatorStateStore` (atomic JSON under
+    `data/live_state/`): `runtime_mode.json`,
+    `telegram_confirmation_state.json`, `capital_profile_state.json`,
+    `kill_switch_state.json`. Default `LIVE_SHADOW`; corrupt /
+    armed-without-confirmation fail safe to `LIVE_SHADOW` + warning.
+  - `telegram_auth.py` — `TelegramAuthGuard` (allow-list, empty = fail
+    closed, `TELEGRAM_UNAUTHORIZED_COMMAND`) + `LiveSourceGuard`
+    (`assert_live_source`, `LIVE_SOURCE_REJECTED`, unknown source →
+    `SIM`). `is_ai_actor`.
+  - `funding_attribution.py` — `attribute_funding_events` +
+    `PositionInterval` / `FillRef` / `AttributedIncome` /
+    `FundingAttributionResult` / `FundingAttributionOutcome`
+    (`ATTRIBUTED_TO_TRADE` / `ATTRIBUTED_TO_POSITION` /
+    `ATTRIBUTED_TO_ORDER` / `ACCOUNT_LEVEL_ONLY` /
+    `AMBIGUOUS_MULTIPLE_POSITIONS` / `UNATTRIBUTED_PENDING_POSITION_LINK`).
+    Funding never dropped; net includes attributed funding.
+
+**Added — enums (`app/core/enums.py`):** `OrderSource` gains `BACKTEST`,
+`OFFLINE_AI`, `TELEGRAM_SANDBOX` (all non-live; `is_live` only `LIVE`).
+
+**Added — events (`app/core/events.py`):** `TELEGRAM_UNAUTHORIZED_COMMAND`,
+`TELEGRAM_OUTBOUND_MESSAGE_SENT`, `TELEGRAM_OUTBOUND_SUPPRESSED`,
+`LIVE_MODE_CHANGED`, `LIVE_PAUSED`, `LIVE_RESUMED`,
+`LIVE_KILL_SWITCH_ARM_REQUESTED`, `LIVE_KILL_SWITCH`,
+`CAPITAL_PROFILE_CHANGE_REQUESTED`, `PROFILE_CHANGE_REJECTED`,
+`CAPITAL_PROFILE_MISMATCH`, `CAPITAL_EVENT_DETECTED`,
+`FUNDING_EVENT_ATTRIBUTED`, `LIVE_SOURCE_REJECTED`.
+
+**Added — errors (`app/core/errors.py`):** `TelegramUnauthorizedCommand`,
+`LiveSourceRejected` (both `SafetyViolation`).
+
+**Added — CLI:** `scripts/live_telegram_operator.py` (`--status-json` /
+`--send-test` / `--once` / `--poll` / `--dry-run` / `--command` /
+`--chat-id` / `--state-dir`). Default never sends an order and never
+switches mode without confirmation.
+
+**Added — docs:** `docs/AMA_RT_TELEGRAM_OPERATOR_CONSOLE.md`,
+`docs/AMA_RT_LIVE_OPERATOR_RUNBOOK.md`. Updated `PROJECT_STATUS.md`,
+`PHASE_GATE.md`, `AMA_RT_LIVE_EXECUTION_GATEWAY.md`,
+`AMA_RT_LIVE_CAPITAL_RISK_PNL.md`.
+
+**Tests:** `tests/unit/test_pr114_telegram_operator.py` (67 tests) — fake
+Telegram transport + fake live state only; no real API call. Covers
+unauthorised chat, mode switching, confirmation handshake, persistence +
+reload, corrupt-state fail-safe, pnl / positions / risk / capital cards,
+funding attribution (inside / outside / commission / ambiguous /
+unattributed), source isolation (`LIVE_SOURCE_REJECTED` /
+`LIVE_PATH_BLOCKED`), and the default-false safety flags.
+
+**Safety:** `phase_12_forbidden=true`, `live_trading=false`,
+`exchange_live_orders=false`, `trade_authority=false`,
+`ai_trade_authority=false`, `runtime_mode=LIVE_SHADOW` — all unchanged.
+
 ### PR113 — Live Execution Gateway v0: Binance Order Execution Adapter + Order Lifecycle + Fill Ledger + Strict LIVE_LIMITED Gate: IN_REVIEW
 
 **Type:** Real order execution skeleton. **Real order code exists but is
