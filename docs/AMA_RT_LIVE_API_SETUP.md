@@ -139,3 +139,80 @@ See `docs/AMA_RT_API_INTEGRATION_PACK.md` §7 for the full mapping.
    LIVE_LIMITED.
 4. The next PR after PR111 is the live capital / risk / execution
    integration.
+
+---
+
+## 8. PR112 hardening: placeholders, profile env, withdraw permission
+
+PR112 folds in several usability fixes discovered on a fresh-server
+PR111 deployment. None of them loosens a safety flag.
+
+### 8.1 Placeholder values cause `PLACEHOLDER_SECRET_CONFIGURED`
+
+If a secret is still a placeholder (copied from `.env.example` and never
+filled in), the health check detects it **before** any real HTTP call
+and reports `PLACEHOLDER_SECRET_CONFIGURED` — it will **not** produce a
+confusing Binance HTTP 401 / Telegram `getMe` error / DeepSeek HTTP 401.
+
+Detected placeholders include (case-insensitive):
+`PUT_YOUR_KEY_HERE`, `PUT_YOUR_SECRET_HERE`, `PUT_YOUR_BOT_TOKEN_HERE`,
+`PUT_YOUR_CHAT_ID_HERE`, `PUT_YOUR_DEEPSEEK_KEY_HERE`, `<your-key>`,
+`changeme`, all-`x` filler, and the empty value (reported as
+`MISSING_REAL_SECRET`).
+
+**How to replace placeholders safely:** edit a local `.env` / `.env.live`
+(gitignored), paste your real value, and re-run the health check. Never
+commit real secrets; only masked forms (`abc***xyz`) ever surface.
+
+The health check now distinguishes: missing secret, placeholder secret,
+invalid real secret / HTTP 401 (`INVALID_SECRET_OR_UNAUTHORIZED`),
+permission denied (`PERMISSION_DENIED`), rate limited (`RATE_LIMITED`),
+endpoint unavailable (`API_ENDPOINT_UNAVAILABLE`), network error
+(`NETWORK_ERROR`), and the correctly-blocked private trade path.
+
+### 8.2 `.env.live` validation
+
+The PR112 status CLI can validate an env file's structure without ever
+printing a secret value:
+
+```bash
+python scripts/live_capital_status.py --validate-env --env-file .env.live --json
+```
+
+It flags `ENV_FILE_SUSPICIOUS_LINE` for malformed lines (e.g. a pasted
+shell command such as `chmod 600 .env.liveALLOWED=false`) and warns
+(`ENV_SECRET_LOGGING_KEY_MISSING`) when `AMA_SECRET_LOGGING_ALLOWED` is
+absent. `AMA_SECRET_LOGGING_ALLOWED` must exist and default `false`.
+
+### 8.3 Binance key must NOT have withdraw permission
+
+PR111/PR112 never need withdraw. If the key has it, the health check
+raises `high_risk_permission_warning=True`. Disable withdraw on the API
+key.
+
+### 8.4 Capital profile env variable name
+
+PR112 reads the active capital profile from the environment. Both names
+are supported, with `AMA_LIVE_CAPITAL_PROFILE_ID` taking priority over
+the `AMA_LIVE_CAPITAL_PROFILE` alias:
+
+```
+AMA_LIVE_CAPITAL_PROFILE=L1_10U_PROBE
+# or, equivalently / with priority:
+AMA_LIVE_CAPITAL_PROFILE_ID=L1_10U_PROBE
+```
+
+An invalid value surfaces `CONFIG_INVALID_CAPITAL_PROFILE` (never a
+silent fallback to `L0_SHADOW`). This fixes the PR111 behaviour where
+`AMA_LIVE_CAPITAL_PROFILE=L1_10U_PROBE` was ignored and the health output
+still showed `capital_profile_id=L0_SHADOW`.
+
+### 8.5 Telegram outbound stays off until an explicit test
+
+`AMA_TELEGRAM_OUTBOUND_ENABLED` must stay `false` until you explicitly
+want to test outbound. A test message is only sent on
+`--send-telegram-test` with outbound enabled and a real (non-placeholder)
+token.
+
+See `docs/AMA_RT_LIVE_CAPITAL_RISK_PNL.md` for the PR112 live capital /
+risk / funding-aware PnL layer.

@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from app.core.enums import LiveRuntimeMode
+from app.live.capital_profile import CapitalProfileId
 from app.live.secrets import SecretValue, load_secret
 
 
@@ -68,6 +69,21 @@ TESTNET_BINANCE_FAPI_BASE_URL: Final[str] = "https://testnet.binancefuture.com"
 DEFAULT_DEEPSEEK_BASE_URL: Final[str] = "https://api.deepseek.com"
 DEFAULT_DEEPSEEK_MODEL: Final[str] = "deepseek-chat"
 
+# PR112 hardening: the default capital profile when nothing is configured.
+# A bare boot stays on the shadow profile (no real orders) — never
+# silently on a funded profile.
+DEFAULT_CAPITAL_PROFILE_ID: Final[CapitalProfileId] = CapitalProfileId.L0_SHADOW
+
+# Health tag emitted when AMA_LIVE_CAPITAL_PROFILE[_ID] holds an invalid
+# value. PR112 NEVER silently falls back without surfacing this.
+CONFIG_INVALID_CAPITAL_PROFILE: Final[str] = "CONFIG_INVALID_CAPITAL_PROFILE"
+
+# Env var names for the capital profile. ``_ID`` takes priority when both
+# are set; ``AMA_LIVE_CAPITAL_PROFILE`` is supported as an operator-friendly
+# alias (the value the PR111 server deployment actually used).
+ENV_CAPITAL_PROFILE_ID: Final[str] = "AMA_LIVE_CAPITAL_PROFILE_ID"
+ENV_CAPITAL_PROFILE_ALIAS: Final[str] = "AMA_LIVE_CAPITAL_PROFILE"
+
 
 def _env(name: str, default: str = "", *, environ: dict[str, str] | None = None) -> str:
     source = environ if environ is not None else os.environ
@@ -91,6 +107,91 @@ def _parse_chat_ids(raw: str) -> tuple[str, ...]:
         if token:
             out.append(token)
     return tuple(out)
+
+
+@dataclass(frozen=True)
+class CapitalProfileResolution:
+    """Result of resolving the capital-profile env variable(s).
+
+    ``error`` is :data:`CONFIG_INVALID_CAPITAL_PROFILE` when a value was
+    supplied but is not a valid :class:`CapitalProfileId`; in that case
+    ``profile_id`` stays on the safe default but the error is surfaced
+    (never a silent fallback). ``warning`` is set whenever the resolution
+    is anything other than a clean, valid, explicitly-configured profile.
+    """
+
+    profile_id: CapitalProfileId
+    source_env: str | None
+    raw_value: str
+    error: str
+    warning: str
+
+    @property
+    def ok(self) -> bool:
+        return self.error == ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "capital_profile_id": self.profile_id.value,
+            "source_env": self.source_env,
+            "raw_value": self.raw_value,
+            "error": self.error,
+            "warning": self.warning,
+        }
+
+
+def resolve_capital_profile_id(
+    environ: dict[str, str] | None = None,
+) -> CapitalProfileResolution:
+    """Resolve the active capital profile from the environment.
+
+    Supports both env names, with ``AMA_LIVE_CAPITAL_PROFILE_ID`` taking
+    priority over the ``AMA_LIVE_CAPITAL_PROFILE`` alias. An invalid value
+    yields :data:`CONFIG_INVALID_CAPITAL_PROFILE` (NOT a silent fallback);
+    an empty env yields the safe default with no error. The brief's
+    failure mode (``AMA_LIVE_CAPITAL_PROFILE=L1_10U_PROBE`` ignored and
+    the health output still showing ``L0_SHADOW``) is fixed here.
+    """
+
+    raw_id = _env(ENV_CAPITAL_PROFILE_ID, "", environ=environ)
+    raw_alias = _env(ENV_CAPITAL_PROFILE_ALIAS, "", environ=environ)
+
+    if raw_id:
+        source_env, raw = ENV_CAPITAL_PROFILE_ID, raw_id
+    elif raw_alias:
+        source_env, raw = ENV_CAPITAL_PROFILE_ALIAS, raw_alias
+    else:
+        return CapitalProfileResolution(
+            profile_id=DEFAULT_CAPITAL_PROFILE_ID,
+            source_env=None,
+            raw_value="",
+            error="",
+            warning="",
+        )
+
+    try:
+        profile_id = CapitalProfileId(raw)
+    except ValueError:
+        # Explicit error, NOT a silent fallback. The caller surfaces it.
+        return CapitalProfileResolution(
+            profile_id=DEFAULT_CAPITAL_PROFILE_ID,
+            source_env=source_env,
+            raw_value=raw,
+            error=CONFIG_INVALID_CAPITAL_PROFILE,
+            warning=(
+                f"{CONFIG_INVALID_CAPITAL_PROFILE}: {source_env}={raw!r} is not a "
+                f"valid capital profile id; staying on the safe default "
+                f"{DEFAULT_CAPITAL_PROFILE_ID.value}. Operator must fix the env."
+            ),
+        )
+
+    return CapitalProfileResolution(
+        profile_id=profile_id,
+        source_env=source_env,
+        raw_value=raw,
+        error="",
+        warning="",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -240,12 +341,23 @@ class GeneralLiveConfig:
     # masked secrets; this flag does NOT unlock raw-secret logging in
     # PR111 (there is no code path that logs a revealed secret).
     secret_logging_allowed: bool = False
+    # PR112: the active capital profile, resolved from
+    # AMA_LIVE_CAPITAL_PROFILE_ID (priority) / AMA_LIVE_CAPITAL_PROFILE
+    # (alias). Defaults to the safe shadow profile.
+    capital_profile_id: CapitalProfileId = DEFAULT_CAPITAL_PROFILE_ID
+    capital_profile_source_env: str | None = None
+    capital_profile_error: str = ""
+    capital_profile_warning: str = ""
 
     def to_safe_dict(self) -> dict[str, object]:
         return {
             "runtime_mode": self.runtime_mode.value,
             "healthcheck_enabled": self.healthcheck_enabled,
             "secret_logging_allowed": self.secret_logging_allowed,
+            "capital_profile_id": self.capital_profile_id.value,
+            "capital_profile_source_env": self.capital_profile_source_env,
+            "capital_profile_error": self.capital_profile_error,
+            "capital_profile_warning": self.capital_profile_warning,
         }
 
     @classmethod
@@ -261,6 +373,7 @@ class GeneralLiveConfig:
         # never armed from a bare env var.
         if mode.real_orders_possible:
             mode = LiveRuntimeMode.LIVE_SHADOW
+        profile = resolve_capital_profile_id(environ)
         return cls(
             runtime_mode=mode,
             healthcheck_enabled=_env_bool(
@@ -269,6 +382,10 @@ class GeneralLiveConfig:
             secret_logging_allowed=_env_bool(
                 "AMA_SECRET_LOGGING_ALLOWED", False, environ=environ
             ),
+            capital_profile_id=profile.profile_id,
+            capital_profile_source_env=profile.source_env,
+            capital_profile_error=profile.error,
+            capital_profile_warning=profile.warning,
         )
 
 
@@ -284,6 +401,10 @@ class LiveApiConfig:
     @property
     def live_runtime_mode(self) -> LiveRuntimeMode:
         return self.general.runtime_mode
+
+    @property
+    def capital_profile_id(self) -> CapitalProfileId:
+        return self.general.capital_profile_id
 
     def to_safe_dict(self) -> dict[str, object]:
         return {
@@ -306,6 +427,12 @@ class LiveApiConfig:
 __all__ = [
     "LiveRuntimeMode",
     "DEFAULT_LIVE_RUNTIME_MODE",
+    "DEFAULT_CAPITAL_PROFILE_ID",
+    "CONFIG_INVALID_CAPITAL_PROFILE",
+    "ENV_CAPITAL_PROFILE_ID",
+    "ENV_CAPITAL_PROFILE_ALIAS",
+    "CapitalProfileResolution",
+    "resolve_capital_profile_id",
     "BinanceApiConfig",
     "TelegramApiConfig",
     "DeepSeekApiConfig",

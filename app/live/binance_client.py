@@ -59,8 +59,13 @@ from app.live.binance_models import (
     parse_exchange_info,
 )
 from app.live.binance_permissions import inspect_permissions
-from app.live.secrets import API_HEALTH_MISSING_SECRET
-from app.live.status import HealthStatus, TRADE_API_BLOCKED_BY_PR111, worst_of
+from app.live.secrets import API_HEALTH_MISSING_SECRET, PLACEHOLDER_SECRET_CONFIGURED
+from app.live.status import (
+    HealthStatus,
+    TRADE_API_BLOCKED_BY_PR111,
+    classify_api_error,
+    worst_of,
+)
 
 #: Transport callable: (method, url, headers) -> parsed JSON value.
 BinanceTransport = Callable[[str, str, Mapping[str, str]], Any]
@@ -442,10 +447,21 @@ class BinanceLiveClient:
             errors.append(f"public_market: {_sanitise(exc)}")
 
         # --- PRIVATE_READ ---
+        placeholder_secret = False
         if not self._config.enable_private_read:
             warnings.append("private_read_disabled_by_config")
         elif not self._config.has_credentials:
             warnings.append(API_HEALTH_MISSING_SECRET)
+        elif (
+            self._config.api_key.is_placeholder
+            or self._config.api_secret.is_placeholder
+        ):
+            # PR112 hardening: a placeholder key/secret (e.g. copied from
+            # .env.example and never filled in) must NOT reach a real HTTP
+            # call - it would only produce a confusing 401. Detect it here
+            # and tell the operator exactly what to fix.
+            placeholder_secret = True
+            warnings.append(PLACEHOLDER_SECRET_CONFIGURED)
         else:
             try:
                 account = self.get_account()
@@ -465,12 +481,15 @@ class BinanceLiveClient:
                     self.get_income_history(limit=10)
                     can_read_income = True
                 except Exception as exc:
-                    warnings.append(f"income_read: {_sanitise(exc)}")
+                    warnings.append(f"income_read: {classify_api_error(_sanitise(exc))}")
                 private_read_ok = can_read_account
                 if private_read_ok:
                     self._emit(EventType.BINANCE_PRIVATE_READ_OK, {"can_read_income": can_read_income})
             except Exception as exc:
-                errors.append(f"private_read: {_sanitise(exc)}")
+                # PR112 hardening: classify into a typed operator reason
+                # (401 / 403 / 429 / 5xx / network) instead of a generic
+                # HTTP error.
+                errors.append(f"private_read: {classify_api_error(_sanitise(exc))}")
 
         # --- PRIVATE_TRADE (always reported as blocked) ---
         self._emit(
@@ -490,7 +509,12 @@ class BinanceLiveClient:
         else:
             statuses.append(HealthStatus.FAIL)
         if self._config.enable_private_read:
-            statuses.append(HealthStatus.PASS if private_read_ok else HealthStatus.FAIL)
+            if placeholder_secret:
+                # A placeholder is a config problem, not a hard failure:
+                # WARN with a clear operator action.
+                statuses.append(HealthStatus.WARN)
+            else:
+                statuses.append(HealthStatus.PASS if private_read_ok else HealthStatus.FAIL)
         if high_risk:
             statuses.append(HealthStatus.WARN)
         status = worst_of(statuses)

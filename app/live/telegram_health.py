@@ -12,8 +12,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.live.api_config import LiveRuntimeMode, TelegramApiConfig
-from app.live.secrets import API_HEALTH_MISSING_SECRET
-from app.live.status import HealthStatus, TELEGRAM_OUTBOUND_DISABLED, worst_of
+from app.live.secrets import API_HEALTH_MISSING_SECRET, PLACEHOLDER_SECRET_CONFIGURED
+from app.live.status import (
+    HealthStatus,
+    TELEGRAM_OUTBOUND_DISABLED,
+    classify_api_error,
+    worst_of,
+)
 from app.live.telegram_client import TelegramLiveClient
 
 
@@ -80,20 +85,30 @@ def run_telegram_health_check(
         statuses.append(HealthStatus.SKIPPED)
     else:
         # Outbound is enabled. Validate token reachability via getMe only
-        # if a token is present; never send a message unless requested.
-        if bot_token_present:
+        # if a REAL token is present; never send a message unless requested.
+        # PR112 hardening: a placeholder token never reaches getMe (it would
+        # only produce a confusing HTTP error).
+        if bot_token_present and config.bot_token.is_placeholder:
+            statuses.append(HealthStatus.WARN)
+            detail_parts.append(PLACEHOLDER_SECRET_CONFIGURED)
+        elif bot_token_present:
             try:
                 cli.get_me()
                 statuses.append(HealthStatus.PASS)
             except Exception as exc:  # token / transport failure
-                error_message = _sanitise(exc)
+                error_message = classify_api_error(_sanitise(exc))
+                detail_parts.append(error_message)
                 statuses.append(HealthStatus.FAIL)
 
         if send_test:
             chat = test_chat_id
             if chat is None and config.allowed_chat_ids:
                 chat = config.allowed_chat_ids[0]
-            if chat is None:
+            if config.bot_token.is_placeholder:
+                # Never send with a placeholder token.
+                statuses.append(HealthStatus.WARN)
+                detail_parts.append(PLACEHOLDER_SECRET_CONFIGURED)
+            elif chat is None:
                 statuses.append(HealthStatus.WARN)
                 detail_parts.append("no_test_chat_id")
             else:

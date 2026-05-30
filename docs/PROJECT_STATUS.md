@@ -5,6 +5,48 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR112 (Live Capital / Risk / Funding-Aware PnL / 10U Profile)
+
+> **PR112 — Live Capital / Risk / Funding-Aware PnL / 10U Profile
+> Enforcement v0.**
+> **Status: IN_REVIEW.**
+> **Type: read-only live capital / risk wiring (NO live orders).**
+
+PR112 wires the PR111 real Binance private-read results into a live
+capital / risk engine and strictly enforces the `L1_10U_PROBE`
+small-capital profile, preparing for PR113's real execution gateway.
+It adds, under `app/live/`: `capital_state.py` (`LiveCapitalState` from a
+real account snapshot), `pnl_accounting.py` (funding-aware
+`LivePnlSummary` with deposit/withdrawal separation), `live_risk_engine.py`
+(capital profile enforcement + deterministic dry order risk pre-check),
+and `live_capital_service.py` (orchestration + Telegram operator
+payloads). CLI: `scripts/live_capital_status.py`.
+
+Hard boundary held by PR112:
+
+  - **No real order is placed / cancelled.** Every `LiveRiskDecision`
+    has `real_order_allowed = false`; an `approved` decision is advisory
+    only (PR113 owns execution).
+  - **No leverage / margin change. No auto-switch to LIVE_LIMITED. No
+    auto-escalate of the capital profile** — a profile/equity mismatch
+    is detected and the operator must reselect manually.
+  - **`net_strategy_pnl = realized − commission + funding`.** Deposits /
+    withdrawals / transfers never count as strategy PnL.
+  - **`L1_10U_PROBE` caps usable account capital at 10U.**
+  - **Account-level funding attribution implemented**; position-level
+    attribution is the PR113/PR114 handoff
+    (`UNATTRIBUTED_PENDING_POSITION_LINK`).
+
+PR112 also folds in PR111 usability hardening: placeholder-secret
+detection (`PLACEHOLDER_SECRET_CONFIGURED` before any real HTTP call),
+typed health messages (401 / 403 / 429 / 5xx / network), `.env.live`
+structure validation, and capital-profile env compatibility
+(`AMA_LIVE_CAPITAL_PROFILE_ID` priority / `AMA_LIVE_CAPITAL_PROFILE`
+alias) — fixing the PR111 bug where `L1_10U_PROBE` showed as `L0_SHADOW`.
+
+See `docs/AMA_RT_LIVE_CAPITAL_RISK_PNL.md` and
+`docs/AMA_RT_LIVE_API_SETUP.md`.
+
 ## Live road map — PR111 (API Integration Pack v0)
 
 > **PR111 — API Integration Pack v0: Binance API + Telegram Bot API +

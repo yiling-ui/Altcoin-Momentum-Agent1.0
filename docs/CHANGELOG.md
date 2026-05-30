@@ -7,6 +7,90 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR112 — Live Capital / Risk / Funding-Aware PnL / 10U Profile Enforcement v0: IN_REVIEW
+
+**Type:** Read-only live capital / risk wiring on top of PR111 private
+read. **No live orders.** **No cancel.** **No leverage / margin change.**
+**No auto-switch to LIVE_LIMITED. No auto-escalation of the capital
+profile.** **LIVE_SHADOW is the default.**
+
+**Runtime effect on trading:** none. PR112 reads real account state,
+computes funding-aware PnL, enforces the `L1_10U_PROBE` profile, and
+produces a deterministic *dry* order risk decision + Telegram operator
+payloads. Every `LiveRiskDecision` has `real_order_allowed=False`.
+
+**Added — `app/live/` package:**
+
+  - `capital_state.py` — `LiveCapitalState` / `LivePosition` built from a
+    PR111 `BinanceAccountSnapshot` (+ open-order count). `source` is
+    always `BINANCE_PRIVATE_READ`; `real_orders_allowed=False` and
+    `exchange_live_orders=False` are hard-locked. Computes equity
+    (margin balance), used/free margin, masked account id.
+  - `pnl_accounting.py` — funding-aware `LivePnlSummary`.
+    `net_strategy_pnl = gross_realized − commission_total + funding_total`.
+    Deposits / withdrawals / transfers are tracked separately and never
+    enter strategy PnL; unknown income is preserved separately;
+    `performance_equity_excluding_external_flows` removes net external
+    capital. Account-level funding attribution
+    (`UNATTRIBUTED_PENDING_POSITION_LINK`); position-level attribution is
+    the PR113/PR114 handoff.
+  - `live_risk_engine.py` — `evaluate_capital_profile_state`
+    (`PROFILE_OK` / `PROFILE_MISMATCH_EQUITY_ABOVE_RANGE` / `..._BELOW_RANGE`
+    / `ACCOUNT_CAPITAL_EXCEEDS_PROFILE_CAP` / `DAILY_LOSS_LIMIT_REACHED`
+    / `TOTAL_LOSS_LIMIT_REACHED` / `MAX_ACTIVE_POSITIONS_REACHED` /
+    `AVAILABLE_BALANCE_TOO_LOW` / `RISK_HALT_ACTIVE` /
+    `KILL_SWITCH_REQUIRED`; caps usable capital at the profile cap; never
+    auto-escalates). `LiveOrderIntent` (PR112 risk-check intent, distinct
+    from PR110's path-isolation intent), `LiveRiskDecision`, and
+    `evaluate_live_order_risk` (rejects on shadow mode, `source != LIVE`,
+    missing snapshot, invalid profile, notional/leverage > profile max,
+    insufficient balance, max positions, daily/total loss, risk halt, no
+    stop plan, no exit plan, right-tail leverage gate rejection, symbol
+    not tradable). `real_order_allowed` always `False`.
+  - `live_capital_service.py` — `LiveCapitalService` orchestration +
+    Telegram operator payload builders: `LIVE_ACCOUNT_STATUS`,
+    `LIVE_CAPITAL_PROFILE_STATUS`, `LIVE_PNL_SUMMARY`, `LIVE_RISK_REJECT`,
+    `CAPITAL_PROFILE_MISMATCH`, `FUNDING_EVENT_SUMMARY`. Build-only (no
+    outbound); every payload carries `real_order=false` /
+    `trade_authority=false` / `ai_trade_authority=false`.
+  - `env_validation.py` — `.env.live` structure validation
+    (`ENV_FILE_SUSPICIOUS_LINE`, `ENV_SECRET_LOGGING_KEY_MISSING`,
+    `ENV_SECRET_LOGGING_ENABLED`); never prints a secret value.
+
+**Added — CLI:** `scripts/live_capital_status.py`
+(`--json` / `--pnl` / `--risk-check-sample --symbol --notional --leverage`
+/ `--validate-env`). Read-only: never submits orders, never switches
+mode, never calls a private-trade endpoint, masks secrets.
+
+**Changed — PR111 usability hardening (no safety flag loosened):**
+
+  - `secrets.py` — placeholder-secret detection
+    (`is_placeholder_secret`, `SecretValue.is_placeholder` / `is_real` /
+    `health_status`); `PLACEHOLDER_SECRET_CONFIGURED` / `MISSING_REAL_SECRET`.
+  - `status.py` — `classify_api_error` + typed tags
+    (`INVALID_SECRET_OR_UNAUTHORIZED` / `PERMISSION_DENIED` /
+    `RATE_LIMITED` / `API_ENDPOINT_UNAVAILABLE` / `NETWORK_ERROR` /
+    `MALFORMED_API_RESPONSE`).
+  - `binance_client.py` / `telegram_health.py` / `deepseek_health.py` —
+    a placeholder secret never reaches a real HTTP call (returns
+    `PLACEHOLDER_SECRET_CONFIGURED` instead of a confusing 401 / getMe
+    error); real errors are classified, not collapsed into a generic one.
+  - `api_config.py` — capital-profile env support
+    (`AMA_LIVE_CAPITAL_PROFILE_ID` priority / `AMA_LIVE_CAPITAL_PROFILE`
+    alias; invalid → `CONFIG_INVALID_CAPITAL_PROFILE`, never silent).
+  - `health.py` — the unified report now reflects the configured capital
+    profile (fixes the PR111 bug where `L1_10U_PROBE` showed `L0_SHADOW`)
+    and surfaces the placeholder / capital-profile warnings.
+
+**Docs:** new `docs/AMA_RT_LIVE_CAPITAL_RISK_PNL.md`; updated
+`docs/PROJECT_STATUS.md`, `docs/PHASE_GATE.md`,
+`docs/AMA_RT_API_INTEGRATION_PACK.md`, `docs/AMA_RT_LIVE_FOUNDATION_SPEC.md`,
+`docs/AMA_RT_LIVE_API_SETUP.md`, `.env.example`.
+
+**Tests:** `tests/unit/test_pr112_live_capital_risk.py`,
+`tests/unit/test_pr112_pr111_hardening.py`, `tests/unit/test_pr112_cli.py`
+(all 28 brief-mandated cases + PR111-pass regression).
+
 ### PR111 — API Integration Pack v0: Binance + Telegram + DeepSeek API Health & Permission Layer: IN_REVIEW
 
 **Type:** Live-API foundation (real read connectivity for the
