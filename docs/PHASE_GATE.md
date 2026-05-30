@@ -8,6 +8,55 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR115 — DeepSeek Live Intelligence v0 (IN_REVIEW)
+
+**PR115 — live-safe operator briefing + evidence compression + risk
+explanation + Telegram AI briefing.** PR115 connects DeepSeek to the live
+operator workflow **only** as market intelligence and does **NOT** loosen
+any Phase 1 safety flag:
+
+  - **No trade authority.** `ai_trade_authority=false` is pinned on every
+    evidence bundle, briefing, Telegram card, CLI report, and audit
+    payload. The AI cannot output direction / `position_size` / `size` /
+    `leverage` / `stop_price` / `take_profit` / `target_price` /
+    `order_type` / `entry_price` / `exit_price` / `execute` /
+    `trade_decision` / `runtime_config_patch` / `strategy_patch` /
+    `risk_limit_patch`; the output guard strips any such field and marks
+    the briefing `REJECTED_FOR_TRADE_AUTHORITY`
+    (`AI_FORBIDDEN_FIELD_STRIPPED` +
+    `DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY`).
+  - **LIVE-only evidence.** The `LiveAIEvidenceBundle` is
+    `source_scope=LIVE_ONLY`; a `SIM`/`BLIND`/`REPLAY`/`PAPER_SHADOW`/
+    `BACKTEST`/`OFFLINE_AI`/`TELEGRAM_SANDBOX` source (or an unknown
+    source, fail-safe) is refused
+    (`LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE`). No blind / replay /
+    sim / future-label evidence is ever a live AI input.
+  - **No execution / no mutation.** The AI modules never import or call
+    `LiveExecutionGateway` / `BinanceExecutionAdapter`. The AI cannot
+    change runtime mode / capital profile / leverage / stop / take-profit
+    / risk limits, cannot auto-switch `LIVE_LIMITED`, and cannot trigger a
+    Telegram live order / state-changing command (those are blocked with
+    `AI_TELEGRAM_BRIEFING_BLOCKED`).
+  - **Informational Telegram only.** `/ai_status`, `/brief`,
+    `/explain_risk`, `/explain_position <SYMBOL>`, `/summarize_pnl`,
+    `/summarize_rejections` return explanation / summary cards
+    (`no_order_instruction=true`, `recommends_action=false`,
+    `MARKET_INTELLIGENCE_ONLY`). Funding / commission / PnL summaries are
+    explanatory only; deposits / withdrawals stay separate from strategy
+    PnL.
+  - DeepSeek key held as a `SecretValue` (Authorization header only,
+    never logged). Missing / disabled key → `MISSING_SECRET` / `DISABLED`
+    (no crash); HTTP error → `ERROR` (safe text). `phase_12_forbidden`
+    recorded `True`.
+
+Gate criteria for the NEXT slice (**PR116 — 10U live launch**): the live
+real-order path remains blocked unless every PR113 gate + all
+confirmation flags are satisfied; the AI remains intelligence-only.
+Acceptance evidence: `docs/AMA_RT_DEEPSEEK_LIVE_INTELLIGENCE.md`,
+`scripts/live_ai_briefing.py --status-json`,
+`tests/unit/test_pr115_deepseek_live_intelligence.py`. **PR115 is not the
+final 10U launch.**
+
 ## Open slice — PR114 — Telegram Operator Console v0 + Live Funding Attribution (IN_REVIEW)
 
 **PR114 — real Telegram operator desk + first funding/commission

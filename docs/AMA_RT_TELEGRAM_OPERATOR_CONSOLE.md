@@ -269,3 +269,33 @@ A corrupt file fails safe to `LIVE_SHADOW` with a warning. An armed
 PR114 is **IN_REVIEW**. This is **not** the final 10U launch. Real
 trading remains blocked by default until the launch PR (PR116) explicitly
 updates the stage docs.
+
+
+---
+
+## 14. AI briefing commands (PR115 — MARKET_INTELLIGENCE_ONLY)
+
+PR115 adds a small set of **read-only** DeepSeek AI commands to the
+operator desk. They return explanation / summary cards only — the AI has
+**no trade authority** and these commands can **never** place an order or
+change mode / profile / risk. See
+`docs/AMA_RT_DEEPSEEK_LIVE_INTELLIGENCE.md`.
+
+| Command | Returns |
+| --- | --- |
+| `/ai_status` | DeepSeek enabled? key present (masked)? last briefing status? `MARKET_INTELLIGENCE_ONLY`, `ai_trade_authority=false`, `source_scope=LIVE_ONLY`. |
+| `/brief` | The latest live-safe briefing. Never creates an order intent. |
+| `/explain_risk` | Current risk state + recent rejects. Never recommends an order action. |
+| `/explain_position <SYMBOL>` | An open position using live data. Never recommends hold / add / close / open. |
+| `/summarize_pnl` | Gross realized PnL, commission, funding, net strategy PnL, deposits / withdrawals (kept separate). Explanatory only. |
+| `/summarize_rejections` | Recent risk / execution rejects. Never suggests bypassing a gate. |
+
+Every AI card displays `[AI Briefing / MARKET_INTELLIGENCE_ONLY]`,
+`ai_trade_authority=false`, `source_scope=LIVE_ONLY`, the
+`evidence_quality`, risk notes, missing evidence, and carries
+`no_order_instruction=true` / `recommends_action=false`. A non-`LIVE`
+source, a live / state-changing command, or a trade-authority leak in the
+model output is blocked (`AI_TELEGRAM_BRIEFING_BLOCKED`); a clean card
+emits `AI_TELEGRAM_BRIEFING_SENT`. The AI uses **LIVE-only** evidence and
+never calls the execution gateway. The 10U live launch still requires
+**PR116**.

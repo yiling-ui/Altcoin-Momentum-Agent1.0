@@ -7,6 +7,75 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR115 — DeepSeek Live Intelligence v0: Live-safe Operator Briefing + Evidence Compression + Risk Explanation: IN_REVIEW
+
+**Type:** AI market-intelligence only — live-safe operator briefing,
+evidence compression, risk explanation, and Telegram AI briefing. **The
+AI has NO trade authority.** **It cannot decide direction / size /
+leverage / stop / take-profit / target / order / execution / config
+patch.** **It cannot use blind / replay / sim evidence.** **It cannot call
+the execution gateway.** **Not the final 10U launch (PR116).**
+
+**Runtime effect on trading:** none. PR115 reads live-approved evidence,
+summarises it, and emits informational briefings. It holds no execution
+adapter and flips no safety flag.
+
+**Added — `app/live/` package:**
+
+  - `ai_live_evidence.py` — `LiveAIEvidenceBundle` +
+    `build_live_ai_evidence_bundle(...)` (`source_scope=LIVE_ONLY`,
+    `ai_trade_authority=false`). Live-approved sources only; `SIM` /
+    `BLIND` / `REPLAY` / `PAPER_SHADOW` / `BACKTEST` / `OFFLINE_AI` /
+    `TELEGRAM_SANDBOX` (and the simulation module class names) are
+    refused; an unknown source fails safe to forbidden. Evidence redacted
+    on construction. Rejection emits
+    `LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE`.
+  - `ai_output_guard.py` — `sanitize_ai_output(...)` strips every
+    forbidden trade-authority field (case-insensitive, any depth):
+    `should_buy/sell/long/short`, `direction`, `position_size`, `size`,
+    `leverage`, `stop_price`, `take_profit`, `target_price`, `order_type`,
+    `entry_price`, `exit_price`, `execute`, `trade_decision`,
+    `runtime_config_patch`, `strategy_patch`, `risk_limit_patch` (+ the
+    PR111 superset). A leak → `REJECTED_FOR_TRADE_AUTHORITY` +
+    `AI_FORBIDDEN_FIELD_STRIPPED` +
+    `DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY`.
+  - `ai_live_briefing.py` — `LiveAIBriefingGenerator` +
+    `build_prompt_messages` (system prompt = market-intelligence only;
+    requested schema carries no trade-authority field) + `LiveAIBriefing`
+    schema. Never raises: `DISABLED` / `MISSING_SECRET` / `ERROR` /
+    `INSUFFICIENT_EVIDENCE` / `REJECTED_FOR_TRADE_AUTHORITY` / `OK`. Emits
+    `LIVE_AI_BRIEFING_REQUESTED` / `GENERATED` / `FAILED`.
+  - `ai_telegram.py` — `AIBriefingTelegram` safe AI commands `/ai_status`,
+    `/brief`, `/explain_risk`, `/explain_position <SYMBOL>`,
+    `/summarize_pnl`, `/summarize_rejections`. Cards carry
+    `[AI Briefing / MARKET_INTELLIGENCE_ONLY]`, `ai_trade_authority=false`,
+    `source_scope=LIVE_ONLY`, `no_order_instruction=true`,
+    `recommends_action=false`. Non-LIVE source / live-or-state-changing
+    command / trade-authority leak → `AI_TELEGRAM_BRIEFING_BLOCKED`; an OK
+    card → `AI_TELEGRAM_BRIEFING_SENT`.
+
+**Added — CLI:** `scripts/live_ai_briefing.py` (`--status-json`,
+`--brief [--json] [--dry-run]`, `--validate-output sample.json`). Never
+submits orders / switches mode / changes profile / calls the execution
+gateway / uses blind-replay-sim evidence. Missing key →
+`MISSING_SECRET` / `DISABLED` (no crash). Secrets masked / redacted.
+
+**Added — events (`app/core/events.py`):** `LIVE_AI_BRIEFING_REQUESTED`,
+`LIVE_AI_BRIEFING_GENERATED`, `LIVE_AI_BRIEFING_FAILED`,
+`LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE`,
+`AI_FORBIDDEN_FIELD_STRIPPED`, `AI_TELEGRAM_BRIEFING_SENT`,
+`AI_TELEGRAM_BRIEFING_BLOCKED`. No payload carries an API key / secret.
+
+**Added — docs:** `docs/AMA_RT_DEEPSEEK_LIVE_INTELLIGENCE.md`.
+
+**Tests:** `tests/unit/test_pr115_deepseek_live_intelligence.py` (fake
+DeepSeek transport only). Full suite green (PR110–PR114 unchanged).
+
+**Safety flags (unchanged, default):** `live_trading=false`,
+`exchange_live_orders=false`, `trade_authority=false`,
+`ai_trade_authority=false`, `runtime_mode=LIVE_SHADOW`,
+`phase_12_forbidden=true`. **10U live launch still requires PR116.**
+
 ### PR114 — Telegram Operator Console v0 + Live Funding Attribution + Operator Workflow + Blind/Replay/Sim Isolation: IN_REVIEW
 
 **Type:** Real Telegram operator desk (gated outbound) + first

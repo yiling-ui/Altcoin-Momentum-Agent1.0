@@ -5,6 +5,51 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR115 (DeepSeek Live Intelligence v0)
+
+> **PR115 — DeepSeek Live Intelligence v0: Live-safe Operator Briefing +
+> Evidence Compression + Risk Explanation.**
+> **Status: IN_REVIEW.**
+> **Type: AI market-intelligence only — the AI has NO trade authority.**
+
+PR115 connects DeepSeek to the live operator workflow **only** as market
+intelligence: it compresses live-approved evidence into a readable
+operator briefing, explains live risk rejections, summarises funding /
+commission / PnL, and can push the briefing to Telegram. New modules under
+`app/live/`: `ai_live_evidence.py`, `ai_output_guard.py`,
+`ai_live_briefing.py`, `ai_telegram.py`. CLI: `scripts/live_ai_briefing.py`.
+Doc: `docs/AMA_RT_DEEPSEEK_LIVE_INTELLIGENCE.md`.
+
+Hard boundary held by PR115 (default state stays safe):
+
+  - **No trade authority.** `ai_trade_authority=false` is pinned on every
+    evidence bundle, briefing, card, and audit payload. The AI cannot
+    output direction / size / leverage / stop / take-profit / target /
+    order type / entry-exit price / execute / trade decision / runtime /
+    strategy / risk-limit config patch.
+  - **LIVE-only evidence.** Evidence is `source_scope=LIVE_ONLY`. A
+    `SIM` / `BLIND` / `REPLAY` / `PAPER_SHADOW` / `BACKTEST` /
+    `OFFLINE_AI` / `TELEGRAM_SANDBOX` source (or an unknown source) is
+    refused (`LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE`).
+  - **Output guard.** DeepSeek output passes a schema + forbidden-field
+    sanitizer; a trade-authority leak is stripped and marked
+    `REJECTED_FOR_TRADE_AUTHORITY` (never sent as an actionable card).
+  - **No execution.** The AI modules never import or call
+    `LiveExecutionGateway` / `BinanceExecutionAdapter`; the AI cannot
+    change mode / profile / leverage / risk limits or trigger a Telegram
+    live order command.
+  - **Informational Telegram.** `/ai_status`, `/brief`, `/explain_risk`,
+    `/explain_position <SYMBOL>`, `/summarize_pnl`,
+    `/summarize_rejections` — every card is informational
+    (`no_order_instruction=true`, `recommends_action=false`).
+  - Safety flags stay `live_trading=false`, `exchange_live_orders=false`,
+    `trade_authority=false`, `ai_trade_authority=false`,
+    `runtime_mode=LIVE_SHADOW`, `phase_12_forbidden=true`.
+
+**The 10U live launch still requires PR116.**
+
+---
+
 ## Live road map — PR114 (Telegram Operator Console v0 + Live Funding Attribution)
 
 > **PR114 — Telegram Operator Console v0 + Live Funding Attribution +
