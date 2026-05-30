@@ -269,6 +269,85 @@ class RiskFreezeReason:
     )
 
 
+class CapitalRejectReason:
+    """Closed taxonomy of pre-entry capital / risk rejection reasons
+    (Phase 11C.1D-D / PR108 - Simulated Capital Safety Floor / Kill
+    Switch / No Negative Equity Guard).
+
+    A capital reject means the engine refused to OPEN a NEW simulated
+    position because doing so would be unsafe. It is a *predictable,
+    paper-only* simulated risk/capital rejection, NEVER a runtime
+    config patch, NEVER a trade authority signal, NEVER an
+    authorisation to raise any cap / floor / drawdown limit.
+    """
+
+    INSUFFICIENT_EQUITY: str = "insufficient_equity"
+    CAPITAL_EXHAUSTED: str = "capital_exhausted"
+    RISK_HALT_ACTIVE: str = "risk_halt_active"
+    MAX_DRAWDOWN_LIMIT_REACHED: str = "max_drawdown_limit_reached"
+    MAX_ACTIVE_POSITIONS_REACHED: str = "max_active_positions_reached"
+
+    ALLOWED: FrozenSet[str] = frozenset(
+        {
+            INSUFFICIENT_EQUITY,
+            CAPITAL_EXHAUSTED,
+            RISK_HALT_ACTIVE,
+            MAX_DRAWDOWN_LIMIT_REACHED,
+            MAX_ACTIVE_POSITIONS_REACHED,
+        }
+    )
+
+
+class RiskHaltReason:
+    """Closed taxonomy of simulated kill-switch / account-halt reasons
+    (PR108).
+
+    A risk halt is a paper-only kill switch: once latched it stops the
+    engine accepting ANY new simulated entry for the rest of the blind
+    window. Descriptive only. NEVER a runtime config patch, NEVER a
+    live-trading authority signal, NEVER an auto-tuning authority
+    signal.
+    """
+
+    NONE: str = "NONE"
+    CAPITAL_EXHAUSTED: str = "SIM_CAPITAL_EXHAUSTED"
+    MAX_DRAWDOWN_LIMIT_REACHED: str = "MAX_DRAWDOWN_LIMIT_REACHED"
+    CONSECUTIVE_LOSS_HALT: str = "CONSECUTIVE_LOSS_HALT"
+    MANUAL_HALT: str = "MANUAL_HALT"
+
+    ALLOWED: FrozenSet[str] = frozenset(
+        {
+            NONE,
+            CAPITAL_EXHAUSTED,
+            MAX_DRAWDOWN_LIMIT_REACHED,
+            CONSECUTIVE_LOSS_HALT,
+            MANUAL_HALT,
+        }
+    )
+
+
+class ForcedExitReason:
+    """Closed taxonomy of simulated forced-exit reasons (PR108).
+
+    Stamped onto a :class:`TradeLedgerEntry.exit_reason` when the
+    engine force-closes an OPEN simulated position to protect capital.
+    Forced exits ALWAYS go through the simulated capital-flow path
+    (never a real exchange). Descriptive only.
+    """
+
+    FORCED_CAPITAL_SAFETY_EXIT: str = "FORCED_CAPITAL_SAFETY_EXIT"
+    SIM_LIQUIDATION: str = "SIM_LIQUIDATION"
+    RISK_HALT: str = "RISK_HALT"
+
+    ALLOWED: FrozenSet[str] = frozenset(
+        {
+            FORCED_CAPITAL_SAFETY_EXIT,
+            SIM_LIQUIDATION,
+            RISK_HALT,
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # SimulatedCapitalConfig
 # ---------------------------------------------------------------------------
@@ -293,6 +372,39 @@ class SimulatedCapitalConfig:
     consecutive_loss_pause_threshold: Optional[int] = None
     max_drawdown_pause_pct: Optional[float] = None
     paper_liquidation_stress_enabled: bool = True
+    # ---- PR108: Simulated Capital Safety Floor / Kill Switch ----
+    # Hard floor (in base currency) below which the simulated *cash*
+    # balance can NEVER silently fall. When a realised loss would push
+    # ``exchange_equity`` below this floor and ``no_negative_equity_guard``
+    # is on, the engine clamps the cash balance at the floor, books the
+    # excess as a deterministic ``liquidation_shortfall``, flags
+    # ``capital_exhausted`` and latches the kill switch. Default 0.0 (no
+    # negative equity). NEVER a live-capital marker.
+    capital_floor: float = 0.0
+    # When True (default) the engine guarantees the simulated cash
+    # balance and the marked equity reported to the runner can never be
+    # silently negative: a close that would breach the floor is clamped,
+    # a marked equity at/under the floor triggers a SIM_LIQUIDATION
+    # forced-exit of every open position. Losses are NEVER hidden (the
+    # ledger entry keeps the truthful realised PnL); only the *account
+    # equity* floors at ``capital_floor``.
+    no_negative_equity_guard: bool = True
+    # When True (default) reaching the capital floor latches the kill
+    # switch: no new simulated entry is accepted for the rest of the
+    # blind window.
+    halt_on_capital_exhaustion: bool = True
+    # Optional hard drawdown kill switch (fraction in (0, 1]). When the
+    # marked drawdown reaches this threshold the engine force-exits every
+    # open simulated position and latches the kill switch with reason
+    # MAX_DRAWDOWN_LIMIT_REACHED. ``None`` => disabled (legacy behaviour).
+    # This is STRICTER than ``max_drawdown_pause_pct`` (which only freezes
+    # new opens); the halt also force-exits and is not auto-released.
+    max_drawdown_halt_pct: Optional[float] = None
+    # Optional minimum free equity required to OPEN a new simulated
+    # position. ``None`` => require free equity >= the position's own
+    # notional (so the account can never take on exposure it cannot
+    # cover). NEVER an authorisation to size up.
+    min_equity_to_open: Optional[float] = None
     # Hard-pinned safety markers:
     sandbox_only: bool = True
     live_capital_enabled: bool = False
@@ -366,6 +478,26 @@ class SimulatedCapitalConfig:
             raise TypeError(
                 "paper_liquidation_stress_enabled must be bool"
             )
+        # ---- PR108 capital-safety validation ----
+        cflr = _validate_non_negative("capital_floor", self.capital_floor)
+        if not isinstance(self.no_negative_equity_guard, bool):
+            raise TypeError("no_negative_equity_guard must be bool")
+        if not isinstance(self.halt_on_capital_exhaustion, bool):
+            raise TypeError("halt_on_capital_exhaustion must be bool")
+        mddh: Optional[float] = None
+        if self.max_drawdown_halt_pct is not None:
+            mddh = _validate_unit_fraction(
+                "max_drawdown_halt_pct", self.max_drawdown_halt_pct
+            )
+            if mddh <= 0.0:
+                raise ValueError(
+                    "max_drawdown_halt_pct must be > 0 or None"
+                )
+        meto: Optional[float] = None
+        if self.min_equity_to_open is not None:
+            meto = _validate_non_negative(
+                "min_equity_to_open", self.min_equity_to_open
+            )
         if self.sandbox_only is not True:
             raise ValueError("sandbox_only must be True")
         if self.live_capital_enabled is not False:
@@ -379,6 +511,9 @@ class SimulatedCapitalConfig:
             self, "consecutive_loss_pause_threshold", clpt
         )
         object.__setattr__(self, "max_drawdown_pause_pct", mdpp)
+        object.__setattr__(self, "capital_floor", cflr)
+        object.__setattr__(self, "max_drawdown_halt_pct", mddh)
+        object.__setattr__(self, "min_equity_to_open", meto)
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -412,6 +547,23 @@ class SimulatedCapitalConfig:
             ),
             "paper_liquidation_stress_enabled": bool(
                 self.paper_liquidation_stress_enabled
+            ),
+            "capital_floor": float(self.capital_floor),
+            "no_negative_equity_guard": bool(
+                self.no_negative_equity_guard
+            ),
+            "halt_on_capital_exhaustion": bool(
+                self.halt_on_capital_exhaustion
+            ),
+            "max_drawdown_halt_pct": (
+                float(self.max_drawdown_halt_pct)
+                if self.max_drawdown_halt_pct is not None
+                else None
+            ),
+            "min_equity_to_open": (
+                float(self.min_equity_to_open)
+                if self.min_equity_to_open is not None
+                else None
             ),
             "is_simulated_capital_config": True,
         }
@@ -581,6 +733,15 @@ class SimulatedCapitalState:
     risk_state: str
     capital_frozen: bool
     freeze_reason: Optional[str] = None
+    # ---- PR108: capital-safety reporting fields ----
+    account_halted: bool = False
+    halt_reason: Optional[str] = None
+    capital_exhausted: bool = False
+    min_equity: Optional[float] = None
+    max_drawdown_limit: Optional[float] = None
+    forced_exit_count: int = 0
+    capital_exhaustion_event_count: int = 0
+    liquidation_shortfall: float = 0.0
     # Hard-pinned safety markers:
     simulated_only: bool = True
     no_live_order: bool = True
@@ -623,6 +784,45 @@ class SimulatedCapitalState:
                     f"{sorted(RiskFreezeReason.ALLOWED)} or None, got "
                     f"{self.freeze_reason!r}"
                 )
+        # ---- PR108 capital-safety field validation ----
+        if not isinstance(self.account_halted, bool):
+            raise TypeError("account_halted must be bool")
+        if self.halt_reason is not None:
+            if self.halt_reason not in RiskHaltReason.ALLOWED:
+                raise ValueError(
+                    f"halt_reason must be one of "
+                    f"{sorted(RiskHaltReason.ALLOWED)} or None, got "
+                    f"{self.halt_reason!r}"
+                )
+        if not isinstance(self.capital_exhausted, bool):
+            raise TypeError("capital_exhausted must be bool")
+        meq: Optional[float] = None
+        if self.min_equity is not None:
+            meq = _validate_finite("min_equity", self.min_equity)
+        mddl: Optional[float] = None
+        if self.max_drawdown_limit is not None:
+            mddl = _validate_unit_fraction(
+                "max_drawdown_limit", self.max_drawdown_limit
+            )
+        if (
+            not isinstance(self.forced_exit_count, int)
+            or isinstance(self.forced_exit_count, bool)
+        ):
+            raise TypeError("forced_exit_count must be int")
+        if self.forced_exit_count < 0:
+            raise ValueError("forced_exit_count must be >= 0")
+        if (
+            not isinstance(self.capital_exhaustion_event_count, int)
+            or isinstance(self.capital_exhaustion_event_count, bool)
+        ):
+            raise TypeError("capital_exhaustion_event_count must be int")
+        if self.capital_exhaustion_event_count < 0:
+            raise ValueError(
+                "capital_exhaustion_event_count must be >= 0"
+            )
+        lsf = _validate_non_negative(
+            "liquidation_shortfall", self.liquidation_shortfall
+        )
         if self.simulated_only is not True:
             raise ValueError("simulated_only must be True")
         if self.no_live_order is not True:
@@ -644,6 +844,9 @@ class SimulatedCapitalState:
         object.__setattr__(self, "realized_pnl", rpnl)
         object.__setattr__(self, "total_lifetime_equity", tle)
         object.__setattr__(self, "drawdown", dd)
+        object.__setattr__(self, "min_equity", meq)
+        object.__setattr__(self, "max_drawdown_limit", mddl)
+        object.__setattr__(self, "liquidation_shortfall", lsf)
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -660,6 +863,29 @@ class SimulatedCapitalState:
             "risk_state": self.risk_state,
             "capital_frozen": bool(self.capital_frozen),
             "freeze_reason": self.freeze_reason,
+            "account_halted": bool(self.account_halted),
+            "halted_by_risk": bool(self.account_halted),
+            "halt_reason": self.halt_reason,
+            "risk_halt_reason": self.halt_reason,
+            "capital_exhausted": bool(self.capital_exhausted),
+            "min_equity": (
+                float(self.min_equity)
+                if self.min_equity is not None
+                else None
+            ),
+            "max_drawdown_limit": (
+                float(self.max_drawdown_limit)
+                if self.max_drawdown_limit is not None
+                else None
+            ),
+            "forced_exit_count": int(self.forced_exit_count),
+            "capital_exhaustion_event_count": int(
+                self.capital_exhaustion_event_count
+            ),
+            "liquidation_like_event_count": int(
+                self.capital_exhaustion_event_count
+            ),
+            "liquidation_shortfall": float(self.liquidation_shortfall),
             "is_simulated_capital_state": True,
         }
         out.update(_safety_payload())
@@ -777,6 +1003,58 @@ class MaxActivePositionsReachedError(RuntimeError):
         self.max_active_positions = max_active_positions
 
 
+class SimAccountHaltedError(CapitalFrozenError):
+    """Raised when a caller attempts to OPEN a NEW simulated position
+    while the simulated account kill switch is latched (PR108).
+
+    This is a *predictable, paper-only* simulated risk/capital
+    rejection (NOT a program error). The kill switch latches when the
+    simulated capital floor is reached (``SIM_CAPITAL_EXHAUSTED``) or a
+    configured hard drawdown limit is breached
+    (``MAX_DRAWDOWN_LIMIT_REACHED``). It is a subclass of
+    :class:`CapitalFrozenError` so any caller that already catches the
+    bare freeze error keeps working; the dedicated subclass lets the
+    (separately gated) Blind Walk-forward Runner record a distinct
+    ``SIM_ACCOUNT_HALTED`` / ``SIM_CAPITAL_EXHAUSTED`` SIM_REJECT and
+    continue the blind run instead of aborting it. It NEVER authorises
+    releasing the halt, live trading, auto-tuning, or Phase 12.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.symbol = symbol
+
+
+class InsufficientSimulatedEquityError(CapitalFrozenError):
+    """Raised when a caller attempts to OPEN a NEW simulated position
+    the simulated account cannot afford (PR108).
+
+    Predictable, paper-only simulated risk/capital rejection. Subclass
+    of :class:`CapitalFrozenError` for backward-compatible catching.
+    NEVER authorises sizing up, live trading, auto-tuning, or Phase 12.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        symbol: Optional[str] = None,
+        required: Optional[float] = None,
+        available: Optional[float] = None,
+    ) -> None:
+        super().__init__(message)
+        self.symbol = symbol
+        self.required = required
+        self.available = available
+
+
 class SimulatedCapitalFlowEngine:
     """Strict blind walk-forward simulated capital flow engine.
 
@@ -837,6 +1115,19 @@ class SimulatedCapitalFlowEngine:
         self._capital_frozen: bool = False
         self._freeze_reason: Optional[str] = None
         self._consecutive_losses: int = 0
+        # ---- PR108: capital-safety / kill-switch bookkeeping ----
+        # The kill switch is latched (not auto-released): once halted
+        # the engine refuses every new OPEN for the rest of the run.
+        self._account_halted: bool = False
+        self._halt_reason: Optional[str] = None  # RiskHaltReason
+        self._capital_exhausted: bool = False
+        # Lowest marked equity ever observed (paper-only).
+        self._min_equity: float = float(config.initial_capital)
+        # Cumulative capital lost beyond the floor on clamped closes.
+        self._liquidation_shortfall: float = 0.0
+        self._forced_exit_count: int = 0
+        self._capital_reject_count: int = 0
+        self._capital_exhaustion_event_count: int = 0
         # Counters for deterministic id generation.
         self._position_seq: int = 0
         self._trade_seq: int = 0
@@ -868,6 +1159,57 @@ class SimulatedCapitalFlowEngine:
     @property
     def freeze_reason(self) -> Optional[str]:
         return self._freeze_reason
+
+    # ----- PR108 capital-safety properties -----
+
+    @property
+    def account_halted(self) -> bool:
+        """True once the simulated kill switch is latched."""
+        return self._account_halted
+
+    @property
+    def halted_by_risk(self) -> bool:
+        return self._account_halted
+
+    @property
+    def halt_reason(self) -> Optional[str]:
+        return self._halt_reason
+
+    @property
+    def risk_halt_reason(self) -> Optional[str]:
+        return self._halt_reason
+
+    @property
+    def capital_exhausted(self) -> bool:
+        return self._capital_exhausted
+
+    @property
+    def min_equity(self) -> float:
+        return float(self._min_equity)
+
+    @property
+    def forced_exit_count(self) -> int:
+        return int(self._forced_exit_count)
+
+    @property
+    def capital_reject_count(self) -> int:
+        return int(self._capital_reject_count)
+
+    @property
+    def capital_exhaustion_event_count(self) -> int:
+        return int(self._capital_exhaustion_event_count)
+
+    @property
+    def liquidation_shortfall(self) -> float:
+        return float(self._liquidation_shortfall)
+
+    @property
+    def final_equity(self) -> float:
+        """Current marked simulated equity (floored at the capital
+        floor when the no-negative-equity guard is active). Used by the
+        runner to report a non-silently-negative final equity.
+        """
+        return self.current_marked_equity()
 
     # ----- pinned safety properties (defensive tripwires) -----
 
@@ -972,6 +1314,346 @@ class SimulatedCapitalFlowEngine:
             + self._locked_profit
             + self._unrealized_pnl_total()
         )
+
+    # ----- PR108: pre-entry gate / kill switch / capital safety -----
+
+    def can_open_position(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        requested_qty: Optional[float] = None,
+        notional: Optional[float] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Pre-entry capital / risk gate (PR108 brief §4).
+
+        Returns ``(True, None)`` only when it is safe to OPEN a NEW
+        simulated position right now. Otherwise returns
+        ``(False, reason)`` with a closed :class:`CapitalRejectReason`.
+
+        Checks (in priority order):
+
+          1. kill switch latched -> ``capital_exhausted`` /
+             ``max_drawdown_limit_reached`` / ``risk_halt_active``,
+          2. capital exhausted flag -> ``capital_exhausted``,
+          3. configured hard drawdown limit reached ->
+             ``max_drawdown_limit_reached``,
+          4. ``max_active_positions`` cap reached ->
+             ``max_active_positions_reached``,
+          5. insufficient free equity for the position ->
+             ``insufficient_equity``.
+
+        The gate is **pure / read-only**: it NEVER opens a position,
+        NEVER raises, NEVER mutates the book. It is paper-only and
+        NEVER an authorisation to raise any cap / floor / limit.
+        """
+        if self._account_halted:
+            if self._halt_reason == RiskHaltReason.CAPITAL_EXHAUSTED:
+                return False, CapitalRejectReason.CAPITAL_EXHAUSTED
+            if (
+                self._halt_reason
+                == RiskHaltReason.MAX_DRAWDOWN_LIMIT_REACHED
+            ):
+                return (
+                    False,
+                    CapitalRejectReason.MAX_DRAWDOWN_LIMIT_REACHED,
+                )
+            return False, CapitalRejectReason.RISK_HALT_ACTIVE
+        if self._capital_exhausted:
+            return False, CapitalRejectReason.CAPITAL_EXHAUSTED
+        if (
+            self._config.max_drawdown_halt_pct is not None
+            and self._current_drawdown
+            >= float(self._config.max_drawdown_halt_pct)
+        ):
+            return False, CapitalRejectReason.MAX_DRAWDOWN_LIMIT_REACHED
+        if self._active_positions_count() >= int(
+            self._config.max_active_positions
+        ):
+            return False, CapitalRejectReason.MAX_ACTIVE_POSITIONS_REACHED
+        # Equity sufficiency. When a notional cannot be derived we skip
+        # the equity check (the engine never fabricates a price).
+        required = self._resolve_required_equity(
+            symbol=symbol,
+            requested_qty=requested_qty,
+            notional=notional,
+        )
+        if required is not None:
+            available = self.available_capital_for_new_exposure()
+            if available < required:
+                return False, CapitalRejectReason.INSUFFICIENT_EQUITY
+        return True, None
+
+    def _resolve_required_equity(
+        self,
+        *,
+        symbol: Optional[str],
+        requested_qty: Optional[float],
+        notional: Optional[float],
+    ) -> Optional[float]:
+        """Resolve the free-equity a new position needs, or None when
+        it cannot be derived without inventing a price.
+        """
+        if self._config.min_equity_to_open is not None:
+            return float(self._config.min_equity_to_open)
+        if notional is not None:
+            return float(notional)
+        if (
+            requested_qty is not None
+            and isinstance(symbol, str)
+            and symbol
+        ):
+            mark = self._mark_prices.get(symbol)
+            if mark is not None and float(mark) > 0.0:
+                return float(requested_qty) * float(mark)
+        return None
+
+    def register_capital_reject(
+        self, reason: str = CapitalRejectReason.INSUFFICIENT_EQUITY
+    ) -> None:
+        """Count one paper-only pre-entry capital/risk rejection.
+
+        Bookkeeping only (drives ``capital_reject_count``). NEVER an
+        authorisation, NEVER a trade signal.
+        """
+        if reason not in CapitalRejectReason.ALLOWED:
+            raise ValueError(
+                f"reason must be one of "
+                f"{sorted(CapitalRejectReason.ALLOWED)}, got {reason!r}"
+            )
+        self._capital_reject_count += 1
+
+    def halt_account(
+        self,
+        reason: str = RiskHaltReason.MANUAL_HALT,
+    ) -> None:
+        """Latch the simulated kill switch (paper-only).
+
+        Once latched the engine refuses every new OPEN for the rest of
+        the run. Idempotent: re-halting keeps the first non-NONE reason.
+        """
+        if reason not in RiskHaltReason.ALLOWED or reason == (
+            RiskHaltReason.NONE
+        ):
+            raise ValueError(
+                f"reason must be one of "
+                f"{sorted(RiskHaltReason.ALLOWED - {RiskHaltReason.NONE})}, "
+                f"got {reason!r}"
+            )
+        self._account_halted = True
+        if self._halt_reason is None:
+            self._halt_reason = reason
+        # Mirror onto the freeze machinery so the descriptive risk_state
+        # string and the consume_fill open guard both observe the halt.
+        self._capital_frozen = True
+        if self._freeze_reason is None:
+            self._freeze_reason = self._freeze_reason_for_halt(reason)
+
+    @staticmethod
+    def _freeze_reason_for_halt(reason: str) -> str:
+        if reason == RiskHaltReason.MAX_DRAWDOWN_LIMIT_REACHED:
+            return RiskFreezeReason.MAX_DRAWDOWN_EXCEEDED
+        if reason == RiskHaltReason.CONSECUTIVE_LOSS_HALT:
+            return RiskFreezeReason.CONSECUTIVE_LOSS_PAUSE
+        if reason == RiskHaltReason.CAPITAL_EXHAUSTED:
+            return RiskFreezeReason.LIQUIDATION_STRESS
+        return RiskFreezeReason.MANUAL_FREEZE
+
+    def force_exit_all(
+        self,
+        *,
+        simulated_time: datetime,
+        reason: str = ForcedExitReason.FORCED_CAPITAL_SAFETY_EXIT,
+        evidence_refs: Iterable[str] = (),
+    ) -> Tuple[TradeLedgerEntry, ...]:
+        """Force-close EVERY open simulated position through the
+        simulated capital-flow path (PR108 brief §5).
+
+        Forced exits NEVER touch a real exchange. Each closed position
+        produces a deterministic :class:`TradeLedgerEntry` tagged with
+        ``reason`` as its ``exit_reason`` and the
+        :data:`TradeFailureFlag.FORCED_EXIT_TRIGGERED` failure flag.
+        """
+        if reason not in ForcedExitReason.ALLOWED:
+            raise ValueError(
+                f"reason must be one of "
+                f"{sorted(ForcedExitReason.ALLOWED)}, got {reason!r}"
+            )
+        refs_t = _check_str_tuple(evidence_refs, "evidence_refs")
+        ts = ensure_utc_aware(simulated_time, "simulated_time")
+        self._advance_clock(ts)
+        entries: List[TradeLedgerEntry] = []
+        # Deterministic order: by symbol.
+        open_positions = sorted(
+            (
+                p
+                for p in self._positions.values()
+                if p.status == PositionStatus.OPEN
+            ),
+            key=lambda p: p.symbol,
+        )
+        for pos in open_positions:
+            mark = self._mark_prices.get(pos.symbol)
+            exit_price = (
+                float(mark)
+                if mark is not None and float(mark) > 0.0
+                else float(pos.avg_entry_price)
+            )
+            entry = self._close_or_reduce_position_internal(
+                pos,
+                close_qty=pos.qty,
+                close_price=exit_price,
+                fee=0.0,
+                slippage_bps=0.0,
+                simulated_time=ts,
+                fill_reason=FillReason.FORCED_EXIT_FILL,
+                forced=True,
+                evidence_refs=refs_t,
+                funding_impact=None,
+                exit_reason_override=reason,
+            )
+            if entry is not None:
+                self._forced_exit_count += 1
+                entries.append(entry)
+        return tuple(entries)
+
+    def enforce_capital_safety(
+        self,
+        simulated_time: datetime,
+        *,
+        evidence_refs: Iterable[str] = (),
+    ) -> Optional[Dict[str, Any]]:
+        """Detect + enforce capital-safety violations (PR108 brief §1,
+        §3, §5).
+
+        Called by the runner once per step AFTER marks + fills have
+        been applied. The method:
+
+          * tracks the running minimum marked equity,
+          * if the marked equity is at/under the capital floor OR a
+            configured hard drawdown limit is breached AND the kill
+            switch is not already latched, force-exits every open
+            position (``SIM_LIQUIDATION`` / ``RISK_HALT``), clamps any
+            residual cash to the floor, flags ``capital_exhausted`` (on
+            a floor breach) and latches the kill switch.
+
+        Returns ``None`` when nothing was triggered, otherwise a
+        deterministic event dict the runner turns into
+        ``SIM_FORCED_EXIT`` + ``SIM_CAPITAL_EXHAUSTED`` /
+        ``SIM_ACCOUNT_HALTED`` transcript entries. The method NEVER
+        touches a real exchange and NEVER hides a loss.
+        """
+        refs_t = _check_str_tuple(evidence_refs, "evidence_refs")
+        ts = ensure_utc_aware(simulated_time, "simulated_time")
+        self._advance_clock(ts)
+        marked = self.current_marked_equity()
+        if marked < self._min_equity:
+            self._min_equity = float(marked)
+        if self._account_halted:
+            return None
+        floor = float(self._config.capital_floor)
+        trigger_halt_reason: Optional[str] = None
+        forced_exit_reason: Optional[str] = None
+        if (
+            self._config.no_negative_equity_guard
+            and self._config.halt_on_capital_exhaustion
+            and marked <= floor
+        ):
+            trigger_halt_reason = RiskHaltReason.CAPITAL_EXHAUSTED
+            forced_exit_reason = ForcedExitReason.SIM_LIQUIDATION
+        elif (
+            self._config.max_drawdown_halt_pct is not None
+            and self._current_drawdown
+            >= float(self._config.max_drawdown_halt_pct)
+        ):
+            trigger_halt_reason = (
+                RiskHaltReason.MAX_DRAWDOWN_LIMIT_REACHED
+            )
+            forced_exit_reason = ForcedExitReason.RISK_HALT
+        if trigger_halt_reason is None:
+            return None
+
+        equity_before = float(marked)
+        drawdown_before = float(self._current_drawdown)
+        forced_entries = self.force_exit_all(
+            simulated_time=ts,
+            reason=forced_exit_reason,
+            evidence_refs=refs_t,
+        )
+        if trigger_halt_reason == RiskHaltReason.CAPITAL_EXHAUSTED:
+            self._capital_exhausted = True
+            self._capital_exhaustion_event_count += 1
+        # Final no-negative-equity clamp on residual cash.
+        if (
+            self._config.no_negative_equity_guard
+            and self._exchange_equity < floor
+        ):
+            self._liquidation_shortfall += float(
+                floor - self._exchange_equity
+            )
+            self._exchange_equity = floor
+        self.halt_account(trigger_halt_reason)
+        self._record_equity_point(ts)
+        if marked < self._min_equity:
+            self._min_equity = float(self.current_marked_equity())
+        event: Dict[str, Any] = {
+            "halt_reason": trigger_halt_reason,
+            "forced_exit_reason": forced_exit_reason,
+            "capital_exhausted": bool(self._capital_exhausted),
+            "equity_before": equity_before,
+            "equity_after": self.current_marked_equity(),
+            "drawdown": drawdown_before,
+            "drawdown_after": float(self._current_drawdown),
+            "forced_exit_count": int(len(forced_entries)),
+            "liquidation_shortfall": float(self._liquidation_shortfall),
+            "forced_exits": tuple(forced_entries),
+            "is_capital_safety_event": True,
+        }
+        return event
+
+    def capital_safety_snapshot(
+        self, simulated_time: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Return a deterministic, JSON-serialisable snapshot of the
+        capital-safety state (PR108 brief §2 reporting fields).
+        """
+        eq = self.current_marked_equity()
+        out: Dict[str, Any] = {
+            "initial_capital": float(self._config.initial_capital),
+            "final_equity": float(eq),
+            "min_equity": float(self._min_equity),
+            "exchange_equity": float(self._exchange_equity),
+            "locked_profit": float(self._locked_profit),
+            "realized_pnl": float(self._realized_pnl),
+            "drawdown": float(self._current_drawdown),
+            "max_drawdown": float(self._current_drawdown),
+            "max_drawdown_limit": (
+                float(self._config.max_drawdown_halt_pct)
+                if self._config.max_drawdown_halt_pct is not None
+                else None
+            ),
+            "capital_floor": float(self._config.capital_floor),
+            "capital_exhausted": bool(self._capital_exhausted),
+            "halted_by_risk": bool(self._account_halted),
+            "account_halted": bool(self._account_halted),
+            "risk_halt_reason": self._halt_reason,
+            "halt_reason": self._halt_reason,
+            "forced_exit_count": int(self._forced_exit_count),
+            "capital_reject_count": int(self._capital_reject_count),
+            "capital_exhaustion_event_count": int(
+                self._capital_exhaustion_event_count
+            ),
+            "liquidation_like_event_count": int(
+                self._capital_exhaustion_event_count
+            ),
+            "liquidation_shortfall": float(self._liquidation_shortfall),
+            "no_negative_equity_guard": bool(
+                self._config.no_negative_equity_guard
+            ),
+            "is_capital_safety_snapshot": True,
+        }
+        out.update(_safety_payload())
+        assert_no_forbidden_fields(out)
+        return out
 
     # ----- public API: fill consumption -----
 
@@ -1134,6 +1816,7 @@ class SimulatedCapitalFlowEngine:
         fee: float = 0.0,
         slippage_bps: float = 0.0,
         evidence_refs: Iterable[str] = (),
+        exit_reason_override: Optional[str] = None,
     ) -> Optional[TradeLedgerEntry]:
         """Force-close the open simulated position on ``symbol`` at
         ``exit_price`` and produce the resulting trade-ledger entry.
@@ -1141,7 +1824,9 @@ class SimulatedCapitalFlowEngine:
         This is a paper-only convenience for the FORCED_EXIT path
         when no :class:`MockFill` is available (e.g. liquidation
         stress). It produces a deterministic ledger entry tagged
-        :data:`TradeFailureFlag.FORCED_EXIT_TRIGGERED`.
+        :data:`TradeFailureFlag.FORCED_EXIT_TRIGGERED`. When
+        ``exit_reason_override`` is supplied it is stamped onto the
+        ledger entry's ``exit_reason`` (PR108 capital-safety exits).
         """
         if not isinstance(symbol, str) or not symbol:
             raise ValueError("symbol must be a non-empty string")
@@ -1149,6 +1834,13 @@ class SimulatedCapitalFlowEngine:
         fe = _validate_non_negative("fee", fee)
         sb = _validate_non_negative("slippage_bps", slippage_bps)
         refs_t = _check_str_tuple(evidence_refs, "evidence_refs")
+        if exit_reason_override is not None and (
+            not isinstance(exit_reason_override, str)
+            or not exit_reason_override
+        ):
+            raise ValueError(
+                "exit_reason_override must be a non-empty string or None"
+            )
         ts = ensure_utc_aware(simulated_time, "simulated_time")
         self._advance_clock(ts)
         pos = self._positions.get(symbol)
@@ -1167,6 +1859,7 @@ class SimulatedCapitalFlowEngine:
             forced=True,
             evidence_refs=refs_t,
             funding_impact=None,
+            exit_reason_override=exit_reason_override,
         )
 
     # ----- public API: manual freeze / unfreeze -----
@@ -1202,6 +1895,14 @@ class SimulatedCapitalFlowEngine:
         candidate_rank: Optional[int],
         risk_decision: Optional[str],
     ) -> Optional[TradeLedgerEntry]:
+        if self._account_halted:
+            self._frozen_open_attempts += 1
+            raise SimAccountHaltedError(
+                f"simulated account halted ({self._halt_reason}); "
+                f"cannot open new simulated position on {fill.symbol}",
+                reason=self._halt_reason,
+                symbol=fill.symbol,
+            )
         if self._capital_frozen:
             self._frozen_open_attempts += 1
             raise CapitalFrozenError(
@@ -1406,6 +2107,7 @@ class SimulatedCapitalFlowEngine:
         forced: bool,
         evidence_refs: Tuple[str, ...],
         funding_impact: Optional[float],
+        exit_reason_override: Optional[str] = None,
     ) -> Optional[TradeLedgerEntry]:
         if close_qty <= 0:
             return None
@@ -1470,8 +2172,12 @@ class SimulatedCapitalFlowEngine:
                 pos,
                 ctx,
                 exit_time=ts,
-                exit_reason=_FILL_REASON_TO_EXIT_REASON.get(
-                    fill_reason, "SIMULATED_CLOSE"
+                exit_reason=(
+                    exit_reason_override
+                    if exit_reason_override is not None
+                    else _FILL_REASON_TO_EXIT_REASON.get(
+                        fill_reason, "SIMULATED_CLOSE"
+                    )
                 ),
                 forced=forced,
             )
@@ -1479,6 +2185,24 @@ class SimulatedCapitalFlowEngine:
                 self._trade_contexts.pop(pos.position_id, None)
         else:
             self._reductions_count += 1
+        # No-negative-equity guard (PR108 brief §1): a realised loss
+        # must NEVER silently drive the simulated cash balance below the
+        # configured capital floor. We clamp the cash balance at the
+        # floor and book the (deterministic) excess as a
+        # ``liquidation_shortfall``. The ledger entry above keeps the
+        # truthful realised PnL: losses are NOT hidden; only the account
+        # cash balance floors so the equity curve can never silently go
+        # negative.
+        if (
+            self._config.no_negative_equity_guard
+            and self._exchange_equity < float(self._config.capital_floor)
+        ):
+            floor = float(self._config.capital_floor)
+            self._liquidation_shortfall += float(
+                floor - self._exchange_equity
+            )
+            self._exchange_equity = floor
+            self._capital_exhausted = True
         # Update peak / drawdown / freeze AFTER cash impact applied.
         self._record_equity_point(ts)
         self._update_freeze_state()
@@ -1616,6 +2340,8 @@ class SimulatedCapitalFlowEngine:
         marked_equity = eq + lp + upnl
         if marked_equity > self._peak_equity:
             self._peak_equity = marked_equity
+        if marked_equity < self._min_equity:
+            self._min_equity = marked_equity
         if self._peak_equity > 0.0:
             self._current_drawdown = max(
                 0.0,
@@ -1704,6 +2430,20 @@ class SimulatedCapitalFlowEngine:
             risk_state=self._risk_state_string(),
             capital_frozen=bool(self._capital_frozen),
             freeze_reason=self._freeze_reason,
+            account_halted=bool(self._account_halted),
+            halt_reason=self._halt_reason,
+            capital_exhausted=bool(self._capital_exhausted),
+            min_equity=float(self._min_equity),
+            max_drawdown_limit=(
+                float(self._config.max_drawdown_halt_pct)
+                if self._config.max_drawdown_halt_pct is not None
+                else None
+            ),
+            forced_exit_count=int(self._forced_exit_count),
+            capital_exhaustion_event_count=int(
+                self._capital_exhaustion_event_count
+            ),
+            liquidation_shortfall=float(self._liquidation_shortfall),
         )
 
     def _advance_clock(self, ts: datetime) -> None:
@@ -1767,8 +2507,14 @@ class SimulatedCapitalFlowEngine:
                 "reductions_count": int(self._reductions_count),
                 "increases_count": int(self._increases_count),
                 "frozen_open_attempts": int(self._frozen_open_attempts),
+                "forced_exit_count": int(self._forced_exit_count),
+                "capital_reject_count": int(self._capital_reject_count),
+                "capital_exhaustion_event_count": int(
+                    self._capital_exhaustion_event_count
+                ),
                 "is_simulated_capital_diagnostics": True,
             },
+            "capital_safety": self.capital_safety_snapshot(),
             "is_simulated_capital_flow_engine": True,
         }
         out.update(_safety_payload())
@@ -1780,6 +2526,11 @@ __all__ = [
     "PHASE_NAME",
     "CapitalFrozenError",
     "MaxActivePositionsReachedError",
+    "SimAccountHaltedError",
+    "InsufficientSimulatedEquityError",
+    "CapitalRejectReason",
+    "RiskHaltReason",
+    "ForcedExitReason",
     "PositionSide",
     "PositionStatus",
     "RiskFreezeReason",

@@ -60,6 +60,7 @@ from app.sim import (
     PaperShadowStrategyBridgeConfig,
     ReplayFeedProvider,
     ReplayFeedProviderConfig,
+    RiskHaltReason,
     SimulatedCapitalConfig,
     SimulatedCapitalFlowEngine,
     SimulationClock,
@@ -831,3 +832,86 @@ def test_bridge_entry_sim_rejected_when_at_max_active_positions(tmp_path):
     ):
         assert payload[flag] is False, flag
     assert payload["phase_12_forbidden"] is True
+
+
+
+# ---------------------------------------------------------------------------
+# PR108: the bridge stops emitting NEW entries once the bound Simulated
+# Capital Flow has latched its kill switch (capital exhausted / hard
+# drawdown limit breached). A genuine breakout signal is suppressed and
+# recorded as a rejection -- never silently dropped, never opened.
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_suppresses_entry_when_capital_flow_halted():
+    capital = SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=100.0, max_drawdown_halt_pct=0.2
+        )
+    )
+    bridge = PaperShadowStrategyBridge(
+        config=PaperShadowStrategyBridgeConfig(
+            breakout_lookback=3,
+            volume_multiplier=1.2,
+            min_history_bars=4,
+            max_hold_bars=5,
+            take_profit_pct=0.5,
+            stop_loss_pct=0.5,
+            position_notional=20.0,
+            max_concurrent_positions=5,
+        ),
+        capital_flow=capital,
+    )
+    # Latch the kill switch directly (paper-only manual halt).
+    capital.halt_account(RiskHaltReason.MANUAL_HALT)
+    assert capital.account_halted is True
+
+    # Drive a deterministic breakout fixture through the bridge. Because
+    # the account is halted, the breakout signal must be SUPPRESSED.
+    store = _make_fixture_store(blind_minutes=12)
+    clock = SimulationClock(
+        start_time_utc=_T0,
+        end_time_utc=_T0 + timedelta(minutes=12),
+        monotonic_forward_only=True,
+    )
+    provider = ReplayFeedProvider(
+        store=store,
+        clock=clock,
+        config=ReplayFeedProviderConfig(
+            start_time=_T0,
+            end_time=_T0 + timedelta(minutes=12),
+            step_interval=timedelta(minutes=1),
+            allow_reemit=False,
+            include_asof_universe=True,
+        ),
+    )
+    halt_rejections = 0
+    while not provider.replay_complete:
+        try:
+            batch = provider.next_batch()
+        except StopIteration:
+            break
+        orders = bridge(batch.simulated_time, batch, None)
+        # No entry order may be emitted while halted.
+        assert orders == ()
+        for rej in bridge.drain_rejections():
+            if rej.get("reason") in (
+                PaperShadowRejectReason.ACCOUNT_HALTED,
+                PaperShadowRejectReason.CAPITAL_EXHAUSTED,
+            ):
+                halt_rejections += 1
+    # At least one breakout signal was suppressed by the kill switch.
+    assert halt_rejections >= 1
+    # No position was ever opened by the bridge.
+    assert capital.get_positions() == ()
+
+
+def test_bridge_reject_reasons_include_capital_safety():
+    assert (
+        PaperShadowRejectReason.ACCOUNT_HALTED
+        in PaperShadowRejectReason.ALLOWED
+    )
+    assert (
+        PaperShadowRejectReason.CAPITAL_EXHAUSTED
+        in PaperShadowRejectReason.ALLOWED
+    )

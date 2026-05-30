@@ -2301,3 +2301,333 @@ def test_unknown_consume_fill_error_still_aborts(tmp_path, monkeypatch):
     monkeypatch.setattr(capital, "consume_fill", _boom)
     with pytest.raises(ValueError):
         runner.run()
+
+
+
+# ---------------------------------------------------------------------------
+# PR108 - Simulated Capital Safety Floor / Kill Switch / No Negative
+# Equity Guard.
+#
+# When the simulated equity breaches the configured hard drawdown
+# kill switch (or the capital floor), the blind runner must force-exit
+# every open simulated position through the simulated flow, latch the
+# kill switch, stop accepting new entries for the rest of the blind
+# window, and surface SIM_FORCED_EXIT + SIM_ACCOUNT_HALTED /
+# SIM_CAPITAL_EXHAUSTED transcript entries -- never aborting with a
+# RuntimeError and never reporting a silently-negative equity.
+# ---------------------------------------------------------------------------
+
+
+def _make_crash_store(
+    *,
+    symbol: str = "BTCUSDT",
+    blind_minutes: int = 10,
+    crash_at: int = 5,
+    base: float = 100.0,
+    crash: float = 40.0,
+) -> HistoricalMarketStore:
+    """Closed, already-available 1m klines: flat at ``base`` until
+    ``crash_at`` then a hard crash to ``crash`` for the remainder.
+    """
+    store = HistoricalMarketStore()
+    store.add_record(_make_symbol_status(symbol=symbol))
+    for i in range(-1, blind_minutes):
+        open_time = _T0 + timedelta(minutes=i)
+        price = base if i < crash_at else crash
+        store.add_record(
+            _make_kline(
+                symbol=symbol,
+                open_time=open_time,
+                interval="1m",
+                open_=price,
+                high=price + 0.2,
+                low=price - 0.2,
+                close=price,
+                volume=10.0,
+                record_id=f"crash_{symbol}_{i + 5}",
+            )
+        )
+    return store
+
+
+def _make_capital_safety_runner(
+    *,
+    tmpdir: Path,
+    store: HistoricalMarketStore,
+    capital: SimulatedCapitalFlowEngine,
+    decision_callback,
+    blind_minutes: int = 10,
+) -> BlindWalkForwardRunner:
+    provider = _make_provider(store=store, blind_minutes=blind_minutes)
+    cfg = BlindWalkForwardRunnerConfig(
+        window=_make_window(blind_minutes=blind_minutes),
+        config_artefact={"ver": 1, "label": "pr108"},
+        rule_artefact={"rules": ["capital_safety"]},
+        feature_schema_artefact={"schema": ["close"]},
+        data_manifest_artefact={"data": "v0"},
+        universe_manifest_artefact={"universe": ["BTCUSDT"]},
+        fee_model_artefact={"taker_bps": 4.0},
+        slippage_model_artefact={"bps": 5.0},
+        latency_model_artefact={"bps": 1.0},
+        outage_model_artefact={"min_gap_seconds": 0},
+        fill_model_artefact={"policy": "WORST_CASE"},
+        code_commit="pr108commit1234",
+        run_id="bwf_pr108_test",
+        report_root=str(tmpdir / "reports"),
+        ai_post_window_summary_enabled=False,
+    )
+    return BlindWalkForwardRunner(
+        config=cfg,
+        replay_provider=provider,
+        capital_flow=capital,
+        mock_exchange=_make_mock_exchange(),
+        telegram_sandbox=_make_telegram(tmpdir),
+        decision_callback=decision_callback,
+    )
+
+
+def _buy_on_calls(symbol: str, qty: float, calls: Sequence[int]):
+    """Decision callback that submits a MARKET BUY for ``symbol`` on the
+    given decision-call indices (1-based), nothing otherwise.
+    """
+    state = {"n": 0}
+    wanted = set(calls)
+
+    def cb(simulated_time, batch, runner):
+        state["n"] += 1
+        if state["n"] in wanted:
+            return [
+                OrderRequest(
+                    symbol=symbol,
+                    side=MockOrderSide.BUY,
+                    order_type=MockOrderType.MARKET,
+                    requested_qty=qty,
+                )
+            ]
+        return []
+
+    return cb
+
+
+def _capital_safety_capital(
+    *, initial_capital: float = 100.0, max_drawdown_halt_pct: float = 0.2
+) -> SimulatedCapitalFlowEngine:
+    return SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=initial_capital,
+            max_drawdown_halt_pct=max_drawdown_halt_pct,
+        )
+    )
+
+
+def test_capital_safety_kill_switch_forces_exit_and_halts(tmp_path):
+    capital = _capital_safety_capital(
+        initial_capital=100.0, max_drawdown_halt_pct=0.2
+    )
+    runner = _make_capital_safety_runner(
+        tmpdir=tmp_path,
+        store=_make_crash_store(blind_minutes=10, crash_at=5, crash=40.0),
+        capital=capital,
+        decision_callback=_buy_on_calls("BTCUSDT", 0.8, calls=[1]),
+    )
+    out = runner.run()  # must NOT raise
+
+    score = out["score"]
+    assert score["status"] == BlindRunStatus.EVIDENCE_GENERATED
+    assert score["no_lookahead_violation_count"] == 0
+    assert list(runner.invalidations) == []
+
+    # The kill switch latched and force-exited the position.
+    assert capital.account_halted is True
+    assert capital.halt_reason == "MAX_DRAWDOWN_LIMIT_REACHED"
+    assert capital.forced_exit_count >= 1
+    assert capital.get_positions() == ()
+    # No silently-negative equity.
+    assert capital.final_equity >= 0.0
+
+    report = json.loads(
+        Path(out["paths"]["blind_walk_forward_report.json"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["halted_by_risk"] is True
+    assert report["risk_halt_reason"] == "MAX_DRAWDOWN_LIMIT_REACHED"
+    assert report["forced_exit_count"] >= 1
+    assert report["final_equity"] >= 0.0
+    assert report["initial_capital"] == 100.0
+
+    # Transcript carries the SIM_FORCED_EXIT + SIM_ACCOUNT_HALTED events.
+    text = Path(
+        out["paths"]["telegram_sandbox_transcript.md"]
+    ).read_text(encoding="utf-8")
+    assert "SIM_FORCED_EXIT" in text
+    assert "SIM_ACCOUNT_HALTED" in text
+    # Mandatory simulated markers are present on the safety messages.
+    assert "SIMULATED_ONLY" in text
+    assert "NO_LIVE_ORDER" in text
+    assert "NO_REAL_CAPITAL" in text
+    assert "NO_COMMAND_AUTHORITY" in text
+
+
+def test_no_new_entries_after_capital_halt(tmp_path):
+    capital = _capital_safety_capital(
+        initial_capital=100.0, max_drawdown_halt_pct=0.2
+    )
+    runner = _make_capital_safety_runner(
+        tmpdir=tmp_path,
+        store=_make_crash_store(blind_minutes=12, crash_at=5, crash=40.0),
+        capital=capital,
+        # Buy early (fills, then crash halts), then keep trying to buy
+        # AFTER the halt -- those must be rejected, not opened.
+        decision_callback=_buy_on_calls(
+            "BTCUSDT", 0.8, calls=[1, 8, 9, 10]
+        ),
+    )
+    out = runner.run()  # must NOT raise
+
+    assert out["score"]["status"] == BlindRunStatus.EVIDENCE_GENERATED
+    assert capital.account_halted is True
+    # No simulated position is open at the end (kill switch latched +
+    # post-halt entries refused).
+    assert capital.get_positions() == ()
+
+    # Post-halt entry attempts became SIM_REJECT (never RuntimeError).
+    report = json.loads(
+        Path(out["paths"]["blind_walk_forward_report.json"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["capital_reject_count"] >= 1
+    rejections = runner.paper_shadow_rejections
+    halt_rejects = [
+        r
+        for r in rejections
+        if r.get("reason")
+        in (
+            "risk_halt_active",
+            "max_drawdown_limit_reached",
+            "capital_exhausted",
+        )
+    ]
+    assert len(halt_rejects) >= 1
+    rej = halt_rejects[0]
+    assert rej["no_live_order"] is True
+    assert rej["phase_12_forbidden"] is True
+    assert rej["trade_authority"] is False
+    assert rej["ai_trade_authority"] is False
+
+
+def test_capital_safety_ledger_and_records_no_negative_continuation(
+    tmp_path,
+):
+    capital = _capital_safety_capital(
+        initial_capital=100.0, max_drawdown_halt_pct=0.2
+    )
+    runner = _make_capital_safety_runner(
+        tmpdir=tmp_path,
+        store=_make_crash_store(blind_minutes=10, crash_at=5, crash=40.0),
+        capital=capital,
+        decision_callback=_buy_on_calls("BTCUSDT", 0.8, calls=[1]),
+    )
+    out = runner.run()
+
+    # trade_ledger.json carries the capital-safety snapshot (no silently
+    # negative continuation) and a non-negative final equity.
+    ledger_payload = json.loads(
+        Path(out["paths"]["trade_ledger.json"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    cs = ledger_payload["capital_safety"]
+    assert cs["final_equity"] >= 0.0
+    assert cs["halted_by_risk"] is True
+
+    # Every enriched paper-shadow trade record carries equity_before /
+    # equity_after and none reports a negative post-trade equity.
+    ps = json.loads(
+        Path(out["paths"]["paper_shadow_trades.json"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert ps["forced_exit_count"] >= 1
+    assert ps["trades"]
+    forced = [
+        t for t in ps["trades"] if t.get("is_forced_capital_safety_exit")
+    ]
+    assert forced, "expected a forced capital-safety exit record"
+    for t in ps["trades"]:
+        assert "equity_before" in t
+        assert "equity_after" in t
+        assert t["equity_after"] >= 0.0
+        assert t["is_simulated"] is True
+        assert t["no_live_order"] is True
+        assert t["phase_12_forbidden"] is True
+    f = forced[0]
+    assert f["exit_reason"] in ("RISK_HALT", "SIM_LIQUIDATION")
+    # The PR98 ledger entry also exists with the truthful realised PnL.
+    assert ledger_payload["ledger"]["summary"]["trade_count"] >= 1
+
+
+def test_report_includes_capital_safety_fields_clean_run(tmp_path):
+    # A clean run (no halt) must still surface the capital-safety
+    # reporting fields with safe defaults.
+    cb = _buy_then_sell_callback("BTCUSDT", qty=0.1)
+    runner = _make_runner(tmpdir=tmp_path, decision_callback=cb)
+    out = runner.run()
+    report = json.loads(
+        Path(out["paths"]["blind_walk_forward_report.json"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    for key in (
+        "initial_capital",
+        "final_equity",
+        "min_equity",
+        "max_drawdown",
+        "max_drawdown_limit",
+        "capital_exhausted",
+        "halted_by_risk",
+        "risk_halt_reason",
+        "forced_exit_count",
+        "capital_reject_count",
+        "capital_exhaustion_event_count",
+        "no_negative_equity_guard",
+    ):
+        assert key in report, f"missing capital-safety field {key!r}"
+    assert report["capital_exhausted"] is False
+    assert report["halted_by_risk"] is False
+    assert report["risk_halt_reason"] is None
+    assert report["forced_exit_count"] == 0
+    assert report["final_equity"] >= 0.0
+    assert report["no_negative_equity_guard"] is True
+
+
+def test_capital_safety_safety_flags_intact_after_halt(tmp_path):
+    capital = _capital_safety_capital(
+        initial_capital=100.0, max_drawdown_halt_pct=0.2
+    )
+    runner = _make_capital_safety_runner(
+        tmpdir=tmp_path,
+        store=_make_crash_store(blind_minutes=10, crash_at=5, crash=40.0),
+        capital=capital,
+        decision_callback=_buy_on_calls("BTCUSDT", 0.8, calls=[1]),
+    )
+    out = runner.run()
+    for name in (
+        "blind_walk_forward_report.json",
+        "paper_shadow_trades.json",
+        "trade_ledger.json",
+        "equity_timeseries.json",
+    ):
+        data = json.loads(
+            Path(out["paths"][name]).read_text(encoding="utf-8")
+        )
+        assert data["live_trading"] is False
+        assert data["exchange_live_orders"] is False
+        assert data["binance_private_api_enabled"] is False
+        assert data["telegram_outbound_enabled"] is False
+        assert data["auto_tuning_allowed"] is False
+        assert data["trade_authority"] is False
+        assert data["ai_trade_authority"] is False
+        assert data["phase_12_forbidden"] is True
+        assert_no_forbidden_fields(data)

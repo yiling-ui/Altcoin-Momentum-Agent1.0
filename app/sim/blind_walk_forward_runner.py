@@ -114,7 +114,12 @@ from app.sim.pessimistic_fill_model import (
 from app.sim.replay_feed_provider import ReplayFeedBatch, ReplayFeedProvider
 from app.sim.simulated_capital_flow import (
     CapitalFrozenError,
+    CapitalRejectReason,
+    ForcedExitReason,
+    InsufficientSimulatedEquityError,
     MaxActivePositionsReachedError,
+    RiskHaltReason,
+    SimAccountHaltedError,
     SimulatedCapitalFlowEngine,
 )
 from app.sim.simulation_clock import (
@@ -165,6 +170,53 @@ PAPER_SHADOW_REJECT_MAX_ACTIVE_POSITIONS: str = (
     "max_active_positions_reached"
 )
 PAPER_SHADOW_REJECT_CAPITAL_FROZEN: str = "capital_frozen"
+
+# PR108 - Simulated Capital Safety Floor / Kill Switch / No Negative
+# Equity Guard. Additional closed reasons for a paper-only SIM_REJECT
+# raised by the runner's pre-entry capital/risk gate or by the
+# Simulated Capital Flow refusing an OPEN. These are *predictable*
+# simulated risk/capital rejections, NOT program errors. They NEVER
+# authorise raising any cap / floor / drawdown limit, live trading,
+# auto-tuning, or Phase 12.
+PAPER_SHADOW_REJECT_INSUFFICIENT_EQUITY: str = "insufficient_equity"
+PAPER_SHADOW_REJECT_CAPITAL_EXHAUSTED: str = "capital_exhausted"
+PAPER_SHADOW_REJECT_RISK_HALT_ACTIVE: str = "risk_halt_active"
+PAPER_SHADOW_REJECT_MAX_DRAWDOWN_LIMIT: str = (
+    "max_drawdown_limit_reached"
+)
+
+# The set of reject reasons that count as capital/risk rejections for
+# the report's ``capital_reject_count`` aggregate.
+_CAPITAL_REJECT_REASONS: FrozenSet[str] = frozenset(
+    {
+        PAPER_SHADOW_REJECT_MAX_ACTIVE_POSITIONS,
+        PAPER_SHADOW_REJECT_CAPITAL_FROZEN,
+        PAPER_SHADOW_REJECT_INSUFFICIENT_EQUITY,
+        PAPER_SHADOW_REJECT_CAPITAL_EXHAUSTED,
+        PAPER_SHADOW_REJECT_RISK_HALT_ACTIVE,
+        PAPER_SHADOW_REJECT_MAX_DRAWDOWN_LIMIT,
+    }
+)
+
+# Map a closed :class:`CapitalRejectReason` (from the engine's
+# pre-entry gate) onto the runner's paper-shadow reject reason string.
+_CAPITAL_REJECT_REASON_MAP: Dict[str, str] = {
+    CapitalRejectReason.INSUFFICIENT_EQUITY: (
+        PAPER_SHADOW_REJECT_INSUFFICIENT_EQUITY
+    ),
+    CapitalRejectReason.CAPITAL_EXHAUSTED: (
+        PAPER_SHADOW_REJECT_CAPITAL_EXHAUSTED
+    ),
+    CapitalRejectReason.RISK_HALT_ACTIVE: (
+        PAPER_SHADOW_REJECT_RISK_HALT_ACTIVE
+    ),
+    CapitalRejectReason.MAX_DRAWDOWN_LIMIT_REACHED: (
+        PAPER_SHADOW_REJECT_MAX_DRAWDOWN_LIMIT
+    ),
+    CapitalRejectReason.MAX_ACTIVE_POSITIONS_REACHED: (
+        PAPER_SHADOW_REJECT_MAX_ACTIVE_POSITIONS
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +799,10 @@ class BlindWalkForwardRunner:
         self._paper_shadow_rejections: List[Dict[str, Any]] = []
         self._paper_shadow_entry_count: int = 0
         self._paper_shadow_exit_count: int = 0
+        # PR108: capital-safety / kill-switch bookkeeping (runner side).
+        self._capital_reject_count: int = 0
+        self._capital_safety_halt_emitted: bool = False
+        self._capital_safety_event_count: int = 0
         self._decision_callback: Optional[DecisionCallback] = (
             decision_callback
         )
@@ -1151,6 +1207,32 @@ class BlindWalkForwardRunner:
                         simulated_time=new_st,
                     )
 
+        # 3b) PR108 capital-safety enforcement. After marks + fills are
+        #     applied, ask the Simulated Capital Flow whether the
+        #     simulated equity has hit the hard floor or breached the
+        #     configured drawdown kill switch. If so it force-exits every
+        #     open simulated position (through the simulated flow, NEVER
+        #     a real exchange) and latches the kill switch; we surface
+        #     SIM_FORCED_EXIT + SIM_CAPITAL_EXHAUSTED / SIM_ACCOUNT_HALTED
+        #     transcript entries. Once halted, the decision callback below
+        #     and the pre-submit gate refuse every new entry for the rest
+        #     of the blind window.
+        try:
+            safety_event = self._capital_flow.enforce_capital_safety(
+                new_st
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            self._record_failure(
+                kind="capital_safety_error",
+                detail=str(exc),
+                simulated_time=new_st,
+            )
+            raise
+        if safety_event is not None:
+            self._handle_capital_safety_event(
+                event=safety_event, simulated_time=new_st
+            )
+
         # 4) Decision callback (paper-shadow bridge or strategy-less).
         orders: Sequence[OrderRequest] = ()
         if self._decision_callback is not None:
@@ -1202,12 +1284,31 @@ class BlindWalkForwardRunner:
         accepted_opens_this_step = 0
         for req in orders:
             if self._order_would_open_new_position(req):
+                # PR108 pre-entry capital/risk gate: refuse a new
+                # simulated OPEN when the kill switch is latched, the
+                # capital is exhausted, the configured drawdown limit is
+                # reached, the concurrency cap is hit, or there is not
+                # enough free equity to cover the position. Each refusal
+                # is a deterministic SIM_REJECT (paper-only); it NEVER
+                # raises a cap/floor/limit and NEVER aborts the run.
                 projected = open_now + accepted_opens_this_step
                 if projected >= max_active:
                     self._handle_capacity_presubmit_reject(
                         symbol=getattr(req, "symbol", None),
                         active_positions=projected,
                         max_active_positions=max_active,
+                        simulated_time=new_st,
+                    )
+                    continue
+                gate_ok, gate_reason = self._capital_flow.can_open_position(
+                    symbol=getattr(req, "symbol", None),
+                    requested_qty=getattr(req, "requested_qty", None),
+                )
+                if not gate_ok:
+                    self._handle_capital_gate_reject(
+                        symbol=getattr(req, "symbol", None),
+                        reason=gate_reason
+                        or CapitalRejectReason.RISK_HALT_ACTIVE,
                         simulated_time=new_st,
                     )
                     continue
@@ -1677,6 +1778,8 @@ class BlindWalkForwardRunner:
             "run_id": self._manifest.run_id,
             "window_id": self._manifest.window.window_id,
             "ledger": ledger_dict,
+            "capital_safety": self._capital_flow.capital_safety_snapshot(),
+            "capital_reject_count": int(self._capital_reject_count),
             "is_blind_walk_forward_payload": True,
         }
         ledger_payload.update(_safety_payload())
@@ -1706,6 +1809,12 @@ class BlindWalkForwardRunner:
             ),
             "entry_signal_count": self._paper_shadow_entry_count,
             "exit_signal_count": self._paper_shadow_exit_count,
+            "reject_count": len(self._paper_shadow_rejections),
+            "capital_reject_count": int(self._capital_reject_count),
+            "forced_exit_count": int(
+                self._capital_flow.forced_exit_count
+            ),
+            "capital_safety": self._capital_flow.capital_safety_snapshot(),
             "trades": [
                 copy.deepcopy(t) for t in self._paper_shadow_trades
             ],
@@ -2326,6 +2435,28 @@ class BlindWalkForwardRunner:
                 f"{active if active is not None else 'n/a'} >= "
                 f"max_active_positions={cap}; simulated fill not opened"
             )
+        elif isinstance(exc, SimAccountHaltedError):
+            halt_reason = getattr(exc, "reason", None)
+            if halt_reason == RiskHaltReason.CAPITAL_EXHAUSTED:
+                reason = PAPER_SHADOW_REJECT_CAPITAL_EXHAUSTED
+            elif (
+                halt_reason == RiskHaltReason.MAX_DRAWDOWN_LIMIT_REACHED
+            ):
+                reason = PAPER_SHADOW_REJECT_MAX_DRAWDOWN_LIMIT
+            else:
+                reason = PAPER_SHADOW_REJECT_RISK_HALT_ACTIVE
+            detail = (
+                "consume_fill open rejected: simulated account halted "
+                f"({halt_reason}); simulated fill not opened"
+            )
+        elif isinstance(exc, InsufficientSimulatedEquityError):
+            reason = PAPER_SHADOW_REJECT_INSUFFICIENT_EQUITY
+            detail = (
+                "consume_fill open rejected: insufficient simulated "
+                f"equity (required={getattr(exc, 'required', None)} "
+                f"available={getattr(exc, 'available', None)}); "
+                "simulated fill not opened"
+            )
         else:
             reason = PAPER_SHADOW_REJECT_CAPITAL_FROZEN
             detail = (
@@ -2398,6 +2529,21 @@ class BlindWalkForwardRunner:
         rec.setdefault("trade_authority", False)
         rec.setdefault("ai_trade_authority", False)
         rec.setdefault("phase_12_forbidden", True)
+        # PR108: count capital/risk rejections + keep the engine's own
+        # capital_reject_count consistent.
+        reason = rec.get("reason")
+        equity_now = self._capital_flow.current_marked_equity()
+        drawdown_now = self._capital_flow_drawdown()
+        rec.setdefault("equity_before", float(equity_now))
+        rec.setdefault("equity_after", float(equity_now))
+        rec.setdefault("drawdown", float(drawdown_now))
+        if isinstance(reason, str) and reason in _CAPITAL_REJECT_REASONS:
+            self._capital_reject_count += 1
+            try:
+                if reason in CapitalRejectReason.ALLOWED:
+                    self._capital_flow.register_capital_reject(reason)
+            except Exception:  # pragma: no cover - defensive
+                pass
         assert_no_forbidden_fields(rec)
         self._paper_shadow_rejections.append(rec)
         symbol = rec.get("symbol")
@@ -2410,8 +2556,225 @@ class BlindWalkForwardRunner:
             body_lines=[
                 f"bridge={self._paper_shadow_bridge_name or 'none'}",
                 f"symbol={symbol}",
+                f"reason={rec.get('reason')}",
                 f"reject_reason={rec.get('reason')}",
                 f"detail={rec.get('detail')}",
+                f"equity_before={float(rec.get('equity_before', 0.0))}",
+                f"equity_after={float(rec.get('equity_after', 0.0))}",
+                f"drawdown={float(rec.get('drawdown', 0.0))}",
+            ],
+        )
+
+    def _capital_flow_drawdown(self) -> float:
+        """Best-effort read of the current simulated drawdown."""
+        try:
+            state = self._capital_flow.get_state()
+            return float(getattr(state, "drawdown", 0.0))
+        except Exception:  # pragma: no cover - defensive
+            return 0.0
+
+    def _handle_capital_gate_reject(
+        self,
+        *,
+        symbol: Optional[str],
+        reason: str,
+        simulated_time: datetime,
+    ) -> None:
+        """Record a SIM_REJECT for an entry order dropped BEFORE
+        submission by the PR108 pre-entry capital/risk gate.
+        """
+        sym = symbol if isinstance(symbol, str) and symbol else "unknown"
+        mapped = _CAPITAL_REJECT_REASON_MAP.get(
+            reason, PAPER_SHADOW_REJECT_RISK_HALT_ACTIVE
+        )
+        rejection: Dict[str, Any] = {
+            "symbol": sym,
+            "simulated_time": ensure_utc_aware(
+                simulated_time, "simulated_time"
+            ).isoformat(),
+            "reason": mapped,
+            "detail": (
+                "pre-entry capital/risk gate refused a new simulated "
+                f"open (gate_reason={reason}); simulated order "
+                "suppressed"
+            ),
+            "stage": "pre_entry_gate",
+            "halted_by_risk": bool(
+                getattr(self._capital_flow, "account_halted", False)
+            ),
+            "capital_exhausted": bool(
+                getattr(self._capital_flow, "capital_exhausted", False)
+            ),
+            "risk_halt_reason": getattr(
+                self._capital_flow, "halt_reason", None
+            ),
+            "bridge_name": self._paper_shadow_bridge_name,
+            "no_live_order": True,
+            "phase_12_forbidden": True,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+        }
+        self._reset_bridge_intent_after_reject(sym)
+        self._handle_simulated_reject(
+            rejection=rejection, simulated_time=simulated_time
+        )
+
+    def _handle_capital_safety_event(
+        self,
+        *,
+        event: Mapping[str, Any],
+        simulated_time: datetime,
+    ) -> None:
+        """Surface a PR108 capital-safety enforcement event.
+
+        Emits a SIM_FORCED_EXIT transcript entry + enriched paper-shadow
+        trade record for every force-closed position, then a single
+        SIM_CAPITAL_EXHAUSTED (capital floor breach) or
+        SIM_ACCOUNT_HALTED (drawdown kill switch) transcript entry. The
+        forced exits already went through the simulated capital flow;
+        this method only records + notifies.
+        """
+        self._capital_safety_event_count += 1
+        halt_reason = event.get("halt_reason")
+        forced_exit_reason = event.get("forced_exit_reason")
+        equity_before = float(event.get("equity_before", 0.0))
+        equity_after = float(event.get("equity_after", 0.0))
+        drawdown = float(event.get("drawdown", 0.0))
+        forced_exits = event.get("forced_exits") or ()
+        for closed_entry in forced_exits:
+            self._handle_forced_capital_exit(
+                closed_entry=closed_entry,
+                exit_reason=(
+                    forced_exit_reason
+                    or ForcedExitReason.FORCED_CAPITAL_SAFETY_EXIT
+                ),
+                equity_after=equity_after,
+                simulated_time=simulated_time,
+            )
+        capital_exhausted = bool(event.get("capital_exhausted", False))
+        if capital_exhausted:
+            title = "SIM_CAPITAL_EXHAUSTED"
+        else:
+            title = "SIM_ACCOUNT_HALTED"
+        self._append_paper_shadow_telegram(
+            title=title,
+            message_type=TelegramSandboxMessageType.RISK_REJECTION,
+            simulated_time=simulated_time,
+            severity=TelegramSandboxSeverity.CRITICAL,
+            body_lines=[
+                f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                f"reason={halt_reason}",
+                f"risk_halt_reason={halt_reason}",
+                f"capital_exhausted={capital_exhausted}",
+                "halted_by_risk=true",
+                f"forced_exit_count={int(event.get('forced_exit_count', 0))}",
+                f"equity_before={equity_before}",
+                f"equity_after={equity_after}",
+                f"drawdown={drawdown}",
+                "liquidation_shortfall="
+                f"{float(event.get('liquidation_shortfall', 0.0))}",
+                "no_new_entries_for_remainder_of_window=true",
+            ],
+        )
+
+    def _handle_forced_capital_exit(
+        self,
+        *,
+        closed_entry: TradeLedgerEntry,
+        exit_reason: str,
+        equity_after: float,
+        simulated_time: datetime,
+    ) -> None:
+        """Record an enriched paper-shadow trade for a forced
+        capital-safety exit + emit a SIM_FORCED_EXIT transcript entry.
+        """
+        symbol = closed_entry.symbol
+        meta = self._paper_shadow_open_meta.pop(symbol, {})
+        side = meta.get("side", "LONG")
+        leverage = float(
+            meta.get("leverage", self._paper_shadow_leverage())
+        )
+        entry_price = float(closed_entry.avg_fill_price)
+        qty = float(closed_entry.filled_qty)
+        notional = entry_price * qty
+        net_pnl = float(closed_entry.net_pnl)
+        pnl_pct = (net_pnl / notional * 100.0) if notional > 0.0 else 0.0
+        equity_before = float(meta.get("equity_before", 0.0))
+        record: Dict[str, Any] = {
+            "trade_id": closed_entry.trade_id,
+            "run_id": (
+                self._manifest.run_id if self._manifest else "unknown"
+            ),
+            "window_id": (
+                self._manifest.window.window_id
+                if self._manifest
+                else "unknown"
+            ),
+            "symbol": symbol,
+            "side": side,
+            "leverage_ratio": leverage,
+            "entry_time": (
+                closed_entry.entry_time.isoformat()
+                if closed_entry.entry_time is not None
+                else None
+            ),
+            "exit_time": (
+                closed_entry.exit_time.isoformat()
+                if closed_entry.exit_time is not None
+                else None
+            ),
+            "entry_price": entry_price,
+            "exit_price": entry_price,
+            "quantity": qty,
+            "notional": notional,
+            "fees": float(closed_entry.fee),
+            "slippage_bps": float(closed_entry.slippage_bps),
+            "realized_pnl": net_pnl,
+            "pnl_pct": pnl_pct,
+            "equity_before": equity_before,
+            "equity_after": float(equity_after),
+            "exit_reason": exit_reason,
+            "entry_signal_reason": meta.get("entry_signal_reason"),
+            "exit_signal_reason": exit_reason,
+            "signal_reason": meta.get("entry_signal_reason") or exit_reason,
+            "outcome": closed_entry.outcome,
+            "evidence_refs": list(closed_entry.evidence_refs),
+            "as_of_refs": [
+                r
+                for r in closed_entry.evidence_refs
+                if isinstance(r, str) and r.startswith("asof:")
+            ],
+            "bridge_name": self._paper_shadow_bridge_name,
+            "is_forced_capital_safety_exit": True,
+            "is_simulated": True,
+            "no_live_order": True,
+            "phase_12_forbidden": True,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+        }
+        assert_no_forbidden_fields(record)
+        self._paper_shadow_trades.append(record)
+        self._paper_shadow_exit_count += 1
+        self._append_paper_shadow_telegram(
+            title="SIM_FORCED_EXIT",
+            message_type=TelegramSandboxMessageType.FORCED_EXIT,
+            simulated_time=simulated_time,
+            symbol=symbol,
+            severity=TelegramSandboxSeverity.WARNING,
+            evidence_refs=tuple(closed_entry.evidence_refs),
+            body_lines=[
+                f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                f"symbol={symbol}",
+                f"side={side}",
+                f"reason={exit_reason}",
+                f"exit_reason={exit_reason}",
+                f"entry_price={entry_price}",
+                f"quantity={qty}",
+                f"realized_pnl={net_pnl}",
+                f"pnl_pct={pnl_pct}",
+                f"outcome={closed_entry.outcome}",
+                f"equity_before={equity_before}",
+                f"equity_after={float(equity_after)}",
             ],
         )
 
@@ -2429,6 +2792,7 @@ class BlindWalkForwardRunner:
             self._paper_shadow_enabled
             and self._paper_shadow_entry_count == 0
         )
+        safety = self._capital_flow.capital_safety_snapshot()
         self._append_paper_shadow_telegram(
             title="WINDOW_SUMMARY",
             message_type=(
@@ -2453,6 +2817,18 @@ class BlindWalkForwardRunner:
                 f"{float(summary.get('total_realized_pnl', 0.0))}",
                 f"max_drawdown={float(summary.get('max_drawdown', 0.0))}",
                 f"no_paper_shadow_signals={no_signals}",
+                # PR108 capital-safety closing fields.
+                f"initial_capital={float(safety['initial_capital'])}",
+                f"final_equity={float(safety['final_equity'])}",
+                f"min_equity={float(safety['min_equity'])}",
+                f"capital_exhausted={bool(safety['capital_exhausted'])}",
+                f"halted_by_risk={bool(safety['halted_by_risk'])}",
+                f"risk_halt_reason={safety['risk_halt_reason']}",
+                f"forced_exit_count={int(safety['forced_exit_count'])}",
+                "capital_reject_count="
+                f"{int(self._capital_reject_count)}",
+                "max_drawdown_limit="
+                f"{safety['max_drawdown_limit']}",
                 "equity_after="
                 f"{self._capital_flow.current_marked_equity()}",
             ],
@@ -2472,6 +2848,7 @@ class BlindWalkForwardRunner:
             self._paper_shadow_enabled
             and self._paper_shadow_entry_count == 0
         )
+        capital_safety = self._capital_flow.capital_safety_snapshot()
         out: Dict[str, Any] = {
             "run_id": manifest.run_id,
             "window_id": manifest.window.window_id,
@@ -2520,6 +2897,35 @@ class BlindWalkForwardRunner:
             ),
             "paper_shadow_trade_count": len(self._paper_shadow_trades),
             "no_paper_shadow_signals": no_paper_shadow_signals,
+            # PR108 - Simulated Capital Safety Floor / Kill Switch
+            # reporting (brief §2 / §8).
+            "initial_capital": float(capital_safety["initial_capital"]),
+            "final_equity": float(capital_safety["final_equity"]),
+            "min_equity": float(capital_safety["min_equity"]),
+            "max_drawdown_limit": capital_safety["max_drawdown_limit"],
+            "capital_floor": float(capital_safety["capital_floor"]),
+            "capital_exhausted": bool(
+                capital_safety["capital_exhausted"]
+            ),
+            "halted_by_risk": bool(capital_safety["halted_by_risk"]),
+            "risk_halt_reason": capital_safety["risk_halt_reason"],
+            "forced_exit_count": int(
+                capital_safety["forced_exit_count"]
+            ),
+            "capital_reject_count": int(self._capital_reject_count),
+            "capital_exhaustion_event_count": int(
+                capital_safety["capital_exhaustion_event_count"]
+            ),
+            "liquidation_like_event_count": int(
+                capital_safety["liquidation_like_event_count"]
+            ),
+            "liquidation_shortfall": float(
+                capital_safety["liquidation_shortfall"]
+            ),
+            "no_negative_equity_guard": bool(
+                capital_safety["no_negative_equity_guard"]
+            ),
+            "capital_safety": capital_safety,
             "is_blind_walk_forward_report": True,
             "next_allowed_step": (
                 "blind_walk_forward_operator_evidence_run_or_checkpoint"
@@ -2623,6 +3029,41 @@ class BlindWalkForwardRunner:
         lines.append(
             "- no_paper_shadow_signals: "
             f"`{report.get('no_paper_shadow_signals')}`"
+        )
+        lines.append("")
+        lines.append("## Capital safety (PR108)")
+        lines.append("")
+        lines.append(
+            f"- initial_capital: `{report.get('initial_capital')}`"
+        )
+        lines.append(f"- final_equity: `{report.get('final_equity')}`")
+        lines.append(f"- min_equity: `{report.get('min_equity')}`")
+        lines.append(f"- max_drawdown: `{report.get('max_drawdown')}`")
+        lines.append(
+            f"- max_drawdown_limit: `{report.get('max_drawdown_limit')}`"
+        )
+        lines.append(
+            f"- capital_exhausted: `{report.get('capital_exhausted')}`"
+        )
+        lines.append(
+            f"- halted_by_risk: `{report.get('halted_by_risk')}`"
+        )
+        lines.append(
+            f"- risk_halt_reason: `{report.get('risk_halt_reason')}`"
+        )
+        lines.append(
+            f"- forced_exit_count: `{report.get('forced_exit_count')}`"
+        )
+        lines.append(
+            f"- capital_reject_count: `{report.get('capital_reject_count')}`"
+        )
+        lines.append(
+            "- capital_exhaustion_event_count: "
+            f"`{report.get('capital_exhaustion_event_count')}`"
+        )
+        lines.append(
+            "- no_negative_equity_guard: "
+            f"`{report.get('no_negative_equity_guard')}`"
         )
         lines.append("")
         lines.append("## Manifest hashes")

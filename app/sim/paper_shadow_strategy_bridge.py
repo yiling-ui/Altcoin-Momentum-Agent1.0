@@ -216,6 +216,13 @@ class PaperShadowRejectReason:
         "max_concurrent_positions_reached"
     )
     SYMBOL_NOT_IN_ASOF_UNIVERSE: str = "symbol_not_in_asof_universe"
+    # PR108 - capital-safety kill-switch awareness. When the bound
+    # Simulated Capital Flow has latched its kill switch (capital floor
+    # reached or hard drawdown limit breached) the bridge stops emitting
+    # NEW entries for the rest of the blind window and records the
+    # suppressed signal here. Descriptive only.
+    ACCOUNT_HALTED: str = "account_halted"
+    CAPITAL_EXHAUSTED: str = "capital_exhausted"
 
     ALLOWED: FrozenSet[str] = frozenset(
         {
@@ -224,6 +231,8 @@ class PaperShadowRejectReason:
             WRONG_TIMEFRAME,
             MAX_CONCURRENT_POSITIONS_REACHED,
             SYMBOL_NOT_IN_ASOF_UNIVERSE,
+            ACCOUNT_HALTED,
+            CAPITAL_EXHAUSTED,
         }
     )
 
@@ -819,6 +828,27 @@ class PaperShadowStrategyBridge:
                 out[sym] = p
         return out
 
+    def _capital_exhausted(self) -> bool:
+        cf = self._capital_flow
+        if cf is None:
+            return False
+        return bool(getattr(cf, "capital_exhausted", False))
+
+    def _capital_safety_block(self) -> Tuple[bool, Optional[str]]:
+        """Return ``(True, detail)`` when the bound Simulated Capital
+        Flow has latched its kill switch (PR108). Read-only / duck-typed
+        so a non-capital-flow stub (older tests) never trips this gate.
+        """
+        cf = self._capital_flow
+        if cf is None:
+            return False, None
+        halted = bool(getattr(cf, "account_halted", False)) or bool(
+            getattr(cf, "capital_exhausted", False)
+        )
+        if not halted:
+            return False, None
+        return True, str(getattr(cf, "halt_reason", None))
+
     def _evaluate_symbol(
         self,
         *,
@@ -926,6 +956,29 @@ class PaperShadowStrategyBridge:
                     f"open_positions={len(open_positions)} "
                     f">= max_concurrent_positions="
                     f"{cfg.max_concurrent_positions}"
+                ),
+            )
+            return []
+
+        # PR108 capital-safety kill switch: once the bound Simulated
+        # Capital Flow has halted (capital exhausted or hard drawdown
+        # limit breached) the bridge must stop emitting NEW entries for
+        # the rest of the blind window. A genuine breakout signal is
+        # suppressed and recorded (NEVER silently dropped). The runner's
+        # pre-entry gate is the authoritative second line of defence.
+        halted, halt_detail = self._capital_safety_block()
+        if halted:
+            self._add_rejection(
+                symbol=symbol,
+                simulated_time=simulated_time,
+                reason=(
+                    PaperShadowRejectReason.CAPITAL_EXHAUSTED
+                    if self._capital_exhausted()
+                    else PaperShadowRejectReason.ACCOUNT_HALTED
+                ),
+                detail=(
+                    "entry signal suppressed: simulated account halted "
+                    f"({halt_detail})"
                 ),
             )
             return []

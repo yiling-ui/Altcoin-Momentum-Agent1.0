@@ -572,6 +572,48 @@ def _build_argparser() -> argparse.ArgumentParser:
         default=10_000.0,
         help="simulated initial capital",
     )
+    # ----- PR108: Simulated Capital Safety Floor / Kill Switch -----
+    p.add_argument(
+        "--capital-floor",
+        type=float,
+        default=0.0,
+        help=(
+            "PR108: hard floor (base ccy) below which the simulated "
+            "equity can NEVER silently fall. Default 0.0 (no negative "
+            "equity). Paper-only; NEVER a live-capital marker."
+        ),
+    )
+    p.add_argument(
+        "--max-drawdown-halt-pct",
+        type=float,
+        default=0.5,
+        help=(
+            "PR108: hard drawdown kill switch (fraction in (0,1]). When "
+            "the marked drawdown reaches this the runner force-exits "
+            "every open simulated position and stops accepting new "
+            "entries for the rest of the blind window. Default 0.5 "
+            "(conservative for a 100 USDT sim). Pass 0 to disable."
+        ),
+    )
+    p.add_argument(
+        "--disable-no-negative-equity-guard",
+        action="store_true",
+        help=(
+            "PR108: disable the no-negative-equity guard (NOT "
+            "recommended). When set the simulated equity is no longer "
+            "clamped at the capital floor. Default OFF (guard ON)."
+        ),
+    )
+    p.add_argument(
+        "--min-equity-to-open",
+        type=float,
+        default=None,
+        help=(
+            "PR108: minimum free simulated equity required to OPEN a "
+            "new position. Default unset => require free equity >= the "
+            "position's own notional (no exposure it cannot cover)."
+        ),
+    )
     p.add_argument(
         "--no-ai-post-window-summary",
         action="store_true",
@@ -802,7 +844,23 @@ def main(argv: List[str] = None) -> int:
     )
     capital = SimulatedCapitalFlowEngine(
         config=SimulatedCapitalConfig(
-            initial_capital=float(args.initial_capital)
+            initial_capital=float(args.initial_capital),
+            capital_floor=float(args.capital_floor),
+            no_negative_equity_guard=(
+                not args.disable_no_negative_equity_guard
+            ),
+            halt_on_capital_exhaustion=True,
+            max_drawdown_halt_pct=(
+                float(args.max_drawdown_halt_pct)
+                if args.max_drawdown_halt_pct
+                and float(args.max_drawdown_halt_pct) > 0.0
+                else None
+            ),
+            min_equity_to_open=(
+                float(args.min_equity_to_open)
+                if args.min_equity_to_open is not None
+                else None
+            ),
         )
     )
     exchange = MockExchange()
@@ -978,6 +1036,22 @@ def main(argv: List[str] = None) -> int:
         "win_count": report_out.get("win_count"),
         "loss_count": report_out.get("loss_count"),
         "breakeven_count": report_out.get("breakeven_count"),
+        # PR108 - capital-safety operator summary.
+        "final_equity": report_out.get("final_equity"),
+        "min_equity": report_out.get("min_equity"),
+        "max_drawdown_limit": report_out.get("max_drawdown_limit"),
+        "capital_floor": report_out.get("capital_floor"),
+        "capital_exhausted": report_out.get("capital_exhausted"),
+        "halted_by_risk": report_out.get("halted_by_risk"),
+        "risk_halt_reason": report_out.get("risk_halt_reason"),
+        "forced_exit_count": report_out.get("forced_exit_count"),
+        "capital_reject_count": report_out.get("capital_reject_count"),
+        "capital_exhaustion_event_count": report_out.get(
+            "capital_exhaustion_event_count"
+        ),
+        "no_negative_equity_guard": report_out.get(
+            "no_negative_equity_guard"
+        ),
         "no_paper_shadow_signals": report_out.get(
             "no_paper_shadow_signals"
         ),
