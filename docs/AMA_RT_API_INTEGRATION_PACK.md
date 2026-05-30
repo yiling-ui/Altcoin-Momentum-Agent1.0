@@ -133,6 +133,17 @@ PR111 uses three access layers:
    or raises `LiveTradeNotEnabled`. **No HTTP order request is ever built
    or sent.**
 
+> **PR113 follow-on (IN_REVIEW):** the **Live Execution Gateway**
+> (`app/live/binance_execution_adapter.py`,
+> `docs/AMA_RT_LIVE_EXECUTION_GATEWAY.md`) introduces a *separate*
+> `BinanceExecutionAdapter` that CAN compose + send a real order — but it
+> is **blocked by default** and never opens a socket unless
+> `real_order_allowed=True` AND `enable_private_trade=True` AND
+> `runtime_mode=LIVE_LIMITED` AND credentials are present, behind the
+> gateway's 15-point gate. This PR111 client's `PRIVATE_TRADE` surface
+> stays interface-only and blocked; the new adapter is the gated real
+> path, and it still **never changes leverage / margin mode**.
+
 The health check reports: `public_market_ok`, `private_read_ok`,
 `private_trade_configured`, `private_trade_enabled_by_config`,
 `private_trade_blocked_by_mode`, `can_read_account`, `can_read_positions`,

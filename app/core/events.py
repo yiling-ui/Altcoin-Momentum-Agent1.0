@@ -1101,6 +1101,59 @@ class EventType(str, Enum):
         "DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY"
     )
 
+    # ------------------------------------------------------------------
+    # PR113 - Live Execution Gateway v0 (Binance order execution adapter,
+    # order lifecycle, fill ledger, strict LIVE_LIMITED gate).
+    #
+    # PR113 introduces the FIRST code path able to compose + send a real
+    # Binance USDT-M futures order, BUT it is BLOCKED by default. A real
+    # order request only leaves the system when every gate is true:
+    # runtime_mode=LIVE_LIMITED + live_limited_confirmed + an allowed
+    # capital profile + exchange_live_orders=true + trade_authority=true +
+    # Binance private trade enabled by config + LiveRiskDecision.approved +
+    # real_order_allowed + kill switch not active + source=LIVE + no path
+    # isolation violation + client_order_id present + exchangeInfo
+    # precision/minNotional pass + notional/leverage within profile +
+    # stop/exit plan (or a documented emergency/order-type exception).
+    #
+    # PR113 boundary - every payload below MUST be safe for logs:
+    #   - no API key / secret / bot token / full request signature
+    #   - exchange_live_orders=false / trade_authority=false /
+    #     ai_trade_authority=false are the DEFAULT and are pinned on every
+    #     blocked / shadow payload.
+    #   - AI never places an order; Telegram never bypasses the Risk
+    #     Engine; blind / replay / sim never reach this path.
+    #
+    #   LIVE_ORDER_SUBMIT_REQUESTED   - a LIVE order intent reached the
+    #     gateway and passed isolation; permission evaluation is about to
+    #     run. Descriptive; no order has been sent.
+    #   LIVE_ORDER_SUBMITTED          - the adapter composed + sent a real
+    #     order request (only possible when every gate is true).
+    #   LIVE_ORDER_FILLED             - the order is fully filled.
+    #   LIVE_ORDER_PARTIALLY_FILLED   - the order is partially filled.
+    #   LIVE_ORDER_CANCELED           - the order was canceled.
+    #   LIVE_ORDER_REJECTED           - the order was rejected by risk /
+    #     validation / the exchange (no fill).
+    #   LIVE_ORDER_FAILED             - a transport / protocol failure
+    #     occurred talking to the exchange.
+    #   LIVE_EXECUTION_BLOCKED        - the execution gate refused to let a
+    #     real order leave the system (the DEFAULT outcome in PR113).
+    #   LIVE_EXIT_FILLED              - a reduce-only / close order filled.
+    #   LIVE_ORDER_ADAPTER_BLOCKED    - the Binance execution adapter
+    #     refused to send HTTP because the order was not authorised
+    #     (real_order_allowed=false / private trade disabled / mode not
+    #     LIVE_LIMITED). No socket was opened.
+    LIVE_ORDER_SUBMIT_REQUESTED = "LIVE_ORDER_SUBMIT_REQUESTED"
+    LIVE_ORDER_SUBMITTED = "LIVE_ORDER_SUBMITTED"
+    LIVE_ORDER_FILLED = "LIVE_ORDER_FILLED"
+    LIVE_ORDER_PARTIALLY_FILLED = "LIVE_ORDER_PARTIALLY_FILLED"
+    LIVE_ORDER_CANCELED = "LIVE_ORDER_CANCELED"
+    LIVE_ORDER_REJECTED = "LIVE_ORDER_REJECTED"
+    LIVE_ORDER_FAILED = "LIVE_ORDER_FAILED"
+    LIVE_EXECUTION_BLOCKED = "LIVE_EXECUTION_BLOCKED"
+    LIVE_EXIT_FILLED = "LIVE_EXIT_FILLED"
+    LIVE_ORDER_ADAPTER_BLOCKED = "LIVE_ORDER_ADAPTER_BLOCKED"
+
 
 
 # Capital-flow event types per Issue #2 / Spec §28.3.

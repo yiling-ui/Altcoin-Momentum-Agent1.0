@@ -10,6 +10,17 @@ capital / risk engine and strictly enforces the `L1_10U_PROBE`
 small-capital profile. It prepares the ground for PR113's real order
 execution gateway — but **PR112 itself never submits an order**.
 
+> **PR113 follow-on (IN_REVIEW):** the next slice — the **Live Execution
+> Gateway** (`docs/AMA_RT_LIVE_EXECUTION_GATEWAY.md`) — adds the first
+> code path able to compose + send a real Binance order, behind a hard
+> 15-point gate, **blocked by default**. PR113 consumes this PR112 dry
+> `LiveRiskDecision`: a real order is only ever authorised when the
+> decision is `approved` AND the context is fully armed
+> (`authorize_real_order`), and the gate then re-checks every flag. PR113
+> begins carrying funding forward into a per-order `net_pnl = realized −
+> fee + funding_usdt_attributed`; position-level funding attribution
+> remains the PR114 handoff (`UNATTRIBUTED_PENDING_POSITION_LINK`).
+
 ---
 
 ## 1. PR112 does NOT (read this first)

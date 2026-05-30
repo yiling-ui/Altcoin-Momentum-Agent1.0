@@ -5,6 +5,50 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR113 (Live Execution Gateway v0)
+
+> **PR113 — Live Execution Gateway v0: Binance Order Execution Adapter +
+> Order Lifecycle + Fill Ledger + Strict LIVE_LIMITED Gate.**
+> **Status: IN_REVIEW.**
+> **Type: real order execution skeleton — real order code exists but is
+> BLOCKED by default.**
+
+PR113 adds the first AMA-RT code path that can compose + send a real
+Binance USDT-M futures order, behind a hard 15-point gate. It adds, under
+`app/live/`: `execution_models.py` (`LiveOrderIntent` / `LiveOrderRequest`
+/ `LiveOrderResult` / `LiveFillEvent` / `OrderValidationResult`),
+`binance_execution_adapter.py` (`BinanceExecutionAdapter` — blocked by
+default), `order_ledger.py` (`LiveOrderLedger`), `execution_gateway.py`
+(`LiveExecutionGateway` + `evaluate_execution_permission`),
+`execution_telegram.py` (order-lifecycle payloads), and
+`execution_errors.py`. CLI: `scripts/live_execution_smoke.py`.
+
+Hard boundary held by PR113 (default state stays safe):
+
+  - **No real order by default.** `LIVE_SHADOW`, `exchange_live_orders=false`,
+    `trade_authority=false`, `live_trading=false`, `ai_trade_authority=false`,
+    Binance `enable_private_trade=false`.
+  - A real order leaves the system **only** when every gate is true:
+    `LIVE_LIMITED` + `live_limited_confirmed` + an allowed profile +
+    `exchange_live_orders=true` + `trade_authority=true` + private trade
+    enabled + `LiveRiskDecision.approved` + `real_order_allowed` +
+    kill switch off + `source=LIVE` + `client_order_id` + exchangeInfo
+    precision/minNotional + notional/leverage within profile + stop/exit
+    plan (or documented emergency exception).
+  - **AI never places orders** (`AiTradeAuthorityForbidden`); **Telegram
+    never bypasses the Risk Engine**; **blind / replay / sim never reach
+    live execution** (`LivePathIsolationViolation`).
+  - The adapter **never changes leverage / margin mode**; orders carry
+    `client_order_id` idempotency and are never blind-retried.
+  - `net_pnl = realized − fee + funding_usdt_attributed`; funding is
+    carried forward (`UNATTRIBUTED_PENDING_POSITION_LINK`) for the PR114
+    position-level attribution handoff.
+  - `L1_10U_PROBE` remains the default live test profile. PR112's dry
+    `LiveRiskDecision` keeps `real_order_allowed=false`; only
+    `authorize_real_order` (gated on a fully-armed context) can flip it.
+
+See `docs/AMA_RT_LIVE_EXECUTION_GATEWAY.md`.
+
 ## Live road map — PR112 (Live Capital / Risk / Funding-Aware PnL / 10U Profile)
 
 > **PR112 — Live Capital / Risk / Funding-Aware PnL / 10U Profile

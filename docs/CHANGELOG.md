@@ -7,6 +7,81 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR113 — Live Execution Gateway v0: Binance Order Execution Adapter + Order Lifecycle + Fill Ledger + Strict LIVE_LIMITED Gate: IN_REVIEW
+
+**Type:** Real order execution skeleton. **Real order code exists but is
+BLOCKED by default.** **No real order by default.** **No leverage / margin
+change.** **AI never places orders.** **LIVE_SHADOW is the default.**
+
+**Runtime effect on trading:** none by default. The `LiveExecutionGateway`
+is the single entry point for real orders; with the default flags
+(`LIVE_SHADOW`, `exchange_live_orders=false`, `trade_authority=false`,
+`enable_private_trade=false`) it returns a `BLOCKED` result and no socket
+is opened.
+
+**Added — `app/live/` package:**
+
+  - `execution_models.py` — `LiveOrderIntent` (full plan + provenance),
+    `LiveOrderRequest` (normalised, exchange-ready), `LiveOrderResult`,
+    `LiveFillEvent` (carries fee + `funding_attribution_status`),
+    `OrderValidationResult`; enums `OrderSide` / `OrderType`
+    (`MARKET` / `LIMIT` / `STOP_MARKET` / `TAKE_PROFIT_MARKET`) /
+    `TimeInForce` / `OrderIntentType` / `LiveExecutionStatus`.
+  - `binance_execution_adapter.py` — `BinanceExecutionAdapter`:
+    `submit_order` / `cancel_order` / `get_order` / `get_open_orders` /
+    `get_user_trades` / `normalize_order` /
+    `validate_order_against_exchange_info` / `parse_order_response`.
+    Blocked by default (no socket unless `real_order_allowed` AND
+    `enable_private_trade` AND `LIVE_LIMITED` AND credentials present;
+    else `LIVE_ORDER_ADAPTER_BLOCKED`). Idempotency via `newClientOrderId`;
+    orders/cancels never blind-retried (only status reads retry). HMAC
+    signing internal; secret / signed URL never logged. `set_leverage` /
+    `set_margin_mode` refuse (`SafeModeViolation`).
+  - `order_ledger.py` — `LiveOrderLedger` append-only LIVE order/fill/
+    cancel rows (separate from sim/blind ledger).
+    `net_pnl = realized − fee + funding_usdt_attributed`; funding carried
+    forward (`UNATTRIBUTED_PENDING_POSITION_LINK`).
+  - `execution_gateway.py` — `LiveExecutionGateway` (single real-order
+    entry), `ExecutionPermissionContext` (`from_config` reads
+    `AMA_LIVE_EXCHANGE_LIVE_ORDERS` / `AMA_LIVE_TRADE_AUTHORITY` /
+    `AMA_LIVE_LIMITED_CONFIRMED` / `AMA_LIVE_KILL_SWITCH_ACTIVE` /
+    `AMA_LIVE_PROFILE_OPERATOR_ACK`, all default False),
+    `evaluate_execution_permission` (the 15-point gate),
+    `authorize_real_order` (the only flip of `real_order_allowed`, gated
+    on a fully-armed context). Isolation guard + AI refusal raise.
+  - `execution_telegram.py` — order-lifecycle payloads
+    (`LIVE_ORDER_SUBMIT_REQUESTED` / `LIVE_ORDER_SUBMITTED` /
+    `LIVE_ORDER_FILLED` / `LIVE_ORDER_PARTIALLY_FILLED` /
+    `LIVE_ORDER_CANCELED` / `LIVE_ORDER_REJECTED` / `LIVE_ORDER_FAILED` /
+    `LIVE_EXECUTION_BLOCKED` / `LIVE_EXIT_FILLED`), planned-vs-actual
+    schema, 空盘跑/有资金跑 mode display. Build-only (no outbound).
+  - `execution_errors.py` — `LiveExecutionBlocked`,
+    `AiTradeAuthorityForbidden`, `OrderValidationError`,
+    `ExecutionAdapterError`.
+
+**Added — events (`app/core/events.py`):** `LIVE_ORDER_SUBMIT_REQUESTED`,
+`LIVE_ORDER_SUBMITTED`, `LIVE_ORDER_FILLED`, `LIVE_ORDER_PARTIALLY_FILLED`,
+`LIVE_ORDER_CANCELED`, `LIVE_ORDER_REJECTED`, `LIVE_ORDER_FAILED`,
+`LIVE_EXECUTION_BLOCKED`, `LIVE_EXIT_FILLED`, `LIVE_ORDER_ADAPTER_BLOCKED`.
+
+**Added — CLI:** `scripts/live_execution_smoke.py`
+(`--permission-check` / `--dry-run-order` / `--real-order` +
+`--i-understand-this-places-real-order` + `--confirm-code`). Default path
+never sends an order (`no_real_order_sent=true`); the real-order path is
+blocked unless every gate + all three confirmation flags
+(and `AMA_LIVE_EXECUTION_CONFIRM_CODE`) are satisfied.
+
+**Added — docs:** `docs/AMA_RT_LIVE_EXECUTION_GATEWAY.md`.
+
+**Added — tests:** `tests/unit/test_pr113_execution_gateway.py`,
+`tests/unit/test_pr113_cli.py` (31 brief scenarios, fake transport only;
+full suite stays green so PR110/PR111/PR112 are unaffected).
+
+**Safety:** `exchange_live_orders` / `trade_authority` /
+`ai_trade_authority` / `live_trading` stay `False` by default;
+`phase_12_forbidden` recorded `True`. AI never places orders; Telegram
+never bypasses risk; blind/replay/sim never reach live execution.
+
 ### PR112 — Live Capital / Risk / Funding-Aware PnL / 10U Profile Enforcement v0: IN_REVIEW
 
 **Type:** Read-only live capital / risk wiring on top of PR111 private
