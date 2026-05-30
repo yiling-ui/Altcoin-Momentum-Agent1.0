@@ -8,6 +8,47 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR112 — Live Capital / Risk / Funding-Aware PnL / 10U Profile Enforcement v0 (IN_REVIEW)
+
+**PR112 — wire PR111 real private-read into a live capital / risk
+engine + enforce `L1_10U_PROBE`.** PR112 reads real account state only;
+it does **NOT** loosen any safety flag:
+
+  - `exchange_live_orders` stays `False`; every `LiveRiskDecision` has
+    `real_order_allowed=False`. PR112 builds the dry risk pre-check that
+    PR113's execution gateway will consume; it never submits an order.
+  - `live_trading` stays `False`; default runtime mode is `LIVE_SHADOW`
+    and a real-order intent is rejected in shadow. No auto-switch to
+    `LIVE_LIMITED`.
+  - No leverage / margin change. No auto-escalation of the capital
+    profile — a profile/equity mismatch is detected and surfaced
+    (`PROFILE_MISMATCH_EQUITY_ABOVE_RANGE` / `..._BELOW_RANGE`,
+    `auto_escalation_allowed=False`); the operator must reselect.
+  - `L1_10U_PROBE` caps usable account capital at 10U; a large real
+    balance is never used blindly under the small profile.
+  - `net_strategy_pnl = realized − commission + funding`. Deposits /
+    withdrawals / transfers are separated from strategy PnL; unknown
+    income is preserved separately. Account-level funding attribution is
+    implemented; position-level attribution is the PR113/PR114 handoff.
+  - `ai_trade_authority` / `trade_authority` stay `False`; DeepSeek is
+    not used by PR112. Telegram operator payloads are built only (no
+    outbound). `phase_12_forbidden` remains recorded `True`.
+
+PR112 also hardens PR111 usability: placeholder-secret detection
+(`PLACEHOLDER_SECRET_CONFIGURED` before any real HTTP call), typed health
+messages, `.env.live` validation, and capital-profile env compatibility
+(`AMA_LIVE_CAPITAL_PROFILE_ID` priority / `AMA_LIVE_CAPITAL_PROFILE`
+alias; invalid → `CONFIG_INVALID_CAPITAL_PROFILE`, never silent) — fixing
+the PR111 bug where `L1_10U_PROBE` showed as `L0_SHADOW`.
+
+Gate criteria for the NEXT slice (PR113 — real order execution gateway):
+operator can run `scripts/live_capital_status.py` against real keys,
+confirm the live capital state + funding-aware PnL + `L1_10U_PROBE`
+enforcement, and the report shows `real_order_allowed=false` /
+`exchange_live_orders=false` / `ai_trade_authority=false`. Acceptance
+evidence: `docs/AMA_RT_LIVE_CAPITAL_RISK_PNL.md`,
+`tests/unit/test_pr112_*.py`.
+
 ## Open slice — PR111 — API Integration Pack v0 (IN_REVIEW)
 
 **PR111 — Binance + Telegram + DeepSeek API Health & Permission Layer.**

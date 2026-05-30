@@ -60,6 +60,8 @@ def build_safety_flags(config: LiveApiConfig) -> dict[str, Any]:
         "deepseek_enabled": config.deepseek.enabled,
         "secret_logging_allowed": config.general.secret_logging_allowed,
         "secrets_masked": True,
+        "capital_profile_id": config.general.capital_profile_id.value,
+        "capital_profile_config_error": config.general.capital_profile_error,
     }
 
 
@@ -116,6 +118,12 @@ def _binance_private_read_status(
         return HealthStatus.SKIPPED
     if not config.binance.has_credentials:
         return HealthStatus.WARN
+    if (
+        config.binance.api_key.is_placeholder
+        or config.binance.api_secret.is_placeholder
+    ):
+        # PR112: placeholder credentials never reach a real HTTP call.
+        return HealthStatus.WARN
     if not result.private_read_ok:
         return HealthStatus.FAIL
     return HealthStatus.WARN if result.high_risk_permission_warning else HealthStatus.PASS
@@ -139,15 +147,30 @@ def run_unified_health_check(
     runtime_mode = config.live_runtime_mode
     safety_flags = build_safety_flags(config)
 
+    # PR112: resolve the capital profile from config when the caller left
+    # the default sentinel. This fixes the PR111 bug where
+    # AMA_LIVE_CAPITAL_PROFILE=L1_10U_PROBE was ignored and the report
+    # showed L0_SHADOW. An explicit override still wins.
+    if capital_profile_id == DEFAULT_CAPITAL_PROFILE_ID:
+        capital_profile_id = config.general.capital_profile_id.value
+
     _emit(event_repo, EventType.API_HEALTH_CHECK_STARTED, {
         "check_binance": check_binance,
         "check_telegram": check_telegram,
         "check_deepseek": check_deepseek,
         "live_runtime_mode": runtime_mode.value,
+        "capital_profile_id": capital_profile_id,
     })
 
     warnings: list[str] = []
     contributing: list[HealthStatus] = []
+
+    # Surface a capital-profile config error/warning loudly (never silent).
+    if config.general.capital_profile_error:
+        warnings.append(config.general.capital_profile_warning)
+        contributing.append(HealthStatus.WARN)
+    elif config.general.capital_profile_warning:
+        warnings.append(config.general.capital_profile_warning)
 
     # --- Binance ---
     binance_result: BinanceApiHealthResult | None = None

@@ -13,8 +13,8 @@ from typing import Any
 from app.core.events import Event, EventType
 from app.live.api_config import DeepSeekApiConfig
 from app.live.deepseek_client import DeepSeekBriefing, DeepSeekLiveClient
-from app.live.secrets import API_HEALTH_MISSING_SECRET
-from app.live.status import HealthStatus, worst_of
+from app.live.secrets import API_HEALTH_MISSING_SECRET, PLACEHOLDER_SECRET_CONFIGURED
+from app.live.status import HealthStatus, classify_api_error, worst_of
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,13 @@ def run_deepseek_health_check(
         statuses.append(HealthStatus.SKIPPED)
         detail_parts.append("deepseek_disabled")
 
-    if call_api and enabled and api_key_present:
+    # PR112 hardening: a placeholder key never reaches a real DeepSeek call.
+    placeholder_key = api_key_present and config.api_key.is_placeholder
+    if placeholder_key:
+        statuses.append(HealthStatus.WARN)
+        detail_parts.append(PLACEHOLDER_SECRET_CONFIGURED)
+
+    if call_api and enabled and api_key_present and not placeholder_key:
         cli = client or DeepSeekLiveClient(config, event_repo=event_repo)
         try:
             briefing = cli.generate_test_briefing()
@@ -111,9 +117,10 @@ def run_deepseek_health_check(
                         pass
         except Exception as exc:
             statuses.append(HealthStatus.FAIL)
-            error_message = _sanitise(exc)
+            error_message = classify_api_error(_sanitise(exc))
+            detail_parts.append(error_message)
     elif call_api:
-        # Asked to call but not eligible (disabled or missing key).
+        # Asked to call but not eligible (disabled / missing / placeholder key).
         detail_parts.append("call_skipped_not_eligible")
 
     status = worst_of(statuses) if statuses else HealthStatus.PASS

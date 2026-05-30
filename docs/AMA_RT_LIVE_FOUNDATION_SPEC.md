@@ -4,6 +4,15 @@
 > safety foundation introduced by PR110. It is the authoritative
 > contract for `app/live/`.
 
+> **PR112 follow-on (IN_REVIEW):** PR112 builds the read-only live
+> capital / risk layer on this foundation — `LiveCapitalState` from the
+> PR111 private read, funding-aware PnL
+> (`net = realized − commission + funding`, deposits/withdrawals kept out
+> of strategy PnL), `L1_10U_PROBE` enforcement (usable capital capped at
+> 10U, no auto-escalation), and a deterministic *dry* live order risk
+> pre-check (`real_order_allowed=false`). The hard safety boundary below
+> is unchanged. See `docs/AMA_RT_LIVE_CAPITAL_RISK_PNL.md`.
+
 ## What AMA-RT is
 
 AMA-RT V1.4 is a crypto altcoin **right-tail capture / adaptive market

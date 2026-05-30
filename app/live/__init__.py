@@ -191,3 +191,29 @@ LIVE_API_PACK_VERSION = "v0"
 LIVE_API_PACK_PR = "PR111"
 
 __all__ += ["LIVE_API_PACK_VERSION", "LIVE_API_PACK_PR"]
+
+# ---------------------------------------------------------------------------
+# PR112 - Live Capital / Risk / Funding-Aware PnL / 10U Profile Enforcement.
+#
+# PR112 layers a READ-ONLY live capital / risk engine on top of PR110 +
+# PR111: it builds a LiveCapitalState from the PR111 private read, computes
+# funding-aware PnL (net = realized - commission + funding) with external
+# deposit/withdrawal flows kept out of strategy PnL, enforces the
+# L1_10U_PROBE capital profile (usable capital capped at 10U, no
+# auto-escalation), and produces a deterministic DRY live order risk
+# decision (real_order_allowed is always False in PR112) plus Telegram
+# operator payloads. PR112 still places NO real order, changes NO leverage
+# / margin, switches NO mode, and escalates NO profile.
+#
+# The PR112 modules (capital_state, pnl_accounting, live_risk_engine,
+# live_capital_service, env_validation) are imported directly (e.g.
+# ``from app.live.live_risk_engine import evaluate_live_order_risk``)
+# rather than re-exported here. In particular, PR112's risk-check
+# ``LiveOrderIntent`` (app.live.live_risk_engine) is intentionally NOT
+# re-exported so it never shadows PR110's path-isolation
+# ``LiveOrderIntent`` (app.live.path_isolation) that this package exports.
+# ---------------------------------------------------------------------------
+LIVE_CAPITAL_RISK_VERSION = "v0"
+LIVE_CAPITAL_RISK_PR = "PR112"
+
+__all__ += ["LIVE_CAPITAL_RISK_VERSION", "LIVE_CAPITAL_RISK_PR"]

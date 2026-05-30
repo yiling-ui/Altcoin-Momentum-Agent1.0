@@ -11,6 +11,19 @@ funding / fee reads, a Telegram test-message path, and a DeepSeek test
 briefing path - all behind the `app/live/` package - **without ever
 placing a real order**.
 
+> **PR112 follow-on (IN_REVIEW):** the next slice wires these real
+> private-read results into a live capital / risk engine and enforces the
+> `L1_10U_PROBE` 10U profile — still **without placing a real order**
+> (`real_order_allowed=false`). PR112 also hardens this pack's usability:
+> placeholder-secret detection (`PLACEHOLDER_SECRET_CONFIGURED` before any
+> real HTTP call), typed health messages (401 / 403 / 429 / 5xx /
+> network), `.env.live` structure validation, and capital-profile env
+> compatibility (`AMA_LIVE_CAPITAL_PROFILE_ID` priority /
+> `AMA_LIVE_CAPITAL_PROFILE` alias) — fixing the case where
+> `AMA_LIVE_CAPITAL_PROFILE=L1_10U_PROBE` was ignored and the health
+> output still showed `L0_SHADOW`. See
+> `docs/AMA_RT_LIVE_CAPITAL_RISK_PNL.md`.
+
 AMA-RT is a short-horizon, right-tail capture system, not a low-volatility
 yield product. This pack is built to serve real market operation: real API
 connectivity, real market data, real balances, real operator push - but

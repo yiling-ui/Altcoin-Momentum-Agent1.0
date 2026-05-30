@@ -29,6 +29,76 @@ SECRET_ABSENT_DISPLAY: Final[str] = "<absent>"
 # Health status strings used across the pack when a secret is missing.
 API_HEALTH_MISSING_SECRET: Final[str] = "API_HEALTH_MISSING_SECRET"
 
+# PR112 hardening: a secret that is *present* but is obviously a
+# placeholder / dummy value (e.g. copied from .env.example and never
+# filled in). Detected BEFORE any real HTTP call so a placeholder never
+# produces a confusing HTTP 401 / getMe error.
+PLACEHOLDER_SECRET_CONFIGURED: Final[str] = "PLACEHOLDER_SECRET_CONFIGURED"
+# A secret that is missing entirely (treated as "no real secret yet").
+MISSING_REAL_SECRET: Final[str] = "MISSING_REAL_SECRET"
+
+# Exact placeholder tokens shipped in .env.example / docs. Matched
+# case-insensitively. These MUST NEVER reach a real Binance / Telegram /
+# DeepSeek HTTP call.
+PLACEHOLDER_SECRET_VALUES: frozenset[str] = frozenset(
+    {
+        "put_your_key_here",
+        "put_your_secret_here",
+        "put_your_bot_token_here",
+        "put_your_chat_id_here",
+        "put_your_deepseek_key_here",
+        "put_your_api_key_here",
+        "put_your_token_here",
+        "your_key_here",
+        "your_secret_here",
+        "your_token_here",
+        "your_api_key_here",
+        "changeme",
+        "change_me",
+        "placeholder",
+        "todo",
+        "tbd",
+        "none",
+        "null",
+        "xxx",
+        "xxxx",
+        "xxxxx",
+    }
+)
+
+
+def is_placeholder_secret(value: str | None) -> bool:
+    """Return True if ``value`` is an obvious placeholder / dummy secret.
+
+    A *missing* value is NOT a placeholder (it is simply missing -
+    callers distinguish the two). The check is deliberately conservative
+    so a legitimate (if fake-looking) credential is never mis-flagged:
+
+      - empty / whitespace-only -> False (that is "missing", not placeholder)
+      - an exact match in :data:`PLACEHOLDER_SECRET_VALUES` (case-insensitive)
+      - a value that contains ``put_your`` or ends with ``_here``
+      - a value wrapped in angle brackets (``<your-key>``)
+      - a value made only of the repeated ``x`` / ``*`` / ``.`` filler char
+    """
+
+    if value is None:
+        return False
+    text = str(value).strip()
+    if text == "":
+        return False
+    lowered = text.lower()
+    if lowered in PLACEHOLDER_SECRET_VALUES:
+        return True
+    if "put_your" in lowered or lowered.endswith("_here"):
+        return True
+    if text.startswith("<") and text.endswith(">"):
+        return True
+    # All-filler tokens like "xxxxxxxx", "********", "........".
+    stripped = text.strip("xX*. _-")
+    if stripped == "":
+        return True
+    return False
+
 
 def mask_secret(value: str | None, *, show: int = 3) -> str:
     """Return a masked form of ``value`` safe to log / display.
@@ -85,6 +155,30 @@ class SecretValue:
     @property
     def is_present(self) -> bool:
         return self.__raw != ""
+
+    @property
+    def is_placeholder(self) -> bool:
+        """True if a value is present but is an obvious placeholder/dummy."""
+        return is_placeholder_secret(self.__raw)
+
+    @property
+    def is_real(self) -> bool:
+        """True only when present AND not a placeholder."""
+        return self.is_present and not self.is_placeholder
+
+    def health_status(self) -> str:
+        """Return the secret-health tag for this value.
+
+        ``MISSING_REAL_SECRET`` when absent, ``PLACEHOLDER_SECRET_CONFIGURED``
+        when a placeholder is present, or ``""`` (empty) when a real value
+        is present. Used by the health checks to short-circuit BEFORE any
+        real HTTP call.
+        """
+        if not self.is_present:
+            return MISSING_REAL_SECRET
+        if self.is_placeholder:
+            return PLACEHOLDER_SECRET_CONFIGURED
+        return ""
 
     def reveal(self) -> str:
         """Return the raw secret. ONLY for HTTP signing / auth.
@@ -143,8 +237,12 @@ def load_secret(env_name: str, *, environ: dict[str, str] | None = None) -> Secr
 
 __all__ = [
     "API_HEALTH_MISSING_SECRET",
+    "PLACEHOLDER_SECRET_CONFIGURED",
+    "MISSING_REAL_SECRET",
+    "PLACEHOLDER_SECRET_VALUES",
     "SECRET_ABSENT_DISPLAY",
     "SecretValue",
+    "is_placeholder_secret",
     "load_secret",
     "mask_secret",
 ]
