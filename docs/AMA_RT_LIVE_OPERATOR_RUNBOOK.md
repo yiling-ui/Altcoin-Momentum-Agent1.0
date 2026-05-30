@@ -170,3 +170,41 @@ runtime_mode           = LIVE_SHADOW
 
 PR114 is **IN_REVIEW**. The 10U launch is not live until the launch PR
 (PR116) explicitly changes the stage docs.
+
+
+---
+
+## 11. AI briefings (PR115 — DeepSeek Live Intelligence v0)
+
+PR115 connects DeepSeek to the operator workflow **only** as market
+intelligence. The AI summarises live-approved evidence, compresses it into
+a readable briefing, explains live risk, and can push the briefing to
+Telegram. **The AI has no trade authority** and cannot decide direction /
+size / leverage / stop / take-profit / target / order, cannot call the
+execution gateway, cannot change mode / profile / risk, and cannot use
+blind / replay / sim evidence. See
+`docs/AMA_RT_DEEPSEEK_LIVE_INTELLIGENCE.md`.
+
+Enable DeepSeek (optional; safe to leave off):
+
+```
+AMA_DEEPSEEK_API_KEY=<key>      # held masked; Authorization header only
+AMA_DEEPSEEK_ENABLED=true
+```
+
+CLI (never submits orders, never switches mode / profile, never calls the
+execution gateway, masks secrets):
+
+```
+python scripts/live_ai_briefing.py --status-json
+python scripts/live_ai_briefing.py --brief --json
+python scripts/live_ai_briefing.py --brief --dry-run
+python scripts/live_ai_briefing.py --validate-output sample.json
+```
+
+If the DeepSeek key is missing or disabled the briefing returns
+`MISSING_SECRET` / `DISABLED` rather than crashing. Telegram AI commands
+(`/ai_status`, `/brief`, `/explain_risk`, `/explain_position <SYMBOL>`,
+`/summarize_pnl`, `/summarize_rejections`) return informational cards only
+(`ai_trade_authority=false`, `no_order_instruction=true`). The 10U live
+launch still requires **PR116**.

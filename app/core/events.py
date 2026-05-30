@@ -1227,6 +1227,60 @@ class EventType(str, Enum):
     FUNDING_EVENT_ATTRIBUTED = "FUNDING_EVENT_ATTRIBUTED"
     LIVE_SOURCE_REJECTED = "LIVE_SOURCE_REJECTED"
 
+    # ------------------------------------------------------------------
+    # PR115 - DeepSeek Live Intelligence v0 (live-safe operator briefing +
+    # evidence compression + risk explanation + Telegram AI briefing).
+    #
+    # PR115 connects DeepSeek to the live operator workflow as MARKET
+    # INTELLIGENCE ONLY: it summarises live-approved evidence, compresses
+    # it into a readable briefing, explains live risk rejections, and can
+    # push that briefing to Telegram. The AI has NO trade authority. It
+    # cannot decide direction / size / leverage / stop / take-profit /
+    # target / order / whether to execute / config patch.
+    #
+    # PR115 boundary - every payload below MUST be safe for logs:
+    #   - no API key / secret / bot token / full request signature; the
+    #     DeepSeek key only ever travels in the Authorization header.
+    #   - ai_trade_authority=false / trade_authority=false /
+    #     exchange_live_orders=false / live_trading=false are pinned on
+    #     every payload; source_scope=LIVE_ONLY.
+    #   - AI evidence is LIVE-only: blind / replay / sim / paper-shadow /
+    #     backtest / offline-AI / telegram-sandbox sources are refused.
+    #   - the AI can NEVER call the execution gateway, change the runtime
+    #     mode / capital profile / leverage / stop / take-profit / risk
+    #     limits, trigger a Telegram live order command, or output a
+    #     runtime config patch.
+    #
+    #   LIVE_AI_BRIEFING_REQUESTED      - an operator / CLI requested a
+    #     live-safe AI briefing. Descriptive; no order / mode change.
+    #   LIVE_AI_BRIEFING_GENERATED      - a briefing was produced + passed
+    #     the output guard (ai_trade_authority=false, source_scope=
+    #     LIVE_ONLY).
+    #   LIVE_AI_BRIEFING_FAILED         - the briefing could not be
+    #     produced (DeepSeek disabled / missing secret / HTTP failure).
+    #     A safe error; the process never crashes.
+    #   LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE - the evidence bundle
+    #     carried a non-LIVE source (SIM / BLIND / REPLAY / PAPER_SHADOW /
+    #     BACKTEST / OFFLINE_AI / TELEGRAM_SANDBOX) and was refused.
+    #   AI_FORBIDDEN_FIELD_STRIPPED     - the AI output carried a forbidden
+    #     trade-authority field; it was stripped (and the briefing marked
+    #     REJECTED_FOR_TRADE_AUTHORITY when present). Pairs with
+    #     DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY (PR111).
+    #   AI_TELEGRAM_BRIEFING_SENT       - a live-safe AI briefing card was
+    #     produced for / sent to an allowed Telegram chat (informational).
+    #   AI_TELEGRAM_BRIEFING_BLOCKED    - an AI Telegram briefing was
+    #     blocked (non-LIVE source, trade-authority leak, or a disallowed
+    #     command). No actionable card was sent.
+    LIVE_AI_BRIEFING_REQUESTED = "LIVE_AI_BRIEFING_REQUESTED"
+    LIVE_AI_BRIEFING_GENERATED = "LIVE_AI_BRIEFING_GENERATED"
+    LIVE_AI_BRIEFING_FAILED = "LIVE_AI_BRIEFING_FAILED"
+    LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE = (
+        "LIVE_AI_EVIDENCE_REJECTED_FOR_NONLIVE_SOURCE"
+    )
+    AI_FORBIDDEN_FIELD_STRIPPED = "AI_FORBIDDEN_FIELD_STRIPPED"
+    AI_TELEGRAM_BRIEFING_SENT = "AI_TELEGRAM_BRIEFING_SENT"
+    AI_TELEGRAM_BRIEFING_BLOCKED = "AI_TELEGRAM_BRIEFING_BLOCKED"
+
 
 # Capital-flow event types per Issue #2 / Spec §28.3.
 CAPITAL_EVENT_TYPES = frozenset(
