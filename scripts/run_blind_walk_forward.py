@@ -107,6 +107,11 @@ from app.sim import (  # noqa: E402
 from app.sim.paper_shadow_strategy_bridge import (  # noqa: E402
     DEFAULT_BRIDGE_NAME,
 )
+from app.sim.core_strategy_bridge import (  # noqa: E402
+    DEFAULT_CORE_BRIDGE_NAME,
+    CoreStrategyBridge,
+    CoreStrategyBridgeConfig,
+)
 
 
 PHASE_NAME: str = (
@@ -690,6 +695,117 @@ def _build_argparser() -> argparse.ArgumentParser:
         default=3,
         help="maximum concurrent simulated positions across symbols",
     )
+    # ----- PR109: Core Strategy Sim-Live Bridge (opt-in) -----
+    p.add_argument(
+        "--strategy-profile",
+        default="baseline",
+        choices=("baseline", "core"),
+        help=(
+            "PR109: which strategy expresses the blind run's decision "
+            "path. 'baseline' = the PR106 baseline_breakout_volume_v0 "
+            "paper-shadow rule (requires --enable-paper-shadow-strategy "
+            "to actually trade). 'core' = the AMA-RT core strategy "
+            "decision lifecycle (market regime -> candidate stage -> "
+            "opportunity score -> strategy selector) bridged in via a "
+            "CoreStrategyBridge. Selecting 'core' implies the bridge is "
+            "built and used. This NEVER authorises live trading, "
+            "auto-tuning, AI trade authority, real Telegram outbound, "
+            "the Binance private API, or Phase 12."
+        ),
+    )
+    p.add_argument(
+        "--enable-core-strategy-sim-live",
+        action="store_true",
+        help=(
+            "PR109: alias for --strategy-profile core. Enable the "
+            "AMA-RT core strategy decision lifecycle as the runner's "
+            "deterministic, paper-only decision path. Paper-only; "
+            "MockExchange + Simulated Capital Flow + PR108 safety floor "
+            "only. NEVER live trading / private API / real orders / "
+            "real capital / AI trade authority / Phase 12."
+        ),
+    )
+    p.add_argument(
+        "--core-bridge-name",
+        default=DEFAULT_CORE_BRIDGE_NAME,
+        help=(
+            "name recorded into the blind report's strategy_bridge_name "
+            "when --strategy-profile core (default core strategy v0)"
+        ),
+    )
+    p.add_argument(
+        "--core-momentum-lookback",
+        type=int,
+        default=3,
+        help=(
+            "core: recent CLOSED-bar window used to measure the "
+            "momentum that ignites a follow/pullback entry (must be < "
+            "--paper-shadow-breakout-lookback)"
+        ),
+    )
+    p.add_argument(
+        "--core-momentum-full-scale-pct",
+        type=float,
+        default=0.05,
+        help=(
+            "core: recent return that maps to a full (100) "
+            "momentum_strength score input"
+        ),
+    )
+    p.add_argument(
+        "--core-volume-full-scale-ratio",
+        type=float,
+        default=2.0,
+        help=(
+            "core: volume-vs-rolling-mean ratio that maps to a full "
+            "(100) volume_expansion score input"
+        ),
+    )
+    p.add_argument(
+        "--core-liquidity-reference-quote-volume",
+        type=float,
+        default=500_000.0,
+        help=(
+            "core: quote-volume (close*volume) that maps to a full "
+            "(100) liquidity_quality score input"
+        ),
+    )
+    p.add_argument(
+        "--core-late-chase-full-scale-pct",
+        type=float,
+        default=0.20,
+        help=(
+            "core: total run-up over the rolling window that maps to a "
+            "full (100) late_chase_risk score input"
+        ),
+    )
+    p.add_argument(
+        "--core-manipulation-wick-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "core: upper-wick-fraction multiplier mapped to the "
+            "manipulation_risk score input"
+        ),
+    )
+    p.add_argument(
+        "--core-min-opportunity-score",
+        type=float,
+        default=50.0,
+        help=(
+            "core: minimum opportunity score required to act on a "
+            "follow/pullback mode (the core selector still gates the "
+            "mode itself)"
+        ),
+    )
+    p.add_argument(
+        "--core-no-scale-notional-by-regime",
+        action="store_true",
+        help=(
+            "core: disable scaling the per-entry notional by the regime "
+            "risk multiplier (default: scale ON, the core risk path)"
+        ),
+    )
     # ----- PR103: Historical Store input glue -----
     p.add_argument(
         "--historical-store-dir",
@@ -865,13 +981,77 @@ def main(argv: List[str] = None) -> int:
     )
     exchange = MockExchange()
 
-    # PR106: optionally build the deterministic, paper-only Paper
-    # Shadow Strategy Bridge. It is bound to the capital-flow engine so
+    # PR109: resolve the strategy profile. ``--enable-core-strategy-sim-live``
+    # is an alias for ``--strategy-profile core``. The core profile
+    # implies a deterministic decision bridge is built and used.
+    strategy_profile = (
+        "core"
+        if (args.enable_core_strategy_sim_live or args.strategy_profile == "core")
+        else "baseline"
+    )
+
+    # PR106 / PR109: optionally build the deterministic, paper-only
+    # decision bridge. For the "core" profile this is the AMA-RT core
+    # strategy bridge (regime -> stage -> score -> selector); for the
+    # "baseline" profile it is the PR106 baseline_breakout_volume_v0
+    # shadow rule. Either bridge is bound to the capital-flow engine so
     # it can reconcile its per-symbol intent against the simulated
-    # position book. It carries NO trade authority, NO AI authority,
+    # position book. Both carry NO trade authority, NO AI authority,
     # NO auto-tuning, and NO live path.
     paper_shadow_bridge: Optional[PaperShadowStrategyBridge] = None
-    if args.enable_paper_shadow_strategy:
+    if strategy_profile == "core":
+        core_config = CoreStrategyBridgeConfig(
+            bridge_name=args.core_bridge_name,
+            timeframe=args.paper_shadow_timeframe,
+            breakout_lookback=int(args.paper_shadow_breakout_lookback),
+            min_history_bars=int(args.paper_shadow_breakout_lookback) + 1,
+            max_hold_bars=int(args.paper_shadow_max_hold_bars),
+            take_profit_pct=float(args.paper_shadow_take_profit_pct),
+            stop_loss_pct=float(args.paper_shadow_stop_loss_pct),
+            position_notional=float(args.paper_shadow_position_notional),
+            max_concurrent_positions=int(
+                args.paper_shadow_max_concurrent_positions
+            ),
+            momentum_lookback=int(args.core_momentum_lookback),
+            momentum_full_scale_pct=float(
+                args.core_momentum_full_scale_pct
+            ),
+            volume_full_scale_ratio=float(
+                args.core_volume_full_scale_ratio
+            ),
+            liquidity_reference_quote_volume=float(
+                args.core_liquidity_reference_quote_volume
+            ),
+            late_chase_full_scale_pct=float(
+                args.core_late_chase_full_scale_pct
+            ),
+            manipulation_wick_scale=float(
+                args.core_manipulation_wick_scale
+            ),
+            min_opportunity_score=float(args.core_min_opportunity_score),
+            scale_notional_by_regime=(
+                not args.core_no_scale_notional_by_regime
+            ),
+        )
+        paper_shadow_bridge = CoreStrategyBridge(
+            config=core_config,
+            capital_flow=capital,
+        )
+        _LOGGER.info(
+            "core strategy sim-live bridge enabled: name=%s timeframe=%s "
+            "breakout_lookback=%d momentum_lookback=%d "
+            "min_opportunity_score=%.2f max_hold_bars=%d "
+            "position_notional=%.4f scale_notional_by_regime=%s",
+            core_config.bridge_name,
+            core_config.timeframe,
+            core_config.breakout_lookback,
+            core_config.momentum_lookback,
+            core_config.min_opportunity_score,
+            core_config.max_hold_bars,
+            core_config.position_notional,
+            core_config.scale_notional_by_regime,
+        )
+    elif args.enable_paper_shadow_strategy:
         bridge_config = PaperShadowStrategyBridgeConfig(
             bridge_name=args.paper_shadow_bridge_name,
             timeframe=args.paper_shadow_timeframe,
@@ -927,12 +1107,14 @@ def main(argv: List[str] = None) -> int:
             ai_post_window_summary_enabled=(
                 not args.no_ai_post_window_summary
             ),
+            strategy_profile=strategy_profile,
             paper_shadow_strategy_enabled=bool(
-                args.enable_paper_shadow_strategy
+                strategy_profile != "core"
+                and args.enable_paper_shadow_strategy
             ),
             paper_shadow_strategy_bridge_name=(
-                args.paper_shadow_bridge_name
-                if args.enable_paper_shadow_strategy
+                paper_shadow_bridge.bridge_name
+                if paper_shadow_bridge is not None
                 else None
             ),
             data_manifest_hash=(
@@ -1022,11 +1204,21 @@ def main(argv: List[str] = None) -> int:
         ),
         # PR106 - paper shadow strategy operator summary.
         "paper_shadow_strategy_enabled": bool(
-            args.enable_paper_shadow_strategy
+            strategy_profile != "core"
+            and args.enable_paper_shadow_strategy
         ),
+        # PR109 - core strategy sim-live operator summary.
+        "strategy_profile": report_out.get(
+            "strategy_profile", strategy_profile
+        ),
+        "core_strategy_enabled": report_out.get(
+            "core_strategy_enabled", strategy_profile == "core"
+        ),
+        "symbols_scanned_count": report_out.get("symbols_scanned_count"),
+        "symbols_traded_count": report_out.get("symbols_traded_count"),
         "strategy_bridge_name": (
-            args.paper_shadow_bridge_name
-            if args.enable_paper_shadow_strategy
+            paper_shadow_bridge.bridge_name
+            if paper_shadow_bridge is not None
             else None
         ),
         "initial_capital": float(args.initial_capital),
