@@ -208,3 +208,102 @@ If the DeepSeek key is missing or disabled the briefing returns
 `/summarize_pnl`, `/summarize_rejections`) return informational cards only
 (`ai_trade_authority=false`, `no_order_instruction=true`). The 10U live
 launch still requires **PR116**.
+
+
+---
+
+# PR116 — 10U LIVE_LIMITED Launch Runbook
+
+This is the final live operator runbook. The full launch-pack reference is
+`docs/AMA_RT_10U_LIVE_LIMITED_LAUNCH_PACK.md`. Default behaviour stays safe:
+`LIVE_SHADOW`, no real orders, no trade authority, no AI trade authority.
+
+## Configure API keys
+
+  - Set `AMA_BINANCE_API_KEY` / `AMA_BINANCE_API_SECRET` from a key that
+    has **futures trade** but **no withdraw** permission.
+  - Set `AMA_BINANCE_ENABLE_PRIVATE_READ=true` to read the account.
+  - Keep `AMA_BINANCE_ENABLE_PRIVATE_TRADE=false` until Phase D.
+  - Set `AMA_TELEGRAM_BOT_TOKEN` + `AMA_TELEGRAM_ALLOWED_CHAT_IDS` (your
+    operator chat id) + `AMA_TELEGRAM_OUTBOUND_ENABLED=true`.
+  - Optionally set `AMA_DEEPSEEK_API_KEY` + `AMA_DEEPSEEK_ENABLED=true`.
+
+## Verify no withdraw permission
+
+Run the launch check and inspect the warnings. A key reporting a high-risk
+(withdraw / internal-transfer) permission raises a warning. PR116 does
+**not** require withdraw permission; if it is detectable, it is a NO-GO
+warning to fix on the exchange.
+
+## Phase A — No-key server validation
+
+  - `python -m pytest tests/unit -q` — all green.
+  - `python scripts/live_launch_check.py --json` — returns `WARN` (not
+    `FAIL`) for missing keys; `no_real_order_sent=true`; `go_for_live_shadow`
+    may be true once public market is reachable.
+  - No real order is ever sent.
+
+## Phase B — Real-key health check
+
+  - `python scripts/live_api_health_check.py --binance --telegram --deepseek --json`
+  - Binance public + private read OK; Telegram send test OK; DeepSeek OK.
+  - Private trade still **disabled**.
+
+## Phase C — LIVE_SHADOW
+
+  - `python scripts/live_shadow_run.py --once --json`
+  - `python scripts/live_shadow_run.py --loop --interval-seconds 60`
+  - `python scripts/live_shadow_run.py --once --send-telegram`
+  - Read the Telegram cards. **No real orders** (`real_order=false`).
+
+## Phase D — Arm LIVE_LIMITED
+
+  - Intentionally set the env: `AMA_LIVE_CAPITAL_PROFILE_ID=L1_10U_PROBE`,
+    `AMA_BINANCE_ENABLE_PRIVATE_TRADE=true`,
+    `AMA_LIVE_EXCHANGE_LIVE_ORDERS=true`, `AMA_LIVE_TRADE_AUTHORITY=true`,
+    `AMA_LIVE_EXECUTION_CONFIRM_CODE=<your-code>`.
+  - Telegram: `/mode live_limited` → returns a risk summary + a code.
+  - Telegram: `/confirm_live CODE`.
+  - Telegram: `/kill_all` → `/confirm_kill CODE` to arm the kill switch
+    (or arm it via the operator workflow), then re-arm operation as needed.
+  - `python scripts/live_launch_check.py --pre-live-limited --require-real-keys --json`
+  - Verify `go_for_live_limited=true` **only** when all gates pass.
+
+## Phase E — 10U tiny smoke
+
+  - Max notional `<= 1U` or the profile config; manually confirm.
+  - `python scripts/live_limited_smoke.py --dry-run --symbol RAVEUSDT --notional 1 --leverage 1 --json`
+  - When ready: `python scripts/live_limited_smoke.py --real-order --symbol RAVEUSDT --notional 1 --leverage 1 --i-understand-this-places-real-order --confirm-code <code> --json`
+  - Verify the order / fill / ledger / Telegram `LIVE_SMOKE_RESULT` card.
+  - Immediate stop conditions: kill switch + manual close on the exchange.
+
+## Phase F — Rollback
+
+  - Telegram: `/mode shadow` (disarms LIVE_LIMITED).
+  - Telegram: `/pause`.
+  - Telegram: `/kill_all` → `/confirm_kill`.
+  - Disable `AMA_LIVE_EXCHANGE_LIVE_ORDERS`, `AMA_LIVE_TRADE_AUTHORITY`,
+    `AMA_BINANCE_ENABLE_PRIVATE_TRADE`.
+  - Stop the runner.
+
+## Logs to save
+
+  - The `events.db` audit trail (mode switches, kill switch, order ledger).
+  - The launch-check JSON reports.
+  - The `LIVE_SMOKE_RESULT` cards + the `LiveOrderLedger` rows.
+
+## Explicit GO / NO-GO
+
+**GO for LIVE_SHADOW:** Binance public OK; no live orders; Telegram
+optional; system stable.
+
+**GO for LIVE_LIMITED:** real account read OK; `L1_10U` (or approved)
+profile active; usable capital capped; kill switch armed; Telegram allowed
+chat OK; `exchangeInfo` OK; DRY order validation OK; no blind/sim source in
+the live path; operator confirmation complete.
+
+**NO-GO:** private read fail; secret placeholder; withdraw-permission
+warning if detectable; profile mismatch unacknowledged; kill switch not
+armed; funding accounting unavailable; stop/exit plan unavailable; Telegram
+not configured for the live operator; source isolation failure; AI
+forbidden-field output accepted; execution gateway rejects.

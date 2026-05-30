@@ -102,6 +102,12 @@ HELP_COMMANDS: tuple[str, ...] = (
     "/resume",
     "/kill_all",
     "/confirm_kill CODE",
+    # PR116 - launch pack operator commands (read-only / dry-run).
+    "/launch_check",
+    "/live_readiness",
+    "/shadow_once",
+    "/live_smoke",
+    "/kill_status",
 )
 
 
@@ -150,6 +156,12 @@ def parse_command(text: str) -> ParsedCommand:
         "/kill_all",
         "/confirm_live",
         "/confirm_kill",
+        # PR116 launch-pack operator commands.
+        "/launch_check",
+        "/live_readiness",
+        "/shadow_once",
+        "/live_smoke",
+        "/kill_status",
     }
 
     if head == "/mode":
@@ -256,6 +268,9 @@ class TelegramCommandHandler:
         clock: Callable[[], int] = now_ms,
         confirmation_ttl_ms: int = DEFAULT_CONFIRMATION_TTL_MS,
         kill_switch_callback: Callable[[], dict[str, Any]] | None = None,
+        launch_readiness_provider: Callable[[], dict[str, Any]] | None = None,
+        shadow_run_provider: Callable[[], dict[str, Any]] | None = None,
+        smoke_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._store = state_store
         self._data = data_provider or LiveConsoleDataProvider()
@@ -267,6 +282,14 @@ class TelegramCommandHandler:
         # cancel/exit through the PR113 execution gateway + safety gate.
         # PR114 default is None (kill switch only arms + alerts).
         self._kill_switch_callback = kill_switch_callback
+        # PR116 OPTIONAL providers for the launch-pack operator commands.
+        # Each returns a card dict. None falls back to a local summary.
+        # The smoke provider is DRY-RUN only from Telegram (a real order
+        # never originates from a Telegram command; it must use the gated
+        # live_limited_smoke CLI path).
+        self._launch_readiness_provider = launch_readiness_provider
+        self._shadow_run_provider = shadow_run_provider
+        self._smoke_provider = smoke_provider
         self._load()
 
     # -- state load / reload ------------------------------------------
@@ -351,6 +374,12 @@ class TelegramCommandHandler:
             "/resume": self._cmd_resume,
             "/kill_all": self._cmd_kill_all,
             "/confirm_kill": self._cmd_confirm_kill,
+            # PR116 launch-pack operator commands (read-only / dry-run).
+            "/launch_check": self._cmd_launch_check,
+            "/live_readiness": self._cmd_launch_check,
+            "/shadow_once": self._cmd_shadow_once,
+            "/live_smoke": self._cmd_live_smoke,
+            "/kill_status": self._cmd_kill_status,
         }
         handler = dispatch[cmd.key]
         return handler(cmd)
@@ -754,6 +783,158 @@ class TelegramCommandHandler:
         if callback_result is not None:
             card["controlled_action"] = callback_result
         return self._ok(cmd.key, card, state_changed=True)
+
+    # -- PR116 launch-pack operator commands --------------------------
+    def _cmd_launch_check(self, cmd: ParsedCommand) -> CommandResult:
+        """Return a LIVE_READINESS_SUMMARY card (GO / NO-GO + blockers).
+
+        Uses the injected readiness provider when wired; otherwise builds
+        a compact local summary from the persisted state + safety flags.
+        Read-only: it NEVER places an order or changes state.
+        """
+        if self._launch_readiness_provider is not None:
+            try:
+                card = self._launch_readiness_provider()
+            except Exception:  # pragma: no cover - provider must not crash
+                card = self._local_readiness_card(error="readiness_provider_failed")
+        else:
+            card = self._local_readiness_card()
+        return self._ok(cmd.key, card)
+
+    def _cmd_shadow_once(self, cmd: ParsedCommand) -> CommandResult:
+        """Return a LIVE_SHADOW_SUMMARY card. Never places an order."""
+        if self._shadow_run_provider is not None:
+            try:
+                card = self._shadow_run_provider()
+            except Exception:  # pragma: no cover
+                card = self._local_shadow_card(error="shadow_provider_failed")
+        else:
+            card = self._local_shadow_card()
+        return self._ok(cmd.key, card)
+
+    def _cmd_live_smoke(self, cmd: ParsedCommand) -> CommandResult:
+        """Return a LIVE_SMOKE_RESULT card (DRY-RUN only from Telegram).
+
+        A real order NEVER originates from a Telegram command. The smoke
+        provider (if wired) MUST be dry-run only; the real-order smoke
+        requires the gated ``live_limited_smoke`` CLI with the explicit
+        acknowledgement flag + confirmation code.
+        """
+        if self._smoke_provider is not None:
+            try:
+                card = dict(self._smoke_provider())
+            except Exception:  # pragma: no cover
+                card = {"card_type": "LIVE_SMOKE_RESULT", "error": "smoke_provider_failed"}
+        else:
+            card = {
+                "card_type": "LIVE_SMOKE_RESULT",
+                "mode": "dry_run",
+                "note": (
+                    "Telegram /live_smoke is dry-run only. A real 10U smoke "
+                    "requires the gated live_limited_smoke CLI with "
+                    "--real-order --i-understand-this-places-real-order "
+                    "--confirm-code <code>."
+                ),
+            }
+        # Hard pins: a Telegram smoke can never report a real order.
+        card.setdefault("real_order", False)
+        card["no_real_order_sent"] = True if card.get("real_order") is not True else card.get(
+            "no_real_order_sent", False
+        )
+        card.setdefault("trade_authority", False)
+        card.setdefault("ai_trade_authority", False)
+        card.setdefault("exchange_live_orders", False)
+        card.setdefault("phase_12_forbidden", True)
+        return self._ok(cmd.key, card)
+
+    def _cmd_kill_status(self, cmd: ParsedCommand) -> CommandResult:
+        """Return a LIVE_KILL_STATUS card (armed / blocks-new-entries)."""
+        armed = bool(self._kill.armed)
+        controlled = self._kill_switch_callback is not None
+        card = {
+            "card_type": "LIVE_KILL_STATUS",
+            "armed": armed,
+            "blocks_new_entries": armed,
+            "armed_at": self._kill.armed_at,
+            "armed_by": self._kill.armed_by,
+            "reason": self._kill.reason,
+            "controlled_exit_supported": controlled,
+            "can_close_positions": armed and controlled,
+            "note": (
+                "Kill switch armed: new entries blocked. "
+                + (
+                    "Controlled reduce/exit is wired through the execution gateway."
+                    if controlled
+                    else "PR116 does not auto-close positions; close manually on the exchange."
+                )
+                if armed
+                else "Kill switch ready (not armed)."
+            ),
+            "real_order": False,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+            "exchange_live_orders": False,
+            "phase_12_forbidden": True,
+        }
+        return self._ok(cmd.key, card)
+
+    def _local_readiness_card(self, *, error: str | None = None) -> dict[str, Any]:
+        """A compact, network-free readiness summary from local state."""
+        flags = self._data.safety_flags()
+        equity = self._data.account_equity_usdt()
+        prof = get_profile(self._profile.capital_profile_id)
+        card = {
+            "card_type": "LIVE_READINESS_SUMMARY",
+            "runtime_mode": self._runtime.runtime_mode.value,
+            "mode_display": (
+                "空盘跑"
+                if self._runtime.runtime_mode is LiveRuntimeMode.LIVE_SHADOW
+                else "有资金跑"
+            ),
+            "capital_profile_id": self._profile.capital_profile_id.value,
+            "account_equity_usdt": equity,
+            "profile_max_account_capital_usdt": prof.max_account_capital_usdt,
+            "kill_switch_armed": self._kill.armed,
+            "live_limited_armed": self._runtime.live_limited_armed,
+            "exchange_live_orders": flags.get("exchange_live_orders", False),
+            "trade_authority": flags.get("trade_authority_flag", False),
+            "private_trade_enabled": flags.get("private_trade_enabled", False),
+            "binance_public_status": flags.get("binance_public_status"),
+            "binance_private_read_status": flags.get("binance_private_read_status"),
+            "telegram_outbound_status": flags.get("telegram_outbound_status"),
+            "deepseek_status": flags.get("deepseek_status"),
+            "note": (
+                "Compact local summary. Run scripts/live_launch_check.py "
+                "--pre-live-limited for the full GO/NO-GO check."
+            ),
+            "ai_trade_authority": False,
+            "real_order": False,
+            "no_real_order_sent": True,
+            "phase_12_forbidden": True,
+        }
+        if error:
+            card["error"] = error
+        return card
+
+    def _local_shadow_card(self, *, error: str | None = None) -> dict[str, Any]:
+        card = {
+            "card_type": "LIVE_SHADOW_SUMMARY",
+            "mode_display": "空盘跑",
+            "runtime_mode": LiveRuntimeMode.LIVE_SHADOW.value,
+            "capital_profile_id": self._profile.capital_profile_id.value,
+            "account_equity_usdt": self._data.account_equity_usdt(),
+            "open_position_count": len(self._data.positions()),
+            "note": "Run scripts/live_shadow_run.py --once for a full shadow iteration.",
+            "real_order": False,
+            "no_real_order_sent": True,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+            "exchange_live_orders": False,
+            "phase_12_forbidden": True,
+        }
+        if error:
+            card["error"] = error
+        return card
 
     # -- helpers -------------------------------------------------------
     def _real_order_allowed(self) -> bool:

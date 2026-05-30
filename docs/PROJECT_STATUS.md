@@ -5,6 +5,40 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR116 (10U LIVE_LIMITED Launch Pack v0)
+
+> **PR116 — 10U LIVE_LIMITED Launch Pack v0: End-to-End Live Readiness,
+> Shadow Run, Controlled Real-Order Arming, Kill Switch, Runbook.**
+> **Status: IN_REVIEW.**
+> **Type: the final launch pack — the first stage that MAY support real
+> 10U `LIVE_LIMITED` operation, only behind every gate.**
+
+PR116 wires PR110–PR115 into a controlled, operator-confirmed,
+small-capital real-money runtime. New modules under `app/live/`:
+`live_launch_models.py`, `live_runtime.py`, `live_launch_readiness.py`,
+`live_shadow_runner.py`, `live_limited_arming.py`, `live_kill_switch.py`.
+CLIs: `scripts/live_launch_check.py`, `scripts/live_shadow_run.py`,
+`scripts/live_limited_smoke.py`. Docs:
+`docs/AMA_RT_10U_LIVE_LIMITED_LAUNCH_PACK.md` + the Phase A–F runbook in
+`docs/AMA_RT_LIVE_OPERATOR_RUNBOOK.md`.
+
+Hard boundary held by PR116 (default state stays safe):
+
+  - **No default real trading.** `runtime_mode=LIVE_SHADOW`,
+    `exchange_live_orders=false`, `trade_authority=false`,
+    `ai_trade_authority=false`, `live_trading=false`, **no real order by
+    default**. A real 10U order is only possible behind the full env +
+    Telegram `/mode live_limited` + `/confirm_live` + armed kill switch +
+    `LiveExecutionGateway` + `LiveRiskDecision` handshake.
+  - **Capital scaling without a new PR.** The runtime reads the active
+    capital profile dynamically; switching `L1_10U_PROBE` → any ladder
+    profile changes every cap with no code change. No auto escalation;
+    equity above band emits `CAPITAL_PROFILE_MISMATCH` and caps usable
+    capital.
+  - **Isolation re-asserted.** Only `OrderSource.LIVE` drives live
+    operation; sim / blind / replay / paper-shadow / `MockExchange` /
+    `HistoricalMarketStore` can never reach the live path.
+
 ## Live road map — PR115 (DeepSeek Live Intelligence v0)
 
 > **PR115 — DeepSeek Live Intelligence v0: Live-safe Operator Briefing +
