@@ -379,6 +379,20 @@ from app.sim.paper_shadow_strategy_bridge import (
     PaperShadowStrategyBridgeConfig,
     PaperShadowStrategyBridgeDiagnostics,
 )
+from app.sim.core_strategy_bridge import (
+    PHASE_NAME as CORE_STRATEGY_BRIDGE_PHASE_NAME,
+)
+from app.sim.core_strategy_bridge import (
+    CORE_STRATEGY_PROFILE,
+)
+from app.sim.core_strategy_bridge import (
+    DEFAULT_CORE_BRIDGE_NAME,
+)
+from app.sim.core_strategy_bridge import (
+    CoreStrategyBridge,
+    CoreStrategyBridgeConfig,
+    CoreStrategySignalReason,
+)
 
 __all__ = [
     "PHASE_NAME",
@@ -415,6 +429,12 @@ __all__ = [
     "PaperShadowStrategyBridge",
     "PaperShadowStrategyBridgeConfig",
     "PaperShadowStrategyBridgeDiagnostics",
+    "CORE_STRATEGY_BRIDGE_PHASE_NAME",
+    "CORE_STRATEGY_PROFILE",
+    "DEFAULT_CORE_BRIDGE_NAME",
+    "CoreStrategyBridge",
+    "CoreStrategyBridgeConfig",
+    "CoreStrategySignalReason",
     "blind_walk_forward_safety_payload",
     "compute_artefact_hash",
     "score_blind_run",

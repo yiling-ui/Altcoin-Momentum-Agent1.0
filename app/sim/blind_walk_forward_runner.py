@@ -501,6 +501,14 @@ class BlindWalkForwardRunnerConfig:
     # argument. Both default OFF (substrate-only v0 behaviour).
     paper_shadow_strategy_enabled: bool = False
     paper_shadow_strategy_bridge_name: Optional[str] = None
+    # PR109: strategy profile selector. ``"baseline"`` is the PR106
+    # baseline_breakout_volume_v0 shadow rule; ``"core"`` is the
+    # AMA-RT core strategy decision lifecycle (regime -> stage -> score
+    # -> selector) bridged in via a CoreStrategyBridge. This is a pure
+    # reporting/identity flag; the actual decision path is still the
+    # bridge object passed to the constructor. It NEVER authorises live
+    # trading, auto-tuning, AI trade authority, or Phase 12.
+    strategy_profile: str = "baseline"
     # Frozen artefact source bundles; the runner hashes each on
     # ``prepare_manifest`` to fill ``BlindRunManifest`` hashes.
     config_artefact: Mapping[str, Any] = field(default_factory=dict)
@@ -589,6 +597,11 @@ class BlindWalkForwardRunnerConfig:
             raise ValueError(
                 "paper_shadow_strategy_bridge_name must be a non-empty "
                 "string or None"
+            )
+        if self.strategy_profile not in ("baseline", "core"):
+            raise ValueError(
+                "strategy_profile must be 'baseline' or 'core'; got "
+                f"{self.strategy_profile!r}"
             )
         if not isinstance(self.code_commit, str) or not self.code_commit:
             raise ValueError("code_commit must be a non-empty string")
@@ -791,6 +804,29 @@ class BlindWalkForwardRunner:
             if paper_shadow_bridge is not None
             else config.paper_shadow_strategy_bridge_name
         )
+        # PR109: strategy profile + core-strategy bridge detection. The
+        # profile is taken from the config; the core flag is True only
+        # when a deterministic strategy bridge is active AND the profile
+        # is "core". ``_strategy_bridge_active`` mirrors the legacy
+        # ``_paper_shadow_enabled`` (a deterministic decision bridge is
+        # wired), independent of which profile it expresses. These are
+        # pure reporting flags; none of them carries trade / AI / tuning
+        # authority.
+        self._strategy_profile: str = str(config.strategy_profile)
+        self._strategy_bridge_active: bool = self._paper_shadow_enabled
+        self._core_strategy_enabled: bool = bool(
+            self._strategy_bridge_active
+            and self._strategy_profile == "core"
+        )
+        # PR109: as-of universe coverage bookkeeping. ``_symbols_scanned``
+        # is the union of every symbol the runner saw a CLOSED, as-of
+        # visible kline for during the blind window; ``_symbols_traded``
+        # is the subset that produced at least one simulated entry. Both
+        # are paper-only counters surfaced into the report so an operator
+        # can confirm the run scanned a full as-of universe and not a
+        # hardcoded handful of symbols.
+        self._symbols_scanned: set = set()
+        self._symbols_traded: set = set()
         # Enriched, paper-only simulated trade records + per-symbol
         # open-trade metadata used to stamp entry-time equity / side /
         # leverage onto the closed-trade record (PR106 brief §6).
@@ -1946,6 +1982,23 @@ class BlindWalkForwardRunner:
         for k in batch.klines_5m:
             kline_by_tf["5m"] = kline_by_tf.get("5m", 0) + 1
         kline_total = sum(kline_by_tf.values())
+        # PR109: accumulate the as-of universe coverage. Every symbol
+        # with a CLOSED, as-of visible kline this step, plus every
+        # symbol the provider reports in the as-of universe, counts as
+        # "scanned" (the provider never emits a future / unclosed
+        # record, so this set is strictly as-of).
+        for k in batch.klines_1m:
+            sym = getattr(k, "symbol", None)
+            if isinstance(sym, str) and sym:
+                self._symbols_scanned.add(sym)
+        for k in batch.klines_5m:
+            sym = getattr(k, "symbol", None)
+            if isinstance(sym, str) and sym:
+                self._symbols_scanned.add(sym)
+        for rec in batch.asof_universe:
+            sym = getattr(rec, "symbol", None)
+            if isinstance(sym, str) and sym:
+                self._symbols_scanned.add(sym)
         entry: Dict[str, Any] = {
             "step": self._steps_run,
             "simulated_time": ensure_utc_aware(
@@ -2209,6 +2262,8 @@ class BlindWalkForwardRunner:
             "equity_before": float(equity_before),
         }
         self._paper_shadow_entry_count += 1
+        if isinstance(symbol, str) and symbol:
+            self._symbols_traded.add(symbol)
         notional = entry_price * qty
         self._append_paper_shadow_telegram(
             title="SIM_ENTRY",
@@ -2801,8 +2856,12 @@ class BlindWalkForwardRunner:
             simulated_time=self._config.window.blind_end,
             body_lines=[
                 f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                f"strategy_profile={self._strategy_profile}",
+                f"core_strategy_enabled={self._core_strategy_enabled}",
                 "paper_shadow_strategy_enabled="
-                f"{self._paper_shadow_enabled}",
+                f"{bool(self._strategy_bridge_active and self._strategy_profile != 'core')}",
+                f"symbols_scanned_count={len(self._symbols_scanned)}",
+                f"symbols_traded_count={len(self._symbols_traded)}",
                 f"entry_signals={self._paper_shadow_entry_count}",
                 f"exit_signals={self._paper_shadow_exit_count}",
                 f"reject_signals={len(self._paper_shadow_rejections)}",
@@ -2869,7 +2928,15 @@ class BlindWalkForwardRunner:
                 self._discovery_quality_steps
             ),
             # PR106 - Paper Shadow Strategy Bridge reporting (brief §9).
-            "paper_shadow_strategy_enabled": self._paper_shadow_enabled,
+            "paper_shadow_strategy_enabled": bool(
+                self._strategy_bridge_active
+                and self._strategy_profile != "core"
+            ),
+            # PR109 - Core Strategy Sim-Live Bridge reporting (brief §10).
+            "strategy_profile": self._strategy_profile,
+            "core_strategy_enabled": self._core_strategy_enabled,
+            "symbols_scanned_count": len(self._symbols_scanned),
+            "symbols_traded_count": len(self._symbols_traded),
             "strategy_bridge_name": self._paper_shadow_bridge_name,
             "trade_count": int(ledger_summary.get("trade_count", 0)),
             "closed_trade_count": int(
@@ -3005,11 +3072,26 @@ class BlindWalkForwardRunner:
         lines.append("## Paper shadow strategy")
         lines.append("")
         lines.append(
+            f"- strategy_profile: `{report.get('strategy_profile')}`"
+        )
+        lines.append(
+            "- core_strategy_enabled: "
+            f"`{report.get('core_strategy_enabled')}`"
+        )
+        lines.append(
             "- paper_shadow_strategy_enabled: "
             f"`{report.get('paper_shadow_strategy_enabled')}`"
         )
         lines.append(
             f"- strategy_bridge_name: `{report.get('strategy_bridge_name')}`"
+        )
+        lines.append(
+            "- symbols_scanned_count: "
+            f"`{report.get('symbols_scanned_count')}`"
+        )
+        lines.append(
+            "- symbols_traded_count: "
+            f"`{report.get('symbols_traded_count')}`"
         )
         lines.append(
             f"- trade_count: `{report.get('trade_count')}`"
