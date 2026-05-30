@@ -7,6 +7,83 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR111 — API Integration Pack v0: Binance + Telegram + DeepSeek API Health & Permission Layer: IN_REVIEW
+
+**Type:** Live-API foundation (real read connectivity for the
+real-capital road map). **No live orders.** **No leverage / margin
+change.** **No AI trade authority.** **LIVE_SHADOW is the default.**
+
+**Runtime effect on trading:** none. PR111 builds real API clients,
+secret loading, permission + health checks, account / funding / fee
+reads, a Telegram test-message path, and a DeepSeek test-briefing path,
+but the order path stays hard-blocked.
+
+**Added — `app/live/` package:**
+
+  - `secrets.py` — `SecretValue` (raw value never in repr/str/dict/json;
+    revealed only for HTTP signing), `mask_secret` (`abc***xyz`),
+    `load_secret`. Missing secret never crashes (`API_HEALTH_MISSING_SECRET`).
+  - `api_config.py` — `LiveRuntimeMode` (default `LIVE_SHADOW`; PR111
+    never escalates to LIVE_LIMITED/LIVE_FULL), env-driven
+    `BinanceApiConfig` / `TelegramApiConfig` / `DeepSeekApiConfig` /
+    `GeneralLiveConfig` / `LiveApiConfig.from_env`.
+  - `capital_events.py` — `CapitalEvent` contract (funding / commission /
+    realized PnL / transfers). Funding never mixed with trading PnL;
+    `net_strategy_pnl = gross_realized_pnl - commission_total + funding_total`.
+    Unattributed funding marked `UNATTRIBUTED_PENDING_POSITION_LINK`.
+  - `binance_models.py`, `binance_permissions.py`, `binance_client.py` —
+    layered Binance client (PUBLIC_MARKET / PRIVATE_READ / PRIVATE_TRADE).
+    PRIVATE_TRADE is interface-only and blocked (`TRADE_API_BLOCKED_BY_PR111`
+    / `LiveTradeNotEnabled`); no HTTP order request is ever built. HMAC
+    signing for private reads; precision helpers
+    (`normalize_order_quantity` / `normalize_order_price` /
+    `validate_min_notional` / `validate_symbol_tradable`); high-risk
+    (withdraw) permission warning.
+  - `telegram_client.py`, `telegram_health.py` — token masking, outbound
+    gate (off by default -> `TELEGRAM_OUTBOUND_DISABLED`), explicit
+    opt-in test message, PR110 operator-contract message banner.
+  - `deepseek_client.py`, `deepseek_health.py` — key masking, chat
+    completion wrapper with retry/backoff, JSON briefing, AND a
+    trade-authority validator that strips/flags forbidden fields
+    (`should_buy` / `direction` / `leverage` / `stop_price` / ...);
+    `ai_trade_authority=false` pinned.
+  - `health.py` — unified `LiveApiHealthReport` + `run_unified_health_check`
+    + `build_safety_flags`.
+
+**Added — CLI:** `scripts/live_api_health_check.py`
+(`--all` / `--binance` / `--telegram` / `--deepseek` / `--json` /
+`--send-telegram-test`). Running it never places orders, never switches
+mode, never enables live trading, never changes leverage/margin, never
+sends Telegram unless `--send-telegram-test`, never calls DeepSeek unless
+`--deepseek`/`--all`.
+
+**Added — audit events (`app/core/events.py`):**
+`API_SECRET_LOADED_MASKED`, `API_HEALTH_CHECK_STARTED`,
+`API_HEALTH_CHECK_COMPLETED`, `BINANCE_PUBLIC_HEALTH_OK`,
+`BINANCE_PRIVATE_READ_OK`, `BINANCE_PRIVATE_TRADE_BLOCKED`,
+`BINANCE_PERMISSION_WARNING`, `BINANCE_ACCOUNT_SNAPSHOT_READ`,
+`BINANCE_INCOME_HISTORY_READ`, `FUNDING_EVENT_DETECTED`,
+`COMMISSION_EVENT_DETECTED`, `TELEGRAM_TEST_MESSAGE_SENT`,
+`TELEGRAM_OUTBOUND_DISABLED`, `DEEPSEEK_HEALTH_OK`,
+`DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY`. Every payload is
+secret-safe.
+
+**Added — errors (`app/core/errors.py`):** `LiveTradeNotEnabled`
+(subclass of `SafeModeViolation`), `LiveApiError`.
+
+**Added — docs:** `docs/AMA_RT_API_INTEGRATION_PACK.md`,
+`docs/AMA_RT_LIVE_API_SETUP.md`; `.env.example` extended with the PR111
+live API variables (no real secrets).
+
+**Tests:** `tests/unit/test_pr111_*.py` — fake/mock transports only, no
+real API calls.
+
+**PR110 handoff:** `LiveRuntimeMode` and the `CapitalEvent` contract are
+self-contained and shaped to be unified with the PR110 Live Path
+Isolation / runtime modes once both land. **HANDOFF(PR113/PR114):**
+position-level funding attribution must be added before real live PnL is
+final.
+
 ### Phase 11C.1D-D — PR108 — Simulated Capital Safety Floor / Kill Switch / No Negative Equity Guard: IN_REVIEW
 
 **Type:** Capital-safety bugfix (paper / sim-live / evidence-only

@@ -5,6 +5,43 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR111 (API Integration Pack v0)
+
+> **PR111 — API Integration Pack v0: Binance API + Telegram Bot API +
+> DeepSeek API Health & Permission Layer.**
+> **Status: IN_REVIEW.**
+> **Type: live-API foundation (real read connectivity; NO live orders).**
+
+PR111 opens the real-capital road map. It adds the `app/live/` package:
+real Binance / Telegram / DeepSeek API clients, env-based secret loading
+with masking, Binance permission + health checks, account / balance /
+position / income reads, funding & commission accounting into a Capital
+Event contract, a Telegram test-message path, a DeepSeek test-briefing
+path, and a unified health-check CLI (`scripts/live_api_health_check.py`).
+
+Hard boundary held by PR111:
+
+  - **No real order is placed, cancelled, or modified.** The Binance
+    `PRIVATE_TRADE` layer is interface-only; every method returns
+    `TRADE_API_BLOCKED_BY_PR111` or raises `LiveTradeNotEnabled`, and no
+    HTTP order request is ever built.
+  - **No leverage / margin change. No auto-switch to LIVE_LIMITED.**
+  - **`LIVE_SHADOW` is the default runtime mode** and is never escalated
+    by PR111.
+  - **AI has no trade authority** — DeepSeek output is
+    MARKET_INTELLIGENCE_ONLY and `ai_trade_authority=false` is pinned.
+  - **No secret is ever hard-coded, logged, exported, or placed in an
+    exception / Telegram message.** Only masked forms surface.
+
+PR110 handoff: PR111 ships a self-contained `LiveRuntimeMode` and Capital
+Event contract shaped to be unified with the PR110 Live Path Isolation /
+runtime modes once both land. The next PR is the live capital / risk /
+execution integration (LIVE_LIMITED 10U small-capital path), still behind
+the Risk Engine + Execution FSM.
+
+See `docs/AMA_RT_API_INTEGRATION_PACK.md` and
+`docs/AMA_RT_LIVE_API_SETUP.md`.
+
 ## Current phase
 
 > **Phase 11C.1D-D — Simulated Capital Safety Floor / Kill Switch /
