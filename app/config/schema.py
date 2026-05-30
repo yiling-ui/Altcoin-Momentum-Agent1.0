@@ -493,6 +493,112 @@ class SafetyConfig(BaseModel):
         return value
 
 
+class LiveConfig(BaseModel):
+    """PR110 - Live Foundation v0 config + persisted state.
+
+    This section holds the live-preparation runtime mode, the active
+    capital profile, the persisted operator confirmation state, the
+    kill-switch flag, and the PR110 feature toggles.
+
+    Hard safety rule: the dangerous flags below are *assertions* locked
+    to their safe values by the validators. A deployment that flips any
+    of them is refused at boot. PR110 does not enable live trading, does
+    not connect the private Binance API, does not place orders, and does
+    not enable real Telegram outbound.
+
+    The ``runtime_mode`` field is validated to one of ``LIVE_SHADOW`` /
+    ``LIVE_LIMITED`` but the runtime guard
+    (:class:`app.live.runtime_mode.LiveModeGuard.from_config`) ALWAYS
+    boots in ``LIVE_SHADOW`` regardless of this value, so a config edit
+    can never silently arm ``LIVE_LIMITED`` on a restart.
+    """
+
+    # Live-preparation runtime state.
+    runtime_mode: str = "LIVE_SHADOW"
+    capital_profile_id: str = "L0_SHADOW"
+    live_limited_confirmation_state: bool = False
+    live_limited_armed_at: int | None = None
+    live_limited_armed_by: str | None = None
+    kill_switch_armed: bool = False
+
+    # PR110 feature toggles (foundation features default ON; the
+    # dangerous capabilities default OFF and are locked OFF).
+    live_path_isolation_enabled: bool = True
+    capital_profile_ladder_enabled: bool = True
+    right_tail_leverage_gate_enabled: bool = True
+
+    # Locked-safe capability flags.
+    live_trading: bool = False
+    exchange_live_orders: bool = False
+    binance_private_api_enabled: bool = False
+    ai_trade_authority: bool = False
+    trade_authority: bool = False
+    right_tail_live_boost_enabled: bool = False
+    phase_12_forbidden: bool = True
+
+    @field_validator("runtime_mode")
+    @classmethod
+    def _runtime_mode_known(cls, value: str) -> str:
+        allowed = {"LIVE_SHADOW", "LIVE_LIMITED"}
+        if value not in allowed:
+            raise ValueError(
+                f"live.runtime_mode must be one of {sorted(allowed)}; got {value!r}"
+            )
+        return value
+
+    @field_validator("capital_profile_id")
+    @classmethod
+    def _capital_profile_known(cls, value: str) -> str:
+        # Closed ladder; mirrors app.live.capital_profile.CapitalProfileId.
+        allowed = {
+            "L0_SHADOW",
+            "L1_1U_MICRO_PROBE",
+            "L1_10U_PROBE",
+            "L2_25U_50U_SCOUT",
+            "L3_100U_ATTACK_TEST",
+            "L4_1K_GROWTH",
+            "L5_10K_PROFIT_PROTECTION",
+            "L6_100K_LIQUIDITY_CONSTRAINED",
+            "L7_1M_INSTITUTIONAL_STYLE",
+            "L8_10M_CAPITAL_PRESERVATION",
+        }
+        if value not in allowed:
+            raise ValueError(
+                f"live.capital_profile_id must be one of {sorted(allowed)}; got {value!r}"
+            )
+        return value
+
+    @field_validator(
+        "live_trading",
+        "exchange_live_orders",
+        "binance_private_api_enabled",
+        "ai_trade_authority",
+        "trade_authority",
+        "right_tail_live_boost_enabled",
+    )
+    @classmethod
+    def _capability_flag_locked_false(cls, value: bool, info) -> bool:
+        if value:
+            raise ValueError(
+                f"live.{info.field_name} must remain False in PR110; "
+                "PR110 builds the live safety foundation only and does not "
+                "enable live trading, the private Binance API, real orders, "
+                "or right-tail live leverage boost. Flipping this requires a "
+                "future Go/No-Go landing in a separate PR."
+            )
+        return value
+
+    @field_validator("phase_12_forbidden")
+    @classmethod
+    def _phase_12_must_remain_forbidden(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError(
+                "live.phase_12_forbidden must remain True; Phase 12 is "
+                "forbidden by PR110 and every prior phase."
+            )
+        return value
+
+
 class DefaultsConfig(BaseModel):
     """Schema for `app/config/defaults.yaml`."""
 
@@ -511,6 +617,7 @@ class DefaultsConfig(BaseModel):
     strategy_validation: StrategyValidationSection = Field(
         default_factory=StrategyValidationSection
     )
+    live: LiveConfig = Field(default_factory=LiveConfig)
 
 
 class RiskThresholds(BaseModel):
