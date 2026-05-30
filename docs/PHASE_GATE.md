@@ -8,6 +8,53 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR114 — Telegram Operator Console v0 + Live Funding Attribution (IN_REVIEW)
+
+**PR114 — real Telegram operator desk + first funding/commission
+attribution to the live ledger + operator workflow + blind/replay/sim
+isolation hardening.** PR114 lets the operator drive the live console
+from Telegram but does **NOT** loosen any Phase 1 safety flag:
+
+  - The console holds **no** Binance execution adapter and exposes **no**
+    path that flips `exchange_live_orders` / `trade_authority`. A Telegram
+    command can never place a naked order, nor bypass the Risk Engine, the
+    PR113 Execution Gateway, the Capital Profile, or the kill switch.
+  - `runtime_mode` defaults `LIVE_SHADOW`; `LIVE_LIMITED` is never armed by
+    default or on a bare restart. `/mode live_limited` only returns a
+    confirmation code + risk summary; `/confirm_live CODE` arms
+    `LIVE_LIMITED` only when the code matches + is unexpired + the profile
+    allows real orders + `LIVE_LIMITED` is in `profile.mode_allowed` + the
+    kill switch is off — and arming still does **not** enable real orders.
+  - Only allow-listed chat ids may run a command (empty allow-list fails
+    closed); unauthorised → `TELEGRAM_UNAUTHORIZED_COMMAND`. Outbound is
+    disabled unless `AMA_TELEGRAM_OUTBOUND_ENABLED=true` and not
+    `--dry-run`; otherwise `TELEGRAM_OUTBOUND_SUPPRESSED`. No secret ever
+    reaches a message body (redactor + `assert_no_forbidden_substrings`).
+  - `ai_trade_authority` stays `False`; an AI / `OFFLINE_AI` source can
+    never run a state-changing command. A non-`LIVE` source
+    (`SIM`/`BLIND`/`REPLAY`/`PAPER_SHADOW`/`BACKTEST`/`OFFLINE_AI`/
+    `TELEGRAM_SANDBOX`) attempting any live mutation → `LIVE_SOURCE_REJECTED`;
+    order-path attempts remain `LIVE_PATH_BLOCKED` (PR110 guard).
+  - Funding attribution: `net_pnl = gross − commission + funding`; funding
+    inside a holding interval is attributed to the trade/position; outside
+    stays account-level; overlapping same-symbol positions →
+    `AMBIGUOUS_MULTIPLE_POSITIONS` (deterministic notional allocation);
+    unlinkable → `UNATTRIBUTED_PENDING_POSITION_LINK`. No funding dropped.
+  - Persistent state under `data/live_state/` (atomic writes); corrupt /
+    armed-without-confirmation both fail safe to `LIVE_SHADOW`.
+    `phase_12_forbidden` recorded `True`.
+
+Gate criteria for the NEXT slice (PR115/PR116 — pre-launch hardening +
+10U launch): operator can run `scripts/live_telegram_operator.py
+--status-json` and see `no_real_order_sent=true`, the current
+`LIVE_SHADOW`/`LIVE_LIMITED` source, and every safety flag false; the
+real-order path stays blocked unless every PR113 gate + all confirmation
+flags are satisfied. Acceptance evidence:
+`docs/AMA_RT_TELEGRAM_OPERATOR_CONSOLE.md`,
+`docs/AMA_RT_LIVE_OPERATOR_RUNBOOK.md`,
+`tests/unit/test_pr114_telegram_operator.py`. **PR114 is not the final
+10U launch.**
+
 ## Open slice — PR113 — Live Execution Gateway v0 (IN_REVIEW)
 
 **PR113 — Binance order execution adapter + order lifecycle + fill

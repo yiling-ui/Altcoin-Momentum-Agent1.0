@@ -567,16 +567,33 @@ class OrderSource(str, Enum):
       - ``BLIND``        : Blind Walk-forward Runner origin.
       - ``REPLAY``       : ReplayFeedProvider origin.
       - ``PAPER_SHADOW`` : Paper Shadow Strategy Bridge origin.
+      - ``BACKTEST``     : offline backtest / historical replay origin
+                           (PR114). A research path; never live.
+      - ``OFFLINE_AI``   : offline DeepSeek / rule-sandbox / reflection
+                           origin (PR114). Intelligence only; never live.
+      - ``TELEGRAM_SANDBOX`` : Telegram Sandbox Outbox origin (PR114).
+                           A simulated outbound surface; never live.
       - ``LIVE``         : the ONLY source a real
                            LiveExchangeAdapter / LiveExecutionGateway
                            may ever attach. PR110 does not implement
                            that adapter; it only reserves the source.
+
+    PR114 hardening: ``SIM`` / ``BLIND`` / ``REPLAY`` / ``PAPER_SHADOW``
+    / ``BACKTEST`` / ``OFFLINE_AI`` / ``TELEGRAM_SANDBOX`` are ALL
+    non-live research / simulation labels. None of them may ever reach
+    the live execution gateway, change the live runtime mode / capital
+    profile / risk / kill switch, or trigger a Telegram live order. Any
+    such attempt is refused (``LIVE_PATH_BLOCKED`` at the order gateway,
+    ``LIVE_SOURCE_REJECTED`` at the operator console / live mutators).
     """
 
     SIM = "SIM"
     BLIND = "BLIND"
     REPLAY = "REPLAY"
     PAPER_SHADOW = "PAPER_SHADOW"
+    BACKTEST = "BACKTEST"
+    OFFLINE_AI = "OFFLINE_AI"
+    TELEGRAM_SANDBOX = "TELEGRAM_SANDBOX"
     LIVE = "LIVE"
 
     @property

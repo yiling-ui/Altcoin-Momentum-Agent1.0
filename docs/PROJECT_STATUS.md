@@ -5,6 +5,62 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR114 (Telegram Operator Console v0 + Live Funding Attribution)
+
+> **PR114 — Telegram Operator Console v0 + Live Funding Attribution +
+> Operator Workflow + Blind/Replay/Sim Isolation hardening.**
+> **Status: IN_REVIEW.**
+> **Type: real Telegram operator desk (gated outbound) — the console can
+> NEVER place a naked order; real order code stays BLOCKED by default.**
+
+PR114 adds a real Telegram operating desk so the operator can see the
+system, switch 空盘跑 (`LIVE_SHADOW`) / request 有资金跑
+(`LIVE_LIMITED`), view account / positions / PnL / risk, and receive
+readable operator cards — without bypassing the Risk Engine, the
+Execution Gateway, the Capital Profile, or the kill switch. It also adds
+the first version of funding / commission attribution to the live
+order / position / trade ledger. New modules under `app/live/`:
+`telegram_operator.py`, `telegram_commands.py`, `telegram_formatters.py`,
+`telegram_state.py`, `telegram_auth.py`, `funding_attribution.py`. CLI:
+`scripts/live_telegram_operator.py`.
+
+Hard boundary held by PR114 (default state stays safe):
+
+  - **No real order, ever, from Telegram.** The console holds no Binance
+    execution adapter and exposes no path that flips
+    `exchange_live_orders` / `trade_authority`. `LIVE_SHADOW` is the
+    default; `LIVE_LIMITED` is never armed by default or on a bare
+    restart.
+  - **Mode switch is a two-step handshake.** `/mode live_limited` returns
+    a confirmation code + risk summary (mode unchanged); `/confirm_live
+    CODE` arms `LIVE_LIMITED` only when the code matches + is unexpired +
+    the profile allows real orders + the kill switch is off. Arming does
+    **not** itself enable real orders.
+  - **Only allow-listed chat ids** may run a command (empty allow-list
+    fails closed); an unauthorised chat is refused +
+    `TELEGRAM_UNAUTHORIZED_COMMAND`.
+  - **Outbound is gated**: disabled unless
+    `AMA_TELEGRAM_OUTBOUND_ENABLED=true` and not `--dry-run`; otherwise
+    `TELEGRAM_OUTBOUND_SUPPRESSED`. No secret ever reaches a message body.
+  - **Funding is never hidden**: `net_pnl = gross − commission + funding`;
+    funding inside a holding interval → trade/position; outside → account
+    level; overlapping same-symbol positions → `AMBIGUOUS_MULTIPLE_POSITIONS`
+    (deterministic notional allocation); unlinkable →
+    `UNATTRIBUTED_PENDING_POSITION_LINK`. No funding event is dropped.
+  - **Blind/replay/sim isolation hardened**: a non-`LIVE` source
+    (`SIM`/`BLIND`/`REPLAY`/`PAPER_SHADOW`/`BACKTEST`/`OFFLINE_AI`/
+    `TELEGRAM_SANDBOX`) attempting any live mutation is refused +
+    `LIVE_SOURCE_REJECTED`; order-path attempts stay `LIVE_PATH_BLOCKED`.
+  - Persistent state under `data/live_state/` (atomic writes); corrupt
+    state + armed-without-confirmation both fail safe to `LIVE_SHADOW`.
+  - Safety defaults unchanged: `phase_12_forbidden=true`,
+    `live_trading=false`, `exchange_live_orders=false`,
+    `trade_authority=false`, `ai_trade_authority=false`,
+    `runtime_mode=LIVE_SHADOW`. **Not the final 10U launch (PR116).**
+
+See `docs/AMA_RT_TELEGRAM_OPERATOR_CONSOLE.md` and
+`docs/AMA_RT_LIVE_OPERATOR_RUNBOOK.md`.
+
 ## Live road map — PR113 (Live Execution Gateway v0)
 
 > **PR113 — Live Execution Gateway v0: Binance Order Execution Adapter +
