@@ -104,6 +104,9 @@ from app.sim.mock_exchange import (
     MockFill,
     OrderRequest,
 )
+from app.sim.paper_shadow_strategy_bridge import (
+    PaperShadowStrategyBridge,
+)
 from app.sim.pessimistic_fill_model import (
     AmbiguousIntrabarPolicy,
     PessimisticFillModel,
@@ -420,6 +423,12 @@ class BlindWalkForwardRunnerConfig:
     telegram_sandbox_enabled: bool = True
     auto_tuning_inside_blind_window: bool = False
     phase_12_forbidden: bool = True
+    # PR106: Paper Shadow Strategy Bridge opt-in markers. These are
+    # purely informational manifest/report flags; the actual decision
+    # path is supplied via the ``paper_shadow_bridge`` constructor
+    # argument. Both default OFF (substrate-only v0 behaviour).
+    paper_shadow_strategy_enabled: bool = False
+    paper_shadow_strategy_bridge_name: Optional[str] = None
     # Frozen artefact source bundles; the runner hashes each on
     # ``prepare_manifest`` to fill ``BlindRunManifest`` hashes.
     config_artefact: Mapping[str, Any] = field(default_factory=dict)
@@ -497,6 +506,18 @@ class BlindWalkForwardRunnerConfig:
                 raise ValueError(
                     f"{fname} must be True in blind walk-forward v0"
                 )
+        if not isinstance(self.paper_shadow_strategy_enabled, bool):
+            raise TypeError(
+                "paper_shadow_strategy_enabled must be bool"
+            )
+        if self.paper_shadow_strategy_bridge_name is not None and (
+            not isinstance(self.paper_shadow_strategy_bridge_name, str)
+            or not self.paper_shadow_strategy_bridge_name
+        ):
+            raise ValueError(
+                "paper_shadow_strategy_bridge_name must be a non-empty "
+                "string or None"
+            )
         if not isinstance(self.code_commit, str) or not self.code_commit:
             raise ValueError("code_commit must be a non-empty string")
         if (
@@ -585,6 +606,7 @@ class BlindWalkForwardRunner:
         mock_exchange: MockExchange,
         telegram_sandbox: TelegramSandboxOutbox,
         decision_callback: Optional[DecisionCallback] = None,
+        paper_shadow_bridge: Optional[PaperShadowStrategyBridge] = None,
         feature_cache: Optional[AsOfFeatureCache] = None,
         heartbeat_every_steps: int = DEFAULT_HEARTBEAT_EVERY_STEPS,
     ) -> None:
@@ -644,6 +666,67 @@ class BlindWalkForwardRunner:
         self._capital_flow: SimulatedCapitalFlowEngine = capital_flow
         self._mock_exchange: MockExchange = mock_exchange
         self._telegram: TelegramSandboxOutbox = telegram_sandbox
+        # PR106: optional Paper Shadow Strategy Bridge. When supplied it
+        # acts as the decision callback (it is callable). It is a
+        # paper-only, deterministic, no-AI-authority decision path.
+        if paper_shadow_bridge is not None:
+            if not isinstance(
+                paper_shadow_bridge, PaperShadowStrategyBridge
+            ):
+                raise TypeError(
+                    "paper_shadow_bridge must be "
+                    "PaperShadowStrategyBridge; got "
+                    f"{type(paper_shadow_bridge)!r}"
+                )
+            if decision_callback is not None:
+                raise ValueError(
+                    "provide either decision_callback or "
+                    "paper_shadow_bridge, not both"
+                )
+            # Defensive: the bridge can never carry trade / AI / tuning
+            # authority.
+            for attr in (
+                "ai_trade_authority",
+                "trade_authority",
+                "auto_tuning_allowed",
+                "live_trading",
+                "exchange_live_orders",
+                "binance_private_api_enabled",
+            ):
+                if getattr(paper_shadow_bridge, attr, False) is not False:
+                    raise ValueError(
+                        f"paper_shadow_bridge.{attr} must be False"
+                    )
+            if getattr(paper_shadow_bridge, "phase_12_forbidden", True) \
+                    is not True:
+                raise ValueError(
+                    "paper_shadow_bridge.phase_12_forbidden must be True"
+                )
+            # Bind the capital-flow position book so the bridge can
+            # reconcile its per-symbol intent against the real
+            # simulated position state.
+            paper_shadow_bridge.attach_capital_flow(capital_flow)
+            decision_callback = paper_shadow_bridge
+        self._paper_shadow_bridge: Optional[PaperShadowStrategyBridge] = (
+            paper_shadow_bridge
+        )
+        self._paper_shadow_enabled: bool = bool(
+            config.paper_shadow_strategy_enabled
+            or paper_shadow_bridge is not None
+        )
+        self._paper_shadow_bridge_name: Optional[str] = (
+            paper_shadow_bridge.bridge_name
+            if paper_shadow_bridge is not None
+            else config.paper_shadow_strategy_bridge_name
+        )
+        # Enriched, paper-only simulated trade records + per-symbol
+        # open-trade metadata used to stamp entry-time equity / side /
+        # leverage onto the closed-trade record (PR106 brief §6).
+        self._paper_shadow_trades: List[Dict[str, Any]] = []
+        self._paper_shadow_open_meta: Dict[str, Dict[str, Any]] = {}
+        self._paper_shadow_rejections: List[Dict[str, Any]] = []
+        self._paper_shadow_entry_count: int = 0
+        self._paper_shadow_exit_count: int = 0
         self._decision_callback: Optional[DecisionCallback] = (
             decision_callback
         )
@@ -738,6 +821,24 @@ class BlindWalkForwardRunner:
     @property
     def batches_consumed(self) -> int:
         return self._batches_consumed
+
+    @property
+    def paper_shadow_strategy_enabled(self) -> bool:
+        return self._paper_shadow_enabled
+
+    @property
+    def paper_shadow_strategy_bridge_name(self) -> Optional[str]:
+        return self._paper_shadow_bridge_name
+
+    @property
+    def paper_shadow_trades(self) -> Tuple[Dict[str, Any], ...]:
+        return tuple(copy.deepcopy(x) for x in self._paper_shadow_trades)
+
+    @property
+    def paper_shadow_rejections(self) -> Tuple[Dict[str, Any], ...]:
+        return tuple(
+            copy.deepcopy(x) for x in self._paper_shadow_rejections
+        )
 
     # ------------------------------------------------------------------
     # Manifest preparation / freezing
@@ -961,8 +1062,19 @@ class BlindWalkForwardRunner:
 
         # 3) Forward fills into capital flow + telegram sandbox.
         for fill in new_fills:
+            # Capture pre-fill open-position / equity so the enriched
+            # paper-only simulated trade record can stamp side / entry
+            # price / equity transitions (PR106 brief §6). All reads
+            # are paper-only in-memory state; no real account is read.
+            symbol = getattr(fill, "symbol", None)
+            prev_position = (
+                self._open_position_for(symbol)
+                if isinstance(symbol, str) and symbol
+                else None
+            )
+            equity_before = self._capital_flow.current_marked_equity()
             try:
-                self._capital_flow.consume_fill(fill)
+                closed_entry = self._capital_flow.consume_fill(fill)
             except Exception as exc:
                 self._record_failure(
                     kind="capital_flow_consume_error",
@@ -970,9 +1082,31 @@ class BlindWalkForwardRunner:
                     simulated_time=new_st,
                 )
                 raise
+            equity_after = self._capital_flow.current_marked_equity()
             self._emit_telegram_fill(fill=fill, simulated_time=new_st)
+            if closed_entry is not None:
+                # The fill fully closed a simulated position -> SIM_EXIT.
+                self._handle_simulated_exit(
+                    fill=fill,
+                    closed_entry=closed_entry,
+                    prev_position=prev_position,
+                    equity_after=equity_after,
+                    simulated_time=new_st,
+                )
+            elif isinstance(symbol, str) and symbol:
+                now_position = self._open_position_for(symbol)
+                if prev_position is None and now_position is not None:
+                    # The fill opened a NEW simulated position ->
+                    # SIM_ENTRY.
+                    self._handle_simulated_entry(
+                        fill=fill,
+                        position=now_position,
+                        equity_before=equity_before,
+                        equity_after=equity_after,
+                        simulated_time=new_st,
+                    )
 
-        # 4) Decision callback (strategy-less in v0).
+        # 4) Decision callback (paper-shadow bridge or strategy-less).
         orders: Sequence[OrderRequest] = ()
         if self._decision_callback is not None:
             try:
@@ -992,6 +1126,17 @@ class BlindWalkForwardRunner:
                     raise TypeError(
                         f"decision_callback must return OrderRequest "
                         f"objects; got {type(req)!r}"
+                    )
+            # PR106: drain any deterministic paper-shadow rejections the
+            # bridge recorded for this step and surface them as
+            # SIM_REJECT transcript entries. A rejection is NEVER a
+            # silent skip: it is logged so the operator can see a valid
+            # signal that was suppressed (e.g. concurrency cap, or a
+            # record that failed the as-of / closed-candle gate).
+            if self._paper_shadow_bridge is not None:
+                for rej in self._paper_shadow_bridge.drain_rejections():
+                    self._handle_simulated_reject(
+                        rejection=rej, simulated_time=new_st
                     )
 
         # 5) Submit orders WITHOUT a replay_batch; they will fill
@@ -1062,6 +1207,10 @@ class BlindWalkForwardRunner:
         except Exception:  # pragma: no cover - defensive
             pass
         self._phase = _RunnerPhase.BLIND_COMPLETE
+        # PR106: emit a paper-shadow WINDOW_SUMMARY transcript entry so
+        # a file-based monitor sees a closing summary of the simulated
+        # trading activity for this blind window.
+        self._emit_window_summary()
         self._emit_telegram_status(
             severity=TelegramSandboxSeverity.INFO,
             title="Blind walk-forward window complete",
@@ -1469,6 +1618,40 @@ class BlindWalkForwardRunner:
         _write_json("no_lookahead_violations.json", violations_dict)
         _write_json("blind_walk_forward_report.json", report_dict)
 
+        # PR106: paper-shadow simulated trades + rejections sidecar so a
+        # reviewer can see every simulated entry / exit / reject with
+        # the enriched fields (side / leverage / entry+exit price / pnl
+        # / pnl_pct / equity_before / equity_after / signal_reason /
+        # as_of_refs). The canonical PR98 trade ledger remains the
+        # source of truth in trade_ledger.json; this is an enriched,
+        # paper-only view of the same closed trades.
+        paper_shadow_dict = {
+            "run_id": self._manifest.run_id,
+            "window_id": self._manifest.window.window_id,
+            "paper_shadow_strategy_enabled": self._paper_shadow_enabled,
+            "strategy_bridge_name": self._paper_shadow_bridge_name,
+            "no_paper_shadow_signals": bool(
+                self._paper_shadow_enabled
+                and self._paper_shadow_entry_count == 0
+            ),
+            "entry_signal_count": self._paper_shadow_entry_count,
+            "exit_signal_count": self._paper_shadow_exit_count,
+            "trades": [
+                copy.deepcopy(t) for t in self._paper_shadow_trades
+            ],
+            "rejections": [
+                copy.deepcopy(r) for r in self._paper_shadow_rejections
+            ],
+            "is_blind_walk_forward_payload": True,
+        }
+        if self._paper_shadow_bridge is not None:
+            paper_shadow_dict["bridge"] = (
+                self._paper_shadow_bridge.to_dict()
+            )
+        paper_shadow_dict.update(_safety_payload())
+        assert_no_forbidden_fields(paper_shadow_dict)
+        _write_json("paper_shadow_trades.json", paper_shadow_dict)
+
         # Telegram sandbox transcript (markdown).
         transcript_path = os.path.join(
             target_root, "telegram_sandbox_transcript.md"
@@ -1725,6 +1908,339 @@ class BlindWalkForwardRunner:
         except Exception:  # pragma: no cover - telegram is sandbox
             pass
 
+    # ------------------------------------------------------------------
+    # PR106 - Paper Shadow Strategy Bridge helpers
+    # ------------------------------------------------------------------
+
+    def _open_position_for(self, symbol: Optional[str]) -> Optional[Any]:
+        """Return the OPEN simulated position for ``symbol`` or None.
+
+        Read-only view of the (PR98) Simulated Capital Flow position
+        book. Paper-only: never reads a real account.
+        """
+        if not isinstance(symbol, str) or not symbol:
+            return None
+        for p in self._capital_flow.get_positions():
+            if getattr(p, "symbol", None) == symbol:
+                return p
+        return None
+
+    @staticmethod
+    def _extract_signal_reason(
+        evidence_refs: Iterable[Any],
+    ) -> Optional[str]:
+        for r in evidence_refs or ():
+            if isinstance(r, str) and r.startswith("signal:"):
+                return r[len("signal:"):]
+        return None
+
+    def _paper_shadow_leverage(self) -> float:
+        if self._paper_shadow_bridge is not None:
+            try:
+                return float(self._paper_shadow_bridge.leverage)
+            except Exception:  # pragma: no cover - defensive
+                return 1.0
+        return 1.0
+
+    def _append_paper_shadow_telegram(
+        self,
+        *,
+        title: str,
+        message_type: str,
+        body_lines: Sequence[str],
+        simulated_time: datetime,
+        symbol: Optional[str] = None,
+        severity: str = TelegramSandboxSeverity.INFO,
+        evidence_refs: Tuple[str, ...] = (),
+    ) -> None:
+        """Append a paper-shadow transcript message.
+
+        Every message carries the four mandatory simulated markers in
+        its body (in addition to the four labels the renderer always
+        prepends): ``SIMULATED_ONLY`` / ``NO_LIVE_ORDER`` /
+        ``NO_REAL_CAPITAL`` / ``NO_COMMAND_AUTHORITY``.
+        """
+        if not self._config.telegram_sandbox_enabled:
+            return
+        header = [
+            title,
+            "SIMULATED_ONLY",
+            "NO_LIVE_ORDER",
+            "NO_REAL_CAPITAL",
+            "NO_COMMAND_AUTHORITY",
+        ]
+        body = "\n".join(list(header) + list(body_lines))
+        run_id = self._manifest.run_id if self._manifest else "unknown"
+        self._telegram_message_counter += 1
+        message_id = (
+            f"bwf_{run_id}_paper_shadow_"
+            f"{self._telegram_message_counter:06d}"
+        )
+        sym = symbol if isinstance(symbol, str) and symbol else None
+        try:
+            msg = TelegramSandboxMessage(
+                message_id=message_id,
+                timestamp_simulated=ensure_utc_aware(
+                    simulated_time, "simulated_time"
+                ),
+                message_type=message_type,
+                severity=severity,
+                title=title,
+                body=body,
+                symbol=sym,
+                evidence_refs=tuple(evidence_refs),
+            )
+            self._telegram.append_message(msg)
+        except Exception:  # pragma: no cover - telegram is sandbox
+            pass
+
+    def _handle_simulated_entry(
+        self,
+        *,
+        fill: MockFill,
+        position: Any,
+        equity_before: float,
+        equity_after: float,
+        simulated_time: datetime,
+    ) -> None:
+        symbol = getattr(fill, "symbol", "")
+        side = getattr(position, "side", None) or (
+            "LONG"
+            if getattr(fill, "side", None) == "BUY"
+            else "SHORT"
+        )
+        entry_price = float(
+            getattr(position, "avg_entry_price", None)
+            or getattr(fill, "fill_price", 0.0)
+        )
+        qty = float(
+            getattr(position, "qty", None)
+            or getattr(fill, "filled_qty", 0.0)
+        )
+        leverage = self._paper_shadow_leverage()
+        signal_reason = self._extract_signal_reason(
+            getattr(fill, "evidence_refs", ())
+        )
+        self._paper_shadow_open_meta[symbol] = {
+            "side": side,
+            "leverage": leverage,
+            "entry_price": entry_price,
+            "entry_qty": qty,
+            "entry_signal_reason": signal_reason,
+            "equity_before": float(equity_before),
+        }
+        self._paper_shadow_entry_count += 1
+        notional = entry_price * qty
+        self._append_paper_shadow_telegram(
+            title="SIM_ENTRY",
+            message_type=(
+                TelegramSandboxMessageType.SIMULATED_ENTRY_ALERT
+            ),
+            simulated_time=simulated_time,
+            symbol=symbol if isinstance(symbol, str) else None,
+            evidence_refs=tuple(getattr(fill, "evidence_refs", ())),
+            body_lines=[
+                f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                f"symbol={symbol}",
+                f"side={side}",
+                f"leverage={leverage}",
+                f"entry_price={entry_price}",
+                f"quantity={qty}",
+                f"notional={notional}",
+                f"signal_reason={signal_reason}",
+                f"equity_after={float(equity_after)}",
+            ],
+        )
+
+    def _handle_simulated_exit(
+        self,
+        *,
+        fill: MockFill,
+        closed_entry: TradeLedgerEntry,
+        prev_position: Optional[Any],
+        equity_after: float,
+        simulated_time: datetime,
+    ) -> None:
+        symbol = closed_entry.symbol
+        side = (
+            getattr(prev_position, "side", None)
+            if prev_position is not None
+            else None
+        )
+        if side is None:
+            # SELL closes a LONG; BUY closes a SHORT.
+            side = (
+                "LONG"
+                if getattr(fill, "side", None) == "SELL"
+                else "SHORT"
+            )
+        entry_price = float(closed_entry.avg_fill_price)
+        exit_price = float(getattr(fill, "fill_price", 0.0))
+        qty = float(closed_entry.filled_qty)
+        notional = entry_price * qty
+        net_pnl = float(closed_entry.net_pnl)
+        pnl_pct = (net_pnl / notional * 100.0) if notional > 0.0 else 0.0
+        meta = self._paper_shadow_open_meta.pop(symbol, {})
+        equity_before = float(meta.get("equity_before", 0.0))
+        leverage = float(
+            meta.get("leverage", self._paper_shadow_leverage())
+        )
+        entry_signal_reason = meta.get("entry_signal_reason")
+        exit_signal_reason = self._extract_signal_reason(
+            getattr(fill, "evidence_refs", ())
+        )
+        record: Dict[str, Any] = {
+            "trade_id": closed_entry.trade_id,
+            "run_id": (
+                self._manifest.run_id if self._manifest else "unknown"
+            ),
+            "window_id": (
+                self._manifest.window.window_id
+                if self._manifest
+                else "unknown"
+            ),
+            "symbol": symbol,
+            "side": side,
+            "leverage_ratio": leverage,
+            "entry_time": (
+                closed_entry.entry_time.isoformat()
+                if closed_entry.entry_time is not None
+                else None
+            ),
+            "exit_time": (
+                closed_entry.exit_time.isoformat()
+                if closed_entry.exit_time is not None
+                else None
+            ),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "quantity": qty,
+            "notional": notional,
+            "fees": float(closed_entry.fee),
+            "slippage_bps": float(closed_entry.slippage_bps),
+            "realized_pnl": net_pnl,
+            "pnl_pct": pnl_pct,
+            "equity_before": equity_before,
+            "equity_after": float(equity_after),
+            "exit_reason": closed_entry.exit_reason,
+            "entry_signal_reason": entry_signal_reason,
+            "exit_signal_reason": exit_signal_reason,
+            "signal_reason": entry_signal_reason or exit_signal_reason,
+            "outcome": closed_entry.outcome,
+            "evidence_refs": list(closed_entry.evidence_refs),
+            "as_of_refs": [
+                r
+                for r in closed_entry.evidence_refs
+                if isinstance(r, str) and r.startswith("asof:")
+            ],
+            "bridge_name": self._paper_shadow_bridge_name,
+            # Hard-pinned per-trade safety markers (PR106 brief §6).
+            "is_simulated": True,
+            "no_live_order": True,
+            "phase_12_forbidden": True,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+        }
+        assert_no_forbidden_fields(record)
+        self._paper_shadow_trades.append(record)
+        self._paper_shadow_exit_count += 1
+        self._append_paper_shadow_telegram(
+            title="SIM_EXIT",
+            message_type=(
+                TelegramSandboxMessageType.SIMULATED_EXIT_ALERT
+            ),
+            simulated_time=simulated_time,
+            symbol=symbol,
+            evidence_refs=tuple(closed_entry.evidence_refs),
+            body_lines=[
+                f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                f"symbol={symbol}",
+                f"side={side}",
+                f"leverage={leverage}",
+                f"entry_price={entry_price}",
+                f"exit_price={exit_price}",
+                f"quantity={qty}",
+                f"realized_pnl={net_pnl}",
+                f"pnl_pct={pnl_pct}",
+                f"outcome={closed_entry.outcome}",
+                f"exit_reason={closed_entry.exit_reason}",
+                f"signal_reason={exit_signal_reason}",
+                f"equity_after={float(equity_after)}",
+            ],
+        )
+
+    def _handle_simulated_reject(
+        self,
+        *,
+        rejection: Mapping[str, Any],
+        simulated_time: datetime,
+    ) -> None:
+        rec = dict(rejection)
+        rec.setdefault("is_simulated", True)
+        rec.setdefault("no_live_order", True)
+        rec.setdefault("trade_authority", False)
+        rec.setdefault("ai_trade_authority", False)
+        rec.setdefault("phase_12_forbidden", True)
+        assert_no_forbidden_fields(rec)
+        self._paper_shadow_rejections.append(rec)
+        symbol = rec.get("symbol")
+        self._append_paper_shadow_telegram(
+            title="SIM_REJECT",
+            message_type=TelegramSandboxMessageType.RISK_REJECTION,
+            simulated_time=simulated_time,
+            symbol=symbol if isinstance(symbol, str) else None,
+            severity=TelegramSandboxSeverity.NOTICE,
+            body_lines=[
+                f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                f"symbol={symbol}",
+                f"reject_reason={rec.get('reason')}",
+                f"detail={rec.get('detail')}",
+            ],
+        )
+
+    def _emit_window_summary(self) -> None:
+        """Emit a paper-shadow WINDOW_SUMMARY transcript entry.
+
+        Called once at blind-window close. Summarises the simulated
+        trading activity (counts + realised PnL) so a file-based
+        monitor can show a closing window summary.
+        """
+        if not self._config.telegram_sandbox_enabled:
+            return
+        summary = self._capital_flow.get_ledger().summary().to_dict()
+        no_signals = bool(
+            self._paper_shadow_enabled
+            and self._paper_shadow_entry_count == 0
+        )
+        self._append_paper_shadow_telegram(
+            title="WINDOW_SUMMARY",
+            message_type=(
+                TelegramSandboxMessageType.MONTHLY_BLIND_TEST_SUMMARY
+            ),
+            simulated_time=self._config.window.blind_end,
+            body_lines=[
+                f"bridge={self._paper_shadow_bridge_name or 'none'}",
+                "paper_shadow_strategy_enabled="
+                f"{self._paper_shadow_enabled}",
+                f"entry_signals={self._paper_shadow_entry_count}",
+                f"exit_signals={self._paper_shadow_exit_count}",
+                f"reject_signals={len(self._paper_shadow_rejections)}",
+                f"trade_count={int(summary.get('trade_count', 0))}",
+                "closed_trade_count="
+                f"{int(summary.get('trade_count', 0))}",
+                f"win_count={int(summary.get('win_count', 0))}",
+                f"loss_count={int(summary.get('loss_count', 0))}",
+                "breakeven_count="
+                f"{int(summary.get('breakeven_count', 0))}",
+                "total_realized_pnl="
+                f"{float(summary.get('total_realized_pnl', 0.0))}",
+                f"max_drawdown={float(summary.get('max_drawdown', 0.0))}",
+                f"no_paper_shadow_signals={no_signals}",
+                "equity_after="
+                f"{self._capital_flow.current_marked_equity()}",
+            ],
+        )
+
     def _build_report_dict(self) -> Dict[str, Any]:
         manifest = self._manifest
         score = self._score
@@ -1732,6 +2248,13 @@ class BlindWalkForwardRunner:
             raise RuntimeError(
                 "report cannot be built before scoring"
             )
+        ledger_summary = (
+            self._capital_flow.get_ledger().summary().to_dict()
+        )
+        no_paper_shadow_signals = bool(
+            self._paper_shadow_enabled
+            and self._paper_shadow_entry_count == 0
+        )
         out: Dict[str, Any] = {
             "run_id": manifest.run_id,
             "window_id": manifest.window.window_id,
@@ -1739,12 +2262,11 @@ class BlindWalkForwardRunner:
             "code_commit": manifest.code_commit,
             "manifest": manifest.to_dict(),
             "score": score.to_dict(),
-            "ledger_summary": self._capital_flow.get_ledger()
-            .summary()
-            .to_dict(),
+            "ledger_summary": ledger_summary,
             "steps_run": self._steps_run,
             "batches_consumed": self._batches_consumed,
             "violations_count": len(self._violations),
+            "no_lookahead_violations_count": len(self._violations),
             "invalidations": [
                 copy.deepcopy(x) for x in self._invalidations
             ],
@@ -1752,6 +2274,35 @@ class BlindWalkForwardRunner:
             "discovery_quality_step_count": len(
                 self._discovery_quality_steps
             ),
+            # PR106 - Paper Shadow Strategy Bridge reporting (brief §9).
+            "paper_shadow_strategy_enabled": self._paper_shadow_enabled,
+            "strategy_bridge_name": self._paper_shadow_bridge_name,
+            "trade_count": int(ledger_summary.get("trade_count", 0)),
+            "closed_trade_count": int(
+                ledger_summary.get("trade_count", 0)
+            ),
+            "total_realized_pnl": float(
+                ledger_summary.get("total_realized_pnl", 0.0)
+            ),
+            "max_drawdown": float(
+                ledger_summary.get("max_drawdown", 0.0)
+            ),
+            "win_count": int(ledger_summary.get("win_count", 0)),
+            "loss_count": int(ledger_summary.get("loss_count", 0)),
+            "breakeven_count": int(
+                ledger_summary.get("breakeven_count", 0)
+            ),
+            "paper_shadow_entry_signal_count": (
+                self._paper_shadow_entry_count
+            ),
+            "paper_shadow_exit_signal_count": (
+                self._paper_shadow_exit_count
+            ),
+            "paper_shadow_reject_count": len(
+                self._paper_shadow_rejections
+            ),
+            "paper_shadow_trade_count": len(self._paper_shadow_trades),
+            "no_paper_shadow_signals": no_paper_shadow_signals,
             "is_blind_walk_forward_report": True,
             "next_allowed_step": (
                 "blind_walk_forward_operator_evidence_run_or_checkpoint"
@@ -1762,6 +2313,10 @@ class BlindWalkForwardRunner:
             "this_authorises_binance_private_api": False,
             "this_authorises_phase_12": False,
         }
+        if self._paper_shadow_bridge is not None:
+            out["paper_shadow_strategy_bridge"] = (
+                self._paper_shadow_bridge.to_dict()
+            )
         if self._post_window_ai_summary is not None:
             out["post_window_ai_summary"] = copy.deepcopy(
                 self._post_window_ai_summary
@@ -1822,6 +2377,35 @@ class BlindWalkForwardRunner:
         )
         lines.append(
             f"- total_realized_pnl: `{score['total_realized_pnl']}`"
+        )
+        lines.append("")
+        lines.append("## Paper shadow strategy")
+        lines.append("")
+        lines.append(
+            "- paper_shadow_strategy_enabled: "
+            f"`{report.get('paper_shadow_strategy_enabled')}`"
+        )
+        lines.append(
+            f"- strategy_bridge_name: `{report.get('strategy_bridge_name')}`"
+        )
+        lines.append(
+            f"- trade_count: `{report.get('trade_count')}`"
+        )
+        lines.append(
+            "- paper_shadow_entry_signal_count: "
+            f"`{report.get('paper_shadow_entry_signal_count')}`"
+        )
+        lines.append(
+            "- paper_shadow_exit_signal_count: "
+            f"`{report.get('paper_shadow_exit_signal_count')}`"
+        )
+        lines.append(
+            "- paper_shadow_reject_count: "
+            f"`{report.get('paper_shadow_reject_count')}`"
+        )
+        lines.append(
+            "- no_paper_shadow_signals: "
+            f"`{report.get('no_paper_shadow_signals')}`"
         )
         lines.append("")
         lines.append("## Manifest hashes")

@@ -360,6 +360,19 @@ from app.sim.blind_walk_forward_runner import (
     DecisionCallback,
     MultiTimeframeAsOfGuard,
 )
+from app.sim.paper_shadow_strategy_bridge import (
+    PHASE_NAME as PAPER_SHADOW_STRATEGY_BRIDGE_PHASE_NAME,
+)
+from app.sim.paper_shadow_strategy_bridge import (
+    DEFAULT_BRIDGE_NAME as PAPER_SHADOW_DEFAULT_BRIDGE_NAME,
+)
+from app.sim.paper_shadow_strategy_bridge import (
+    PaperShadowRejectReason,
+    PaperShadowSignalReason,
+    PaperShadowStrategyBridge,
+    PaperShadowStrategyBridgeConfig,
+    PaperShadowStrategyBridgeDiagnostics,
+)
 
 __all__ = [
     "PHASE_NAME",
@@ -389,6 +402,13 @@ __all__ = [
     "BlindWalkForwardWindow",
     "DecisionCallback",
     "MultiTimeframeAsOfGuard",
+    "PAPER_SHADOW_STRATEGY_BRIDGE_PHASE_NAME",
+    "PAPER_SHADOW_DEFAULT_BRIDGE_NAME",
+    "PaperShadowRejectReason",
+    "PaperShadowSignalReason",
+    "PaperShadowStrategyBridge",
+    "PaperShadowStrategyBridgeConfig",
+    "PaperShadowStrategyBridgeDiagnostics",
     "blind_walk_forward_safety_payload",
     "compute_artefact_hash",
     "score_blind_run",
