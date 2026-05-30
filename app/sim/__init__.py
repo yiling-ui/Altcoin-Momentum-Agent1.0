@@ -269,6 +269,7 @@ from app.sim.simulated_capital_flow import (
 )
 from app.sim.simulated_capital_flow import (
     CapitalFrozenError,
+    MaxActivePositionsReachedError,
     PositionSide,
     PositionStatus,
     RiskFreezeReason,
@@ -425,6 +426,7 @@ __all__ = [
     "AmbiguousIntrabarPolicy",
     "CandleVisibilityGuard",
     "CapitalFrozenError",
+    "MaxActivePositionsReachedError",
     "ConservativeAssumption",
     "DataCompletenessState",
     "DataQualityFlag",

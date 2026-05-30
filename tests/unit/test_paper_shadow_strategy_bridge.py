@@ -48,9 +48,12 @@ from app.sim import (
     BlindWalkForwardRunner,
     BlindWalkForwardRunnerConfig,
     BlindWalkForwardWindow,
+    FillReason,
     HistoricalKlineRecord,
     HistoricalMarketStore,
     MockExchange,
+    MockFill,
+    MockOrderSide,
     PaperShadowRejectReason,
     PaperShadowSignalReason,
     PaperShadowStrategyBridge,
@@ -740,3 +743,91 @@ def test_bridge_config_to_dict_has_no_forbidden_fields():
     # leverage must be surfaced under the guard-safe key.
     assert "leverage" not in d
     assert d["leverage_ratio"] == 1.0
+
+
+
+# ---------------------------------------------------------------------------
+# PR107 hotfix: a bridge entry signal that hits the capital-flow
+# max_active_positions cap must be SIM_REJECTed (not crash the run).
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_entry_sim_rejected_when_at_max_active_positions(tmp_path):
+    # Capital flow caps at ONE concurrent position and is already
+    # holding one (pre-opened on an unrelated symbol). The bridge's own
+    # concurrency cap is high, so the runner-level max_active_positions
+    # gate is the one that binds. The deterministic BTCUSDT breakout
+    # entry must be rejected with reason=max_active_positions_reached
+    # while the blind run completes EVIDENCE_GENERATED.
+    capital = SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=100.0, max_active_positions=1
+        )
+    )
+    # Seed one open position on a different symbol before the window.
+    capital.consume_fill(
+        MockFill(
+            fill_id="seed_fill_0001",
+            order_id="seed_order_0001",
+            symbol="ETHUSDT",
+            side=MockOrderSide.BUY,
+            filled_qty=1.0,
+            fill_price=10.0,
+            fee=0.0,
+            slippage_bps=0.0,
+            fill_reason=FillReason.MARKET_FILL,
+            filled_at_simulated=_T0 - timedelta(minutes=2),
+        )
+    )
+    assert len(capital.get_positions()) == 1
+
+    bridge = PaperShadowStrategyBridge(
+        config=PaperShadowStrategyBridgeConfig(
+            breakout_lookback=3,
+            volume_multiplier=1.2,
+            min_history_bars=4,
+            max_hold_bars=2,
+            take_profit_pct=0.5,
+            stop_loss_pct=0.5,
+            position_notional=20.0,
+            max_concurrent_positions=5,  # high so the runner gate binds
+        ),
+        capital_flow=capital,
+    )
+    runner = _make_runner(tmpdir=tmp_path, bridge=bridge, capital=capital)
+    out = runner.run()  # must NOT raise
+
+    assert out["score"]["status"] == BlindRunStatus.EVIDENCE_GENERATED
+    # The bridge fired its breakout entry signal once...
+    assert bridge.diagnostics.entry_signals == 1
+    # ...but it was rejected, so NO new BTCUSDT position opened (only
+    # the seeded ETHUSDT remains) and the cap was NOT raised.
+    assert len(capital.get_positions()) == 1
+    assert capital.config.max_active_positions == 1
+    rejections = runner.paper_shadow_rejections
+    assert any(
+        r.get("reason") == "max_active_positions_reached"
+        for r in rejections
+    )
+    # SIM_REJECT visible in the file-only transcript.
+    text = Path(
+        out["paths"]["telegram_sandbox_transcript.md"]
+    ).read_text(encoding="utf-8")
+    assert "SIM_REJECT" in text
+    assert "max_active_positions_reached" in text
+    # No-lookahead violations remain zero.
+    assert runner.violations == ()
+    assert out["score"]["no_lookahead_violation_count"] == 0
+    # Safety flags intact.
+    payload = bridge.safety_payload()
+    for flag in (
+        "live_trading",
+        "exchange_live_orders",
+        "binance_private_api_enabled",
+        "telegram_outbound_enabled",
+        "ai_trade_authority",
+        "trade_authority",
+        "auto_tuning_allowed",
+    ):
+        assert payload[flag] is False, flag
+    assert payload["phase_12_forbidden"] is True

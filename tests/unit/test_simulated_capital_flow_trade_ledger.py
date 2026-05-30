@@ -63,6 +63,7 @@ from app.sim import (
     FillReason,
     HistoricalKlineRecord,
     HistoricalMarketStore,
+    MaxActivePositionsReachedError,
     MockExchange,
     MockExchangeConfig,
     MockFill,
@@ -1415,3 +1416,66 @@ def test_phase_name_strings_present():
     assert "PR98" in SIMULATED_CAPITAL_FLOW_PHASE_NAME
     assert "PR98" in TRADE_LEDGER_PHASE_NAME
     assert "11C.1D-D-E" in SIMULATED_CAPITAL_FLOW_PHASE_NAME
+
+
+# ---------------------------------------------------------------------------
+# PR107 hotfix: opening past max_active_positions raises a typed,
+# predictable rejection (subclass of RuntimeError) instead of a bare
+# RuntimeError so the blind runner can catch it and emit a SIM_REJECT.
+# ---------------------------------------------------------------------------
+
+
+def test_open_beyond_max_active_positions_raises_typed_error():
+    eng = _make_engine(max_active_positions=2)
+    # Open the first two positions on distinct symbols.
+    eng.consume_fill(
+        _make_fill(
+            order_id="mock_order_00000001",
+            fill_id="mock_fill_00000001",
+            symbol="AAAUSDT",
+            side=MockOrderSide.BUY,
+            filled_qty=1.0,
+            fill_price=100.0,
+            fee=0.0,
+            filled_at_simulated=_T0,
+        )
+    )
+    eng.consume_fill(
+        _make_fill(
+            order_id="mock_order_00000002",
+            fill_id="mock_fill_00000002",
+            symbol="BBBUSDT",
+            side=MockOrderSide.BUY,
+            filled_qty=1.0,
+            fill_price=50.0,
+            fee=0.0,
+            filled_at_simulated=_T0 + timedelta(minutes=1),
+        )
+    )
+    assert len(eng.get_positions()) == 2
+
+    # The third OPEN must be refused with the typed error.
+    with pytest.raises(MaxActivePositionsReachedError) as excinfo:
+        eng.consume_fill(
+            _make_fill(
+                order_id="mock_order_00000003",
+                fill_id="mock_fill_00000003",
+                symbol="CCCUSDT",
+                side=MockOrderSide.BUY,
+                filled_qty=1.0,
+                fill_price=10.0,
+                fee=0.0,
+                filled_at_simulated=_T0 + timedelta(minutes=2),
+            )
+        )
+    err = excinfo.value
+    # Backward compatible: still a RuntimeError subclass.
+    assert isinstance(err, RuntimeError)
+    # Carries structured context the runner uses for the SIM_REJECT.
+    assert err.symbol == "CCCUSDT"
+    assert err.active_positions == 2
+    assert err.max_active_positions == 2
+    assert "max_active_positions=2" in str(err)
+    # The rejected OPEN never mutated the position book.
+    assert len(eng.get_positions()) == 2
+    assert {p.symbol for p in eng.get_positions()} == {"AAAUSDT", "BBBUSDT"}
