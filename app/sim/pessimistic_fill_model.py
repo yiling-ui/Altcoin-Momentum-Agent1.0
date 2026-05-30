@@ -1242,6 +1242,7 @@ class PessimisticFillModel:
             fill_reason=FillReason.MARKET_FILL,
             filled_at_simulated=simulated_time,
             conservative_assumption=ca,
+            evidence_refs=order.evidence_refs,
         )
         return FillModelDecision(
             fill=fill, new_status=new_status, reason="market_fill"
@@ -1345,6 +1346,7 @@ class PessimisticFillModel:
             fill_reason=FillReason.LIMIT_FILL_ON_PENETRATION,
             filled_at_simulated=simulated_time,
             conservative_assumption=tuple(ca),
+            evidence_refs=order.evidence_refs,
         )
         return FillModelDecision(
             fill=fill,
@@ -1463,6 +1465,7 @@ class PessimisticFillModel:
             fill_reason=fill_reason,
             filled_at_simulated=simulated_time,
             conservative_assumption=ca,
+            evidence_refs=order.evidence_refs,
         )
         return FillModelDecision(
             fill=fill, new_status=new_status, reason=reason
@@ -1555,6 +1558,7 @@ class PessimisticFillModel:
             fill_reason=FillReason.TAKE_PROFIT_TRIGGERED_FILL,
             filled_at_simulated=simulated_time,
             conservative_assumption=ca,
+            evidence_refs=order.evidence_refs,
         )
         return FillModelDecision(
             fill=fill,
@@ -1611,6 +1615,7 @@ class PessimisticFillModel:
             fill_reason=FillReason.FORCED_EXIT_FILL,
             filled_at_simulated=simulated_time,
             conservative_assumption=ca,
+            evidence_refs=order.evidence_refs,
         )
         return FillModelDecision(
             fill=fill,

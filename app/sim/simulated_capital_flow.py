@@ -925,6 +925,23 @@ class SimulatedCapitalFlowEngine:
             avail += self._locked_profit
         return float(avail)
 
+    def current_marked_equity(self) -> float:
+        """Return the current mark-to-market simulated equity.
+
+        This is ``exchange_equity + locked_profit + unrealized_pnl``
+        of all OPEN simulated positions. It is a paper-only read of
+        the engine's in-memory state: it NEVER reads a real account
+        book, NEVER signs a request, NEVER touches a real exchange.
+        Used by the (separately gated) Blind Walk-forward Runner /
+        Paper Shadow Strategy Bridge to stamp ``equity_before`` /
+        ``equity_after`` on a simulated trade record.
+        """
+        return float(
+            self._exchange_equity
+            + self._locked_profit
+            + self._unrealized_pnl_total()
+        )
+
     # ----- public API: fill consumption -----
 
     def consume_fill(

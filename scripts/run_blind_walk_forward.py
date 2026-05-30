@@ -91,6 +91,8 @@ from app.sim import (  # noqa: E402
     HistoricalMarketRecord,
     HistoricalMarketStore,
     MockExchange,
+    PaperShadowStrategyBridge,
+    PaperShadowStrategyBridgeConfig,
     ReplayFeedProvider,
     ReplayFeedProviderConfig,
     SimulatedCapitalConfig,
@@ -101,6 +103,9 @@ from app.sim import (  # noqa: E402
     TelegramSandboxOutboxConfig,
     assert_no_forbidden_fields,
     blind_walk_forward_safety_payload,
+)
+from app.sim.paper_shadow_strategy_bridge import (  # noqa: E402
+    DEFAULT_BRIDGE_NAME,
 )
 
 
@@ -572,6 +577,77 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_true",
         help="disable the offline post-window AI commentary template",
     )
+    # ----- PR106: Paper Shadow Strategy Bridge (opt-in) -----
+    p.add_argument(
+        "--enable-paper-shadow-strategy",
+        action="store_true",
+        help=(
+            "PR106: enable the deterministic, paper-only Paper Shadow "
+            "Strategy Bridge as the runner's decision path. When set, "
+            "the runner can produce SIMULATED entry / exit / fill / "
+            "PnL via the MockExchange + Simulated Capital Flow when a "
+            "valid as-of signal occurs. Default OFF (substrate-only "
+            "v0 behaviour). This NEVER authorises live trading, "
+            "auto-tuning, AI trade authority, real Telegram outbound, "
+            "the Binance private API, or Phase 12."
+        ),
+    )
+    p.add_argument(
+        "--paper-shadow-bridge-name",
+        default=DEFAULT_BRIDGE_NAME,
+        help=(
+            "name recorded into the blind report's "
+            "strategy_bridge_name (default deterministic baseline)"
+        ),
+    )
+    p.add_argument(
+        "--paper-shadow-timeframe",
+        default="1m",
+        choices=("1m", "5m"),
+        help="closed-candle timeframe the bridge consumes (default 1m)",
+    )
+    p.add_argument(
+        "--paper-shadow-breakout-lookback",
+        type=int,
+        default=10,
+        help="rolling lookback (closed bars) for the breakout trigger",
+    )
+    p.add_argument(
+        "--paper-shadow-volume-multiplier",
+        type=float,
+        default=1.5,
+        help="volume-expansion multiplier vs the rolling mean volume",
+    )
+    p.add_argument(
+        "--paper-shadow-max-hold-bars",
+        type=int,
+        default=15,
+        help="maximum bars to hold a simulated position before exit",
+    )
+    p.add_argument(
+        "--paper-shadow-take-profit-pct",
+        type=float,
+        default=0.02,
+        help="fixed take-profit fraction for the simulated exit",
+    )
+    p.add_argument(
+        "--paper-shadow-stop-loss-pct",
+        type=float,
+        default=0.01,
+        help="fixed stop-loss fraction for the simulated exit",
+    )
+    p.add_argument(
+        "--paper-shadow-position-notional",
+        type=float,
+        default=20.0,
+        help="fixed notional (quote ccy) per simulated entry",
+    )
+    p.add_argument(
+        "--paper-shadow-max-concurrent-positions",
+        type=int,
+        default=3,
+        help="maximum concurrent simulated positions across symbols",
+    )
     # ----- PR103: Historical Store input glue -----
     p.add_argument(
         "--historical-store-dir",
@@ -730,6 +806,46 @@ def main(argv: List[str] = None) -> int:
         )
     )
     exchange = MockExchange()
+
+    # PR106: optionally build the deterministic, paper-only Paper
+    # Shadow Strategy Bridge. It is bound to the capital-flow engine so
+    # it can reconcile its per-symbol intent against the simulated
+    # position book. It carries NO trade authority, NO AI authority,
+    # NO auto-tuning, and NO live path.
+    paper_shadow_bridge: Optional[PaperShadowStrategyBridge] = None
+    if args.enable_paper_shadow_strategy:
+        bridge_config = PaperShadowStrategyBridgeConfig(
+            bridge_name=args.paper_shadow_bridge_name,
+            timeframe=args.paper_shadow_timeframe,
+            breakout_lookback=int(args.paper_shadow_breakout_lookback),
+            volume_multiplier=float(args.paper_shadow_volume_multiplier),
+            min_history_bars=int(args.paper_shadow_breakout_lookback) + 1,
+            max_hold_bars=int(args.paper_shadow_max_hold_bars),
+            take_profit_pct=float(args.paper_shadow_take_profit_pct),
+            stop_loss_pct=float(args.paper_shadow_stop_loss_pct),
+            position_notional=float(
+                args.paper_shadow_position_notional
+            ),
+            max_concurrent_positions=int(
+                args.paper_shadow_max_concurrent_positions
+            ),
+        )
+        paper_shadow_bridge = PaperShadowStrategyBridge(
+            config=bridge_config,
+            capital_flow=capital,
+        )
+        _LOGGER.info(
+            "paper shadow strategy bridge enabled: name=%s timeframe=%s "
+            "breakout_lookback=%d volume_multiplier=%.3f "
+            "max_hold_bars=%d position_notional=%.4f",
+            bridge_config.bridge_name,
+            bridge_config.timeframe,
+            bridge_config.breakout_lookback,
+            bridge_config.volume_multiplier,
+            bridge_config.max_hold_bars,
+            bridge_config.position_notional,
+        )
+
     target_root = Path(args.report_root)
     target_root.mkdir(parents=True, exist_ok=True)
     telegram = TelegramSandboxOutbox(
@@ -753,6 +869,14 @@ def main(argv: List[str] = None) -> int:
             ai_post_window_summary_enabled=(
                 not args.no_ai_post_window_summary
             ),
+            paper_shadow_strategy_enabled=bool(
+                args.enable_paper_shadow_strategy
+            ),
+            paper_shadow_strategy_bridge_name=(
+                args.paper_shadow_bridge_name
+                if args.enable_paper_shadow_strategy
+                else None
+            ),
             data_manifest_hash=(
                 historical_input.data_manifest_hash
                 if historical_input is not None
@@ -768,6 +892,7 @@ def main(argv: List[str] = None) -> int:
         capital_flow=capital,
         mock_exchange=exchange,
         telegram_sandbox=telegram,
+        paper_shadow_bridge=paper_shadow_bridge,
     )
 
     result: Dict[str, Any] = runner.run()
@@ -776,6 +901,17 @@ def main(argv: List[str] = None) -> int:
     score = result.get("score") or {}
     paths = result.get("paths") or {}
     manifest_out = result.get("manifest") or {}
+    # PR106: read back the blind report so the operator summary can
+    # surface the paper-shadow aggregates (the runner.run() result only
+    # carries manifest / score / paths).
+    report_out: Dict[str, Any] = {}
+    report_path = paths.get("blind_walk_forward_report.json")
+    if report_path:
+        try:
+            with open(report_path, "r", encoding="utf-8") as fh:
+                report_out = json.load(fh)
+        except (OSError, ValueError):
+            report_out = {}
 
     # PR103: write a Historical Store input metadata sidecar alongside
     # the report so reviewers can see exactly which store fed the run.
@@ -825,6 +961,34 @@ def main(argv: List[str] = None) -> int:
         ),
         "failure_ledger_entry_count": score.get(
             "failure_ledger_entry_count"
+        ),
+        # PR106 - paper shadow strategy operator summary.
+        "paper_shadow_strategy_enabled": bool(
+            args.enable_paper_shadow_strategy
+        ),
+        "strategy_bridge_name": (
+            args.paper_shadow_bridge_name
+            if args.enable_paper_shadow_strategy
+            else None
+        ),
+        "initial_capital": float(args.initial_capital),
+        "trade_count": (report_out.get("trade_count")),
+        "total_realized_pnl": report_out.get("total_realized_pnl"),
+        "max_drawdown": report_out.get("max_drawdown"),
+        "win_count": report_out.get("win_count"),
+        "loss_count": report_out.get("loss_count"),
+        "breakeven_count": report_out.get("breakeven_count"),
+        "no_paper_shadow_signals": report_out.get(
+            "no_paper_shadow_signals"
+        ),
+        "paper_shadow_entry_signal_count": report_out.get(
+            "paper_shadow_entry_signal_count"
+        ),
+        "paper_shadow_exit_signal_count": report_out.get(
+            "paper_shadow_exit_signal_count"
+        ),
+        "paper_shadow_reject_count": report_out.get(
+            "paper_shadow_reject_count"
         ),
         "historical_store_dir": args.historical_store_dir,
         "ingested_record_count": (
