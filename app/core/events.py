@@ -966,6 +966,7 @@ class EventType(str, Enum):
     EVIDENCE_CLAIM_REJECTED = "EVIDENCE_CLAIM_REJECTED"
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # PR110 - Live Foundation v0 (Live Path Isolation + Runtime Mode
     # Guard + Capital Profile Ladder + Capital Event Contract +
     # Right-tail Leverage Gate + Telegram Operator Contract).
@@ -1031,6 +1032,75 @@ class EventType(str, Enum):
     CAPITAL_PROFILE_CHANGED = "CAPITAL_PROFILE_CHANGED"
     CAPITAL_PROFILE_MISMATCH_DETECTED = "CAPITAL_PROFILE_MISMATCH_DETECTED"
     RIGHT_TAIL_LEVERAGE_EVALUATED = "RIGHT_TAIL_LEVERAGE_EVALUATED"
+
+    # ------------------------------------------------------------------
+    # PR111 - Live API Integration Pack v0 (Binance / Telegram / DeepSeek
+    # health, permission, account-read, funding/fee accounting).
+    #
+    # PR111 is the FIRST PR allowed to hold real Binance / Telegram /
+    # DeepSeek credentials and to talk to those real private / read
+    # APIs. It does NOT place / cancel / modify any real order, does NOT
+    # change leverage / margin, and does NOT grant AI any trade
+    # authority. The events below describe the health / permission /
+    # account-read / funding-accounting lifecycle.
+    #
+    # PR111 boundary - every payload below MUST be safe for logs:
+    #   - no API key, no API secret, no bot token
+    #   - no full request signature
+    #   - no sensitive account identifier beyond an allowed masked form
+    #   - exchange_live_orders=false / live_trading=false /
+    #     ai_trade_authority=false / trade_authority=false are pinned
+    #
+    #   API_SECRET_LOADED_MASKED         - a credential was loaded from
+    #     the environment; the payload carries ONLY the masked form +
+    #     presence flag.
+    #   API_HEALTH_CHECK_STARTED         - a unified / per-provider
+    #     health check began. No order / mode change is implied.
+    #   API_HEALTH_CHECK_COMPLETED       - the health check finished;
+    #     carries the overall PASS / WARN / FAIL + safety flags.
+    #   BINANCE_PUBLIC_HEALTH_OK         - ping / server-time /
+    #     exchangeInfo public-market reachability succeeded.
+    #   BINANCE_PRIVATE_READ_OK          - account / balance / position /
+    #     income read succeeded with the configured key.
+    #   BINANCE_PRIVATE_TRADE_BLOCKED    - a private-trade surface was
+    #     requested and refused (TRADE_API_BLOCKED_BY_PR111).
+    #   BINANCE_PERMISSION_WARNING       - the key reports a high-risk
+    #     permission (e.g. withdraw) or another permission anomaly.
+    #   BINANCE_ACCOUNT_SNAPSHOT_READ    - a read-only account snapshot
+    #     was parsed (balances / positions counts only).
+    #   BINANCE_INCOME_HISTORY_READ      - income history rows were read
+    #     + classified.
+    #   FUNDING_EVENT_DETECTED           - a funding fee / funding income
+    #     row was classified into the Capital Event contract.
+    #   COMMISSION_EVENT_DETECTED        - a commission row was
+    #     classified into the fee total.
+    #   TELEGRAM_TEST_MESSAGE_SENT       - an explicit operator-requested
+    #     test message was delivered (outbound enabled).
+    #   TELEGRAM_OUTBOUND_DISABLED       - outbound is disabled; no
+    #     message was sent (not an error).
+    #   DEEPSEEK_HEALTH_OK               - a safe test briefing round-trip
+    #     succeeded.
+    #   DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY - DeepSeek output
+    #     carried a forbidden trade-authority field and was rejected /
+    #     stripped.
+    API_SECRET_LOADED_MASKED = "API_SECRET_LOADED_MASKED"
+    API_HEALTH_CHECK_STARTED = "API_HEALTH_CHECK_STARTED"
+    API_HEALTH_CHECK_COMPLETED = "API_HEALTH_CHECK_COMPLETED"
+    BINANCE_PUBLIC_HEALTH_OK = "BINANCE_PUBLIC_HEALTH_OK"
+    BINANCE_PRIVATE_READ_OK = "BINANCE_PRIVATE_READ_OK"
+    BINANCE_PRIVATE_TRADE_BLOCKED = "BINANCE_PRIVATE_TRADE_BLOCKED"
+    BINANCE_PERMISSION_WARNING = "BINANCE_PERMISSION_WARNING"
+    BINANCE_ACCOUNT_SNAPSHOT_READ = "BINANCE_ACCOUNT_SNAPSHOT_READ"
+    BINANCE_INCOME_HISTORY_READ = "BINANCE_INCOME_HISTORY_READ"
+    FUNDING_EVENT_DETECTED = "FUNDING_EVENT_DETECTED"
+    COMMISSION_EVENT_DETECTED = "COMMISSION_EVENT_DETECTED"
+    TELEGRAM_TEST_MESSAGE_SENT = "TELEGRAM_TEST_MESSAGE_SENT"
+    TELEGRAM_OUTBOUND_DISABLED = "TELEGRAM_OUTBOUND_DISABLED"
+    DEEPSEEK_HEALTH_OK = "DEEPSEEK_HEALTH_OK"
+    DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY = (
+        "DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY"
+    )
+
 
 
 # Capital-flow event types per Issue #2 / Spec §28.3.

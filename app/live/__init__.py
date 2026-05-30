@@ -173,3 +173,21 @@ __all__ = [
     "render_operator_card",
     "build_audit_payload",
 ]
+
+# ---------------------------------------------------------------------------
+# PR111 - API Integration Pack v0 metadata.
+#
+# PR111 layers the real Binance / Telegram / DeepSeek API clients, secret
+# loading, health/permission checks, and funding/fee accounting ON TOP of
+# this PR110 foundation. The PR111 modules (api_config, secrets,
+# binance_client, telegram_client, deepseek_client, health, ...) reuse
+# PR110's LiveRuntimeMode (app.core.enums), Capital Event contract
+# (app.live.capital_event), and Capital Profile ladder
+# (app.live.capital_profile). They are imported directly (e.g.
+# ``from app.live.binance_client import BinanceLiveClient``) rather than
+# re-exported here, to keep this package's import surface small.
+# ---------------------------------------------------------------------------
+LIVE_API_PACK_VERSION = "v0"
+LIVE_API_PACK_PR = "PR111"
+
+__all__ += ["LIVE_API_PACK_VERSION", "LIVE_API_PACK_PR"]

@@ -129,7 +129,6 @@ class DataExportError(AMARTError):
     """
 
 
-
 # ---------------------------------------------------------------------------
 # PR110 - Live Foundation v0 (Live Path Isolation + Runtime Mode Guard +
 # Right-tail Leverage Gate)
@@ -175,4 +174,34 @@ class LeverageGateViolation(SafetyViolation):
     gate normally returns a *rejection decision* (so the audit trail
     records the refusal); this exception is reserved for the defensive
     assertion path.
+    """
+
+
+# ---------------------------------------------------------------------------
+# PR111 - Live API Integration Pack v0
+# ---------------------------------------------------------------------------
+class LiveTradeNotEnabled(SafeModeViolation):
+    """Raised when any Binance ``PRIVATE_TRADE`` surface is invoked in PR111.
+
+    PR111 ships the live private-trade client interface but keeps every
+    order / cancel / leverage / margin surface BLOCKED. A caller that
+    invokes one of those surfaces gets this exception (or, where a
+    non-raising contract is expected, the ``TRADE_API_BLOCKED_BY_PR111``
+    sentinel). No real order request is ever built or sent.
+
+    It subclasses :class:`SafeModeViolation` (and therefore
+    :class:`SafetyViolation`) so any existing boot-time / Risk Engine
+    handler that catches the broader safety hierarchy continues to
+    catch it. The exception text never carries a secret.
+    """
+
+
+class LiveApiError(ExchangeError):
+    """Recoverable transport / protocol failure talking to a live API.
+
+    Used by the PR111 Binance / Telegram / DeepSeek clients for HTTP
+    transport errors (timeout, non-2xx, malformed JSON). It is NOT a
+    safety violation - the health check downgrades it into a FAIL /
+    WARN status. The error text is sanitised so it never carries a
+    secret, token, or full request signature.
     """

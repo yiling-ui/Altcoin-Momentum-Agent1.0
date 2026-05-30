@@ -8,6 +8,34 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR111 — API Integration Pack v0 (IN_REVIEW)
+
+**PR111 — Binance + Telegram + DeepSeek API Health & Permission Layer.**
+PR111 opens the real-capital road map by adding real read-only API
+connectivity under `app/live/`. It does **NOT** loosen any safety flag:
+
+  - `exchange_live_orders` stays `False`; the Binance `PRIVATE_TRADE`
+    layer is interface-only and blocked (`TRADE_API_BLOCKED_BY_PR111` /
+    `LiveTradeNotEnabled`). No HTTP order request is ever built.
+  - `live_trading` stays `False`; default runtime mode is `LIVE_SHADOW`
+    and PR111 never auto-escalates to `LIVE_LIMITED`.
+  - No leverage / margin change.
+  - `ai_trade_authority` / `trade_authority` stay `False`; DeepSeek is
+    MARKET_INTELLIGENCE_ONLY.
+  - `telegram_outbound_enabled` defaults `False`; a test message is only
+    sent on explicit `--send-telegram-test` with outbound enabled.
+  - No secret is hard-coded / logged / exported / leaked; only masked
+    forms surface. `phase_12_forbidden` remains recorded `True` in the
+    unified health report's safety flags.
+
+Gate criteria for the NEXT slice (live capital / risk / execution
+integration): operator can run the health check against real keys,
+confirm `binance_public=PASS`, optional `binance_private_read=PASS`, no
+high-risk (withdraw) permission, and the health report shows
+`exchange_live_orders=false` / `ai_trade_authority=false` /
+`live_runtime_mode=LIVE_SHADOW`. Acceptance evidence:
+`docs/AMA_RT_API_INTEGRATION_PACK.md`, `tests/unit/test_pr111_*.py`.
+
 ## Closed phases
 
 | #     | Title                                              | Closed (UTC)    | Acceptance evidence                                            |
