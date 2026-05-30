@@ -7,6 +7,109 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### Phase 11C.1D-D — PR108 — Simulated Capital Safety Floor / Kill Switch / No Negative Equity Guard: IN_REVIEW
+
+**Type:** Capital-safety bugfix (paper / sim-live / evidence-only
+infrastructure). **Capital safety ONLY** — no strategy parameter was
+tuned, no profitability change was attempted.
+**Runtime effect:** **none on real trading; no Phase 12; no Binance
+private API; no real exchange order; no real exchange endpoint; no real
+Telegram outbound; no AI trade authority; no auto-tuning inside a blind
+window; no runtime config patching; no bypass of Risk / Capital /
+MockExchange safety.**
+
+**Problem.** PR107 fixed the `max_active_positions=5` crash and proved
+simulated trades can be generated, but the simulated account could still
+show `equity_after ≈ -309` on a 100 USDT initial capital (cloud
+`blocked_180d_02_pr106_shadow`: `total_realized_pnl=-409`,
+`max_drawdown=0.90`). A realistic paper/live-like capital engine must
+not keep opening or holding risk after capital is exhausted or the risk
+state becomes unsafe.
+
+**Root cause.** The PR98 `SimulatedCapitalFlowEngine` closed positions by
+adding the realised gross PnL straight onto `exchange_equity` with **no
+floor** and opened new positions checking only `capital_frozen` /
+`max_active_positions` — there was **no pre-entry equity gate, no
+no-negative-equity guard, and no kill switch**. With a long-only fixed
+notional bridge that had no equity ceiling, accumulated losses drove the
+simulated cash balance arbitrarily negative while the runner kept
+opening new simulated positions as if normal.
+
+**What changed (capital safety only).**
+
+  - `app/sim/simulated_capital_flow.py`
+    - New closed taxonomies: `CapitalRejectReason`
+      (`insufficient_equity` / `capital_exhausted` / `risk_halt_active` /
+      `max_drawdown_limit_reached` / `max_active_positions_reached`),
+      `RiskHaltReason` (`SIM_CAPITAL_EXHAUSTED` /
+      `MAX_DRAWDOWN_LIMIT_REACHED` / `CONSECUTIVE_LOSS_HALT` /
+      `MANUAL_HALT`), `ForcedExitReason`
+      (`FORCED_CAPITAL_SAFETY_EXIT` / `SIM_LIQUIDATION` / `RISK_HALT`).
+    - New predictable, paper-only exceptions `SimAccountHaltedError` and
+      `InsufficientSimulatedEquityError` (both subclass
+      `CapitalFrozenError` for backward-compatible catching).
+    - New `SimulatedCapitalConfig` fields (conservative defaults):
+      `capital_floor=0.0`, `no_negative_equity_guard=True`,
+      `halt_on_capital_exhaustion=True`, `max_drawdown_halt_pct=None`,
+      `min_equity_to_open=None`.
+    - **No-negative-equity guard:** a realised close that would drive the
+      cash balance below the floor is clamped at the floor; the excess is
+      booked as a deterministic `liquidation_shortfall` and
+      `capital_exhausted` is flagged. The ledger entry keeps the
+      **truthful** realised PnL — losses are never hidden, only the
+      account equity floors.
+    - **Pre-entry gate:** `can_open_position(symbol, requested_qty,
+      notional)` returns a closed `CapitalRejectReason` when the kill
+      switch is latched, capital is exhausted, the hard drawdown limit is
+      reached, the concurrency cap is hit, or free equity cannot cover
+      the position.
+    - **Kill switch:** `enforce_capital_safety(simulated_time)` force-
+      exits every open simulated position through the simulated flow
+      (`SIM_LIQUIDATION` on a floor breach, `RISK_HALT` on the hard
+      drawdown limit), clamps residual cash, latches the halt, and tracks
+      the running `min_equity`. Once latched, `_open_position` raises
+      `SimAccountHaltedError` (caught by the runner as SIM_REJECT, never a
+      RuntimeError). Reporting via `capital_safety_snapshot()` +
+      new state / diagnostics fields.
+  - `app/sim/blind_walk_forward_runner.py` — `step_once` calls
+    `enforce_capital_safety` after marks + fills; new pre-entry gate in
+    the pre-submit path; new SIM_REJECT reasons; `_handle_capital_safety_event`
+    emits `SIM_FORCED_EXIT` + `SIM_CAPITAL_EXHAUSTED` / `SIM_ACCOUNT_HALTED`
+    transcript entries; forced exits recorded as enriched paper-shadow
+    trades; report / window summary / trade-ledger payload / paper-shadow
+    sidecar gain `initial_capital`, `final_equity`, `min_equity`,
+    `max_drawdown`, `max_drawdown_limit`, `capital_exhausted`,
+    `halted_by_risk`, `risk_halt_reason`, `forced_exit_count`,
+    `capital_reject_count`, `capital_exhaustion_event_count` /
+    `liquidation_like_event_count`.
+  - `app/sim/paper_shadow_strategy_bridge.py` — `PaperShadowRejectReason`
+    gains `account_halted` / `capital_exhausted`; the bridge stops
+    emitting NEW entries (and records the suppressed signal) once the
+    bound capital flow has latched its kill switch.
+  - `scripts/run_blind_walk_forward.py` — new flags `--capital-floor`
+    (0.0), `--max-drawdown-halt-pct` (0.5), `--disable-no-negative-equity-guard`,
+    `--min-equity-to-open`; the operator summary surfaces the capital-
+    safety fields.
+
+**No-lookahead / safety boundary unchanged.** At simulated time T only
+`available_at <= T` closed-candle records are used; no future outcome /
+MFE / MAE / tail label is a decision input; AI text never influences
+direction / sizing / leverage / stop / target / execution. Safety flags
+stay pinned: `phase_12_forbidden=true`, `live_trading=false`,
+`exchange_live_orders=false`, `binance_private_api_enabled=false`,
+`telegram_outbound_enabled=false`, `auto_tuning_allowed=false`,
+`trade_authority=false`, `ai_trade_authority=false`.
+
+**Tests.** New `tests/unit/test_simulated_capital_flow.py` (pre-entry
+gate, no-negative-equity clamp, liquidation + drawdown kill switch,
+halt-latched refusal of new opens, deterministic snapshot). Extended
+`tests/unit/test_blind_walk_forward_runner.py` (kill switch force-exit +
+halt, no new entries after halt, ledger/record no-negative continuation,
+report capital-safety fields, safety flags intact) and
+`tests/unit/test_paper_shadow_strategy_bridge.py` (bridge suppresses
+entries while halted). Full `tests/unit` suite green (3704 passed); PR98
+/ PR106 / PR107 tests unchanged.
+
 ### Phase 11C.1D-D-J — PR104 — Blind Runner Store Query Performance Fix: IN_REVIEW
 
 **Type:** Performance bugfix (paper / report / evidence-only

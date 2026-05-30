@@ -7,6 +7,56 @@ intentionally short. The full phase-gate ledger lives in
 
 ## Current phase
 
+> **Phase 11C.1D-D — Simulated Capital Safety Floor / Kill Switch /
+> No Negative Equity Guard (*模拟资金安全下限 / 熔断 / 无负权益保护*;
+> PR108).**
+> **Status: IN_REVIEW (after this implementation PR; not
+> `ACCEPTED` until maintainer review).**
+> **Type: capital-safety bugfix (paper / sim-live / evidence-only
+> infrastructure). Capital safety ONLY — no strategy parameter was
+> tuned and no profitability change was attempted.** Fixes the PR107
+> finding that the simulated account could still show
+> `equity_after ≈ -309` on a 100 USDT initial capital
+> (`blocked_180d_02_pr106_shadow`: `total_realized_pnl=-409`,
+> `max_drawdown=0.90`). Root cause: the PR98
+> `SimulatedCapitalFlowEngine` added realised gross PnL straight onto
+> `exchange_equity` with **no floor** and opened new positions
+> checking only `capital_frozen` / `max_active_positions` — there was
+> no pre-entry equity gate, no no-negative-equity guard, and no kill
+> switch. Fix: (1) a **no-negative-equity guard** clamps the simulated
+> cash balance at `capital_floor` (default 0) and books the excess as a
+> deterministic `liquidation_shortfall` while the ledger keeps the
+> truthful realised loss; (2) a **pre-entry gate**
+> (`can_open_position`) refuses an open when the kill switch is
+> latched, capital is exhausted, the hard drawdown limit is reached,
+> the concurrency cap is hit, or free equity cannot cover the
+> position; (3) a **kill switch** (`enforce_capital_safety`,
+> default `--max-drawdown-halt-pct 0.5`) force-exits every open
+> simulated position through the simulated flow
+> (`SIM_LIQUIDATION` / `RISK_HALT`), latches the halt, and stops new
+> entries for the rest of the blind window; new entries after the halt
+> become `SIM_REJECT` / `SIM_ACCOUNT_HALTED`, never a `RuntimeError`.
+> New report / transcript / ledger fields: `final_equity`,
+> `min_equity`, `capital_exhausted`, `halted_by_risk`,
+> `risk_halt_reason`, `forced_exit_count`, `capital_reject_count`,
+> `capital_exhaustion_event_count`, plus `SIM_FORCED_EXIT` /
+> `SIM_ACCOUNT_HALTED` / `SIM_CAPITAL_EXHAUSTED` transcript events.
+> No-lookahead constraints unchanged (only `available_at <= T` closed
+> candles; no future label is a decision input; AI text never
+> influences direction / sizing / leverage / stop / target /
+> execution). Scope touches only `app/sim/simulated_capital_flow.py`,
+> `app/sim/blind_walk_forward_runner.py`,
+> `app/sim/paper_shadow_strategy_bridge.py`,
+> `scripts/run_blind_walk_forward.py`, the matching `tests/unit/*`,
+> and the docs; **nothing** under `app/risk/`, `app/execution/`,
+> `app/exchanges/`, `app/telegram/`, `app/config/`. Still
+> `historical_blind_sim_live` / paper-only. Safety flags unchanged
+> (`phase_12_forbidden=true`, `live_trading=false`,
+> `exchange_live_orders=false`, `binance_private_api_enabled=false`,
+> `telegram_outbound_enabled=false`, `auto_tuning_allowed=false`,
+> `trade_authority=false`, `ai_trade_authority=false`). **Phase 12
+> remains FORBIDDEN.** See `docs/CHANGELOG.md` (PR108 entry).
+
 > **Phase 11C.1D-D-J — Blind Runner Store Query Performance Fix
 > (*Blind Runner 历史数据存储查询性能修复*; PR104).**
 > **Status: IN_REVIEW (after this implementation PR; not
