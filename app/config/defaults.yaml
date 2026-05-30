@@ -194,3 +194,42 @@ strategy_validation:
   quality_gate_min_score_bucket_coverage: 2
   quality_gate_require_export_roundtrip: true
   quality_gate_require_replay_readable: true
+
+
+
+live:
+  # PR110 - Live Foundation v0 (Live Path Isolation + Runtime Mode
+  # Guard + Capital Profile Ladder + Capital Event Contract +
+  # Right-tail Leverage Gate + Telegram Operator Contract).
+  #
+  # PR110 builds the SAFETY FOUNDATION for the move from large-scale
+  # cloud blind testing to a 10U small-capital live-preparation posture.
+  # It does NOT enable live trading, does NOT connect the Binance
+  # private API, does NOT place / cancel orders, and does NOT enable
+  # real Telegram outbound.
+  #
+  # The runtime guard (app/live/runtime_mode.py) ALWAYS boots in
+  # LIVE_SHADOW regardless of runtime_mode below, so a config edit can
+  # never silently arm LIVE_LIMITED on a restart. capital_profile_id is
+  # L0_SHADOW by default (no real orders) and only ever changes by
+  # explicit operator action (never auto-escalates).
+  runtime_mode: LIVE_SHADOW          # LIVE_SHADOW (空盘跑) | LIVE_LIMITED (有资金跑)
+  capital_profile_id: L0_SHADOW      # L0_SHADOW .. L8_10M_CAPITAL_PRESERVATION
+  live_limited_confirmation_state: false
+  live_limited_armed_at: null
+  live_limited_armed_by: null
+  kill_switch_armed: false           # stays false until a later PR implements API health checks
+
+  # PR110 foundation feature toggles (on by default).
+  live_path_isolation_enabled: true
+  capital_profile_ladder_enabled: true
+  right_tail_leverage_gate_enabled: true
+
+  # Locked-safe capability flags (the schema refuses to load these True).
+  live_trading: false
+  exchange_live_orders: false
+  binance_private_api_enabled: false
+  ai_trade_authority: false
+  trade_authority: false
+  right_tail_live_boost_enabled: false
+  phase_12_forbidden: true
