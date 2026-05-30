@@ -11,7 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.live.capital_events import CapitalEvent, classify_income_row
+# BinanceIncomeEvent lives in app.live.binance_income (it maps onto PR110's
+# Capital Event contract). Re-exported here for backward compatibility so
+# callers can keep importing it from app.live.binance_models.
+from app.live.binance_income import BinanceIncomeEvent
 from app.live.status import HealthStatus
 
 
@@ -260,46 +263,10 @@ def parse_account(body: dict[str, Any], *, timestamp_ms: int = 0) -> BinanceAcco
 
 
 # ---------------------------------------------------------------------------
-# Income events
+# Income events: see app.live.binance_income.BinanceIncomeEvent (imported
+# above). It maps each Binance income row onto PR110's Capital Event
+# contract (app.live.capital_event).
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True)
-class BinanceIncomeEvent:
-    """A single Binance income row plus its classified capital event."""
-
-    symbol: str | None
-    income_type: str
-    income: float
-    asset: str
-    time_ms: int | None
-    tran_id: str | None
-    trade_id: str | None
-    capital_event: CapitalEvent
-
-    @classmethod
-    def from_row(cls, row: dict[str, Any]) -> "BinanceIncomeEvent":
-        capital_event = classify_income_row(row)
-        return cls(
-            symbol=capital_event.symbol,
-            income_type=capital_event.raw_income_type,
-            income=capital_event.amount,
-            asset=capital_event.asset,
-            time_ms=capital_event.time_ms,
-            tran_id=capital_event.tran_id,
-            trade_id=capital_event.trade_id,
-            capital_event=capital_event,
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "income_type": self.income_type,
-            "income": self.income,
-            "asset": self.asset,
-            "time_ms": self.time_ms,
-            "tran_id": self.tran_id,
-            "trade_id": self.trade_id,
-            "capital_event": self.capital_event.to_dict(),
-        }
 
 
 # ---------------------------------------------------------------------------

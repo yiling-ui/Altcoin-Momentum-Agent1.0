@@ -106,7 +106,7 @@ def format_operator_message(
     Produces ``[ama-rt:<tag>] mode=<MODE> live=on|off <text>``. PR111
     keeps ``live=off`` because no live order path is enabled.
     """
-    live_on = runtime_mode.allows_live_orders  # always False in PR111 usage
+    live_on = runtime_mode.real_orders_possible  # always False in PR111 usage
     banner = f"mode={runtime_mode.value} live={'on' if live_on else 'off'}"
     body = str(text).replace("\n", " ").strip()
     return f"[ama-rt:{tag}] {banner} {body}".rstrip()

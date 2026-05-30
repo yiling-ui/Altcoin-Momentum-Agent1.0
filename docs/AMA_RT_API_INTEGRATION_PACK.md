@@ -24,7 +24,7 @@ with the order path hard-blocked until a later PR.
 |------|--------|
 | Secret loading + masking | `app/live/secrets.py` |
 | Live API config (env) + runtime mode | `app/live/api_config.py` |
-| Capital Event contract (funding/fee/PnL) | `app/live/capital_events.py` |
+| Binance income → PR110 Capital Event contract | `app/live/binance_income.py` |
 | Binance models | `app/live/binance_models.py` |
 | Binance permissions | `app/live/binance_permissions.py` |
 | Binance client (public / private-read / private-trade-blocked) | `app/live/binance_client.py` |
@@ -33,9 +33,13 @@ with the order path hard-blocked until a later PR.
 | Unified health report | `app/live/health.py` |
 | Health-check CLI | `scripts/live_api_health_check.py` |
 
-PR110 handoff: PR111 ships a self-contained `LiveRuntimeMode` and a
-self-contained `CapitalEvent` contract. Search the package for `HANDOFF`
-to find the points that should be unified with PR110 once both land.
+Built on PR110: PR111 reuses PR110's `LiveRuntimeMode`
+(`app.core.enums`), the Capital Event contract
+(`app.live.capital_event`: `LiveCapitalEvent` / `CapitalEventType` /
+`CapitalEventLedger`), and the Capital Profile ladder
+(`app.live.capital_profile`) rather than duplicating them.
+`app/live/binance_income.py` only maps Binance `/fapi/v1/income` rows
+onto those PR110 types.
 
 ---
 
@@ -126,6 +130,16 @@ If a trade-capable key exists but the runtime mode is `LIVE_SHADOW`, the
 order path stays blocked. `can_trade_if_account_reports_it` mirrors the
 exchange's own flag - it is **not** a runtime authorisation.
 
+### Relationship to PR110's locked `binance_private_api_enabled`
+PR110's `live:` config locks `binance_private_api_enabled=False`; that
+flag gates the PR110 **live order / execution** config path and is
+deliberately left untouched (still `False`) by PR111. PR111's
+**read-only** private access is a separate, independently env-gated path
+(`AMA_BINANCE_ENABLE_PRIVATE_READ`) that can only read account / balance
+/ position / income and can never place an order. PR111 does not flip,
+read, or depend on PR110's `binance_private_api_enabled`, and PR110's
+`LiveExecutionGateway` order path remains fully blocked.
+
 **Withdraw permission is NEVER required.** If the API key reports
 withdraw / high-risk permission, the health check raises
 `BINANCE_PERMISSION_WARNING`. Prefer an API key without withdraw enabled.
@@ -171,26 +185,33 @@ validator strips and flags any such field and emits
 
 ## 7. Funding fee / commission accounting
 
-Binance income rows (`/fapi/v1/income`) are classified into the Capital
-Event contract. Funding is **never mixed** with trading price PnL.
+Binance income rows (`/fapi/v1/income`) are mapped by
+`app/live/binance_income.py` into **PR110's** Capital Event contract
+(`app.live.capital_event`). Funding is **never mixed** with trading
+price PnL — PR110's `CapitalEventLedger` keeps `total_funding` separate
+from `total_realized_pnl`.
 
 Recognised income types: `REALIZED_PNL`, `FUNDING_FEE`, `COMMISSION`,
-`TRANSFER`, `INTERNAL_TRANSFER`, plus rebates/bonuses. Unknown types are
-preserved verbatim as `UNKNOWN_INCOME_TYPE` (never dropped).
+`TRANSFER`, `INTERNAL_TRANSFER`, `WELCOME_BONUS`. Unknown / unmapped
+types are preserved verbatim (`UNKNOWN_INCOME_TYPE`), tallied separately,
+and **never** coerced into a capital-event type (so they can never
+pollute realized PnL / fees / funding / deposits).
 
-Mapping into `CapitalEventType`:
+Mapping into PR110 `CapitalEventType`:
 - `REALIZED_PNL` -> `REALIZED_PNL` (>=0) / `REALIZED_LOSS` (<0)
 - `FUNDING_FEE` -> `FUNDING_INCOME` (>=0) / `FUNDING_FEE` (<0)
-- `COMMISSION` (+ rebates) -> `FEE`
+- `COMMISSION` -> `FEE`
 - `TRANSFER` / `INTERNAL_TRANSFER` -> `TRANSFER_IN` (>=0) / `TRANSFER_OUT` (<0)
-- bonuses -> `EXTERNAL_DEPOSIT` (inferable)
+- `WELCOME_BONUS` -> `EXTERNAL_DEPOSIT` (inferable external credit)
 
-The PnL summary computes:
+The summary (`BinanceIncomeSummary`, backed by PR110's
+`CapitalEventLedger`) exposes:
 ```
-gross_realized_pnl
-commission_total
-funding_total
+gross_realized_pnl   (= ledger.total_realized_pnl)
+commission_total     (= ledger.total_fees)
+funding_total        (= ledger.total_funding)
 net_strategy_pnl = gross_realized_pnl - commission_total + funding_total
+```
 ```
 
 When funding cannot yet be attributed to a `trade_id`, it is stored as an

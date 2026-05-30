@@ -33,11 +33,13 @@ Hard boundary held by PR111:
   - **No secret is ever hard-coded, logged, exported, or placed in an
     exception / Telegram message.** Only masked forms surface.
 
-PR110 handoff: PR111 ships a self-contained `LiveRuntimeMode` and Capital
-Event contract shaped to be unified with the PR110 Live Path Isolation /
-runtime modes once both land. The next PR is the live capital / risk /
-execution integration (LIVE_LIMITED 10U small-capital path), still behind
-the Risk Engine + Execution FSM.
+Built on PR110: PR111 reuses PR110's `LiveRuntimeMode`
+(`app.core.enums`), the Capital Event contract (`app.live.capital_event`)
+and the Capital Profile ladder (`app.live.capital_profile`) rather than
+duplicating them — the unified health report records the active
+`CapitalProfileId` (default `L0_SHADOW`). The next PR is the live
+capital / risk / execution integration (LIVE_LIMITED 10U small-capital
+path), still behind the Risk Engine + Execution FSM.
 
 See `docs/AMA_RT_API_INTEGRATION_PACK.md` and
 `docs/AMA_RT_LIVE_API_SETUP.md`.

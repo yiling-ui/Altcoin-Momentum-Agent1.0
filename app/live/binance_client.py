@@ -59,7 +59,6 @@ from app.live.binance_models import (
     parse_exchange_info,
 )
 from app.live.binance_permissions import inspect_permissions
-from app.live.capital_events import CapitalEventType
 from app.live.secrets import API_HEALTH_MISSING_SECRET
 from app.live.status import HealthStatus, TRADE_API_BLOCKED_BY_PR111, worst_of
 
@@ -313,15 +312,8 @@ class BinanceLiveClient:
             params["endTime"] = int(end_time_ms)
         body = self._private_read_request("/fapi/v1/income", params)
         events = [BinanceIncomeEvent.from_row(row) for row in (body or [])]
-        funding_count = sum(
-            1
-            for e in events
-            if e.capital_event.capital_event_type
-            in (CapitalEventType.FUNDING_FEE, CapitalEventType.FUNDING_INCOME)
-        )
-        commission_count = sum(
-            1 for e in events if e.capital_event.capital_event_type == CapitalEventType.FEE
-        )
+        funding_count = sum(1 for e in events if e.is_funding)
+        commission_count = sum(1 for e in events if e.is_fee)
         self._emit(
             EventType.BINANCE_INCOME_HISTORY_READ,
             {"row_count": len(events), "funding_count": funding_count, "commission_count": commission_count},
@@ -436,7 +428,7 @@ class BinanceLiveClient:
         # PR111: order path is blocked while runtime mode does not allow
         # live orders (LIVE_SHADOW is the default). PR111 keeps it blocked
         # regardless, but we report the mode-based predicate honestly.
-        private_trade_blocked_by_mode = not self._runtime_mode.allows_live_orders
+        private_trade_blocked_by_mode = not self._runtime_mode.real_orders_possible
 
         # --- PUBLIC_MARKET ---
         try:

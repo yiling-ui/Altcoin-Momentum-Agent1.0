@@ -21,6 +21,7 @@ from app.core.events import Event, EventType
 from app.live.api_config import LiveApiConfig
 from app.live.binance_client import BinanceLiveClient
 from app.live.binance_models import BinanceApiHealthResult
+from app.live.capital_profile import CapitalProfileId
 from app.live.deepseek_health import DeepSeekApiHealthResult, run_deepseek_health_check
 from app.live.status import (
     HealthStatus,
@@ -29,9 +30,10 @@ from app.live.status import (
 )
 from app.live.telegram_health import TelegramApiHealthResult, run_telegram_health_check
 
-# HANDOFF(PR110): capital profile id comes from the PR110 Capital Profile
-# Ladder. Until PR110 lands, PR111 uses a self-contained default.
-DEFAULT_CAPITAL_PROFILE_ID = "shadow_default"
+# The capital profile id comes from PR110's Capital Profile Ladder
+# (:mod:`app.live.capital_profile`). PR111 defaults to the shadow profile
+# ``L0_SHADOW`` (real_orders_allowed=False) and never auto-escalates.
+DEFAULT_CAPITAL_PROFILE_ID = CapitalProfileId.L0_SHADOW.value
 
 
 def build_safety_flags(config: LiveApiConfig) -> dict[str, Any]:

@@ -10,14 +10,14 @@ from app.core.errors import LiveTradeNotEnabled
 from app.core.events import Event, EventType
 from app.live.api_config import LiveApiConfig, LiveRuntimeMode
 from app.live.binance_client import BinanceLiveClient
+from app.live.binance_income import (
+    AttributionStatus,
+    classify_income_rows,
+    summarise_income_events,
+)
 from app.live.binance_models import parse_account, parse_exchange_info
 from app.live.binance_permissions import inspect_permissions
-from app.live.capital_events import (
-    AttributionStatus,
-    CapitalEventType,
-    classify_income_rows,
-    summarise_capital_events,
-)
+from app.live.capital_event import CapitalEventType
 from app.live.status import TRADE_API_BLOCKED_BY_PR111
 
 FAKE_KEY = "FAKEKEY0000000000000000000000000000000000000000000000000000000000"
@@ -209,28 +209,38 @@ def test_account_read_via_client_emits_event():
 # ---- Test 8/9/10/11: income classification --------------------------------
 def test_income_classification_realized_commission_funding_unknown():
     events = classify_income_rows(SAMPLE_INCOME)
-    by_type: dict[CapitalEventType, list] = {}
-    for e in events:
-        by_type.setdefault(e.capital_event_type, []).append(e)
+
+    def types_present(et):
+        return any(
+            e.capital_event is not None and e.capital_event.event_type == et
+            for e in events
+        )
 
     # REALIZED_PNL (+) and REALIZED_LOSS (-).
-    assert any(e.capital_event_type == CapitalEventType.REALIZED_PNL for e in events)
-    assert any(e.capital_event_type == CapitalEventType.REALIZED_LOSS for e in events)
+    assert types_present(CapitalEventType.REALIZED_PNL)
+    assert types_present(CapitalEventType.REALIZED_LOSS)
     # COMMISSION -> FEE.
-    assert any(e.capital_event_type == CapitalEventType.FEE for e in events)
+    assert types_present(CapitalEventType.FEE)
     # FUNDING_FEE (-) and FUNDING_INCOME (+).
-    assert any(e.capital_event_type == CapitalEventType.FUNDING_FEE for e in events)
-    assert any(e.capital_event_type == CapitalEventType.FUNDING_INCOME for e in events)
-    # Unknown income type preserved safely.
-    unknown = [e for e in events if e.capital_event_type == CapitalEventType.UNKNOWN]
+    assert types_present(CapitalEventType.FUNDING_FEE)
+    assert types_present(CapitalEventType.FUNDING_INCOME)
+    # Unknown income type preserved safely (never mapped to a capital event).
+    unknown = [e for e in events if e.is_unmapped]
     assert len(unknown) == 1
     assert unknown[0].raw_income_type == "SOME_FUTURE_TYPE"
     assert unknown[0].info_tag == "UNKNOWN_INCOME_TYPE"
+    assert unknown[0].capital_event is None
 
 
 def test_realized_pnl_preserves_trade_id_attribution():
     events = classify_income_rows(SAMPLE_INCOME)
-    realized = [e for e in events if e.capital_event_type in (CapitalEventType.REALIZED_PNL, CapitalEventType.REALIZED_LOSS)]
+    realized = [
+        e
+        for e in events
+        if e.capital_event is not None
+        and e.capital_event.event_type
+        in (CapitalEventType.REALIZED_PNL, CapitalEventType.REALIZED_LOSS)
+    ]
     assert all(e.trade_id is not None for e in realized)
     assert all(e.attribution_status == AttributionStatus.ATTRIBUTED for e in realized)
 
@@ -238,19 +248,23 @@ def test_realized_pnl_preserves_trade_id_attribution():
 # ---- Test 12/13: funding -> CapitalEvent, no deposit/withdraw pollution ----
 def test_funding_and_commission_accounting_separated():
     events = classify_income_rows(SAMPLE_INCOME)
-    summary = summarise_capital_events(events)
+    summary = summarise_income_events(events)
     # gross realized = 25.5 - 10.0 = 15.5
     assert summary.gross_realized_pnl == pytest.approx(15.5)
     # funding = -1.2 + 0.8 = -0.4 (NOT mixed into realized).
     assert summary.funding_total == pytest.approx(-0.4)
     # commission stored as positive magnitude = 0.5
     assert summary.commission_total == pytest.approx(0.5)
-    # transfer in = 500 (NOT polluted by funding).
-    assert summary.transfer_in_total == pytest.approx(500.0)
+    # the +500 TRANSFER is an internal transfer, NOT polluted by funding
+    # and NOT counted as an external deposit / strategy PnL.
+    assert summary.internal_transfer_total == pytest.approx(500.0)
+    assert summary.external_deposit_total == pytest.approx(0.0)
     # net_strategy_pnl = 15.5 - 0.5 + (-0.4) = 14.6
     assert summary.net_strategy_pnl == pytest.approx(14.6)
     # funding without trade_id is account-level pending.
     assert summary.unattributed_funding_count == 2
+    # the unknown row is tallied separately, never in the ledger.
+    assert summary.unknown_count == 1
 
 
 def test_income_history_via_client_emits_funding_and_commission_events():

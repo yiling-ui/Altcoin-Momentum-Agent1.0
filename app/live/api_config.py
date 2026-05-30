@@ -37,51 +37,24 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Final
 
+from app.core.enums import LiveRuntimeMode
 from app.live.secrets import SecretValue, load_secret
 
 
 # ---------------------------------------------------------------------------
 # Live runtime mode
 # ---------------------------------------------------------------------------
-class LiveRuntimeMode(str, Enum):
-    """Live runtime mode for the real-capital road map.
-
-    HANDOFF(PR110): this enum is intentionally shaped to be unified with
-    the PR110 "Live Path Isolation" runtime modes. Until PR110 lands,
-    PR111 ships this self-contained enum and defaults to
-    :attr:`LIVE_SHADOW`.
-
-    Ladder semantics (strict):
-
-      - ``LIVE_SHADOW``  - connect real read APIs, observe real market /
-        balances, push operator messages, but the order path is HARD
-        blocked. This is the PR111 default and the only mode PR111
-        supports for real connectivity.
-      - ``LIVE_LIMITED`` - small-capital real trading (a later PR). PR111
-        NEVER auto-selects this mode.
-      - ``LIVE_FULL``    - full real trading (a much later PR).
-      - ``PAPER``        - no real API; pure paper. Kept so the mode set
-        is a superset of the paper road map.
-    """
-
-    PAPER = "PAPER"
-    LIVE_SHADOW = "LIVE_SHADOW"
-    LIVE_LIMITED = "LIVE_LIMITED"
-    LIVE_FULL = "LIVE_FULL"
-
-    @property
-    def allows_live_orders(self) -> bool:
-        """Only LIVE_LIMITED / LIVE_FULL conceptually allow orders.
-
-        PR111 still refuses to *send* orders in every mode; this property
-        only describes the mode's intent so the order-path gate can read a
-        single predicate. ``LIVE_SHADOW`` and ``PAPER`` never allow orders.
-        """
-        return self in (LiveRuntimeMode.LIVE_LIMITED, LiveRuntimeMode.LIVE_FULL)
-
+# PR111 reuses PR110's canonical :class:`app.core.enums.LiveRuntimeMode`
+# (``LIVE_SHADOW`` / ``LIVE_LIMITED``) rather than defining its own. The
+# default is ``LIVE_SHADOW`` (空盘跑): real read connectivity, no order
+# path. PR111 NEVER escalates to ``LIVE_LIMITED`` - that is gated by
+# PR110's :class:`app.live.runtime_mode.LiveModeGuard` confirmation
+# handshake, and PR111 still never sends a real order in any mode.
+#
+# PR110's enum exposes ``real_orders_possible`` (True only for
+# LIVE_LIMITED). PR111 keeps the order path blocked regardless.
 
 # Default mode: never auto-escalate above LIVE_SHADOW in PR111.
 DEFAULT_LIVE_RUNTIME_MODE: Final[LiveRuntimeMode] = LiveRuntimeMode.LIVE_SHADOW
@@ -284,7 +257,9 @@ class GeneralLiveConfig:
             # Unknown mode: fall back to the safe default rather than crash.
             mode = DEFAULT_LIVE_RUNTIME_MODE
         # PR111 never escalates above LIVE_SHADOW for real connectivity.
-        if mode.allows_live_orders:
+        # LIVE_LIMITED is gated by PR110's confirmation handshake and is
+        # never armed from a bare env var.
+        if mode.real_orders_possible:
             mode = LiveRuntimeMode.LIVE_SHADOW
         return cls(
             runtime_mode=mode,

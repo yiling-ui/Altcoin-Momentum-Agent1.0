@@ -76,12 +76,12 @@ def test_default_runtime_mode_is_live_shadow():
 
 
 def test_runtime_mode_never_auto_escalates_to_live_orders():
-    # Even if the operator asks for LIVE_LIMITED / LIVE_FULL, PR111 keeps
-    # the runtime at LIVE_SHADOW so the order path stays blocked.
-    for asked in ("LIVE_LIMITED", "LIVE_FULL"):
-        cfg = LiveApiConfig.from_env({"AMA_LIVE_RUNTIME_MODE": asked})
-        assert cfg.live_runtime_mode == LiveRuntimeMode.LIVE_SHADOW
-        assert cfg.live_runtime_mode.allows_live_orders is False
+    # If the operator asks for LIVE_LIMITED, PR111 coerces back to
+    # LIVE_SHADOW so the order path stays blocked (LIVE_LIMITED is only
+    # ever armed via PR110's confirmation handshake, never a bare env var).
+    cfg = LiveApiConfig.from_env({"AMA_LIVE_RUNTIME_MODE": "LIVE_LIMITED"})
+    assert cfg.live_runtime_mode == LiveRuntimeMode.LIVE_SHADOW
+    assert cfg.live_runtime_mode.real_orders_possible is False
 
 
 def test_unknown_runtime_mode_falls_back_safely():
