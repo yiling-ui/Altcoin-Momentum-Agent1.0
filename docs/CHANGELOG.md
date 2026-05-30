@@ -7,6 +7,94 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR116 — 10U LIVE_LIMITED Launch Pack v0: End-to-End Live Readiness + Shadow Run + Controlled Real-Order Arming + Kill Switch + Runbook: IN_REVIEW
+
+**Type:** the final launch pack that wires PR110–PR115 into a controlled,
+operator-confirmed, small-capital real-money runtime. **The first stage
+that MAY support real 10U `LIVE_LIMITED` operation — only when every gate
+is explicitly satisfied.** **Default behaviour stays safe:**
+`runtime_mode=LIVE_SHADOW`, `exchange_live_orders=false`,
+`live_trading=false`, `trade_authority=false`, `ai_trade_authority=false`,
+**no real order by default**.
+
+**Runtime effect on trading:** none by default. Real 10U operation is only
+possible behind the full env + Telegram confirmation + execution-gate
+handshake described below.
+
+**Added — `app/live/` package:**
+
+  - `live_launch_models.py` — `LaunchReadinessReport`, `ShadowRunResult`,
+    `SmokeResult`, `LaunchCheckItem` + `launch_safety_markers()` (every
+    payload pins `real_order=false` / `trade_authority=false` /
+    `ai_trade_authority=false` / `exchange_live_orders=false` /
+    `no_real_order_sent=true`).
+  - `live_runtime.py` — `LiveRuntime` resolves the **active capital
+    profile dynamically** (explicit → persistent state → env → `L0_SHADOW`);
+    `LiveProfileCaps` exposes every cap; `build_execution_context(...)`
+    sets `allowed_profile_ids=(active,)` so a profile switch needs **no
+    code change**; `assert_live_source` / `assert_live_market_source`
+    re-assert the PR110/PR114 isolation (rejects `MockExchange` /
+    `HistoricalMarketStore` / sim / blind / replay as a live source).
+  - `live_launch_readiness.py` — `LiveLaunchReadinessChecker` runs the
+    single end-to-end check (Binance public/private-read/private-trade,
+    Telegram outbound + chat, DeepSeek optional, active profile + usable
+    cap, `exchangeInfo` precision, a tiny **DRY** order validation, kill
+    switch, live-path + blind/sim isolation, funding accounting) and emits
+    `overall_status` (`PASS`/`WARN`/`FAIL`), `go_for_live_shadow`,
+    `go_for_live_limited`, blockers + warnings. **Never sends a real
+    order.**
+  - `live_shadow_runner.py` — `LiveShadowRunner` runs the real-market
+    shadow loop (空盘跑): cards + optional DeepSeek briefing + optional
+    Telegram push. `real_order=false`, `no_real_order_sent=true`.
+  - `live_limited_arming.py` — `evaluate_arming(...)` (`ArmingStatus`) +
+    `LiveLimitedSmoke` (dry-run validates/gates but never submits; the
+    real-order path requires the acknowledgement flag + confirmation code +
+    within-cap notional + armed `LIVE_LIMITED` + every execution gate, and
+    routes through the single `LiveExecutionGateway`, writes the ledger,
+    never retries).
+  - `live_kill_switch.py` — `LiveKillSwitch` (persisted, audited; blocks
+    new entries immediately; controlled exit only through the gateway when
+    wired; never claims a position closed unless the exchange confirms).
+
+**Added — CLIs:** `scripts/live_launch_check.py`,
+`scripts/live_shadow_run.py`, `scripts/live_limited_smoke.py` (dry-run by
+default).
+
+**Changed — `app/live/telegram_commands.py`:** added `/launch_check`,
+`/live_readiness`, `/shadow_once`, `/live_smoke` (dry-run only from
+Telegram), `/kill_status` — read-only / informational; no direct order
+from Telegram.
+
+**Docs:** `docs/AMA_RT_10U_LIVE_LIMITED_LAUNCH_PACK.md` (new); Phase A–F
+runbook + GO/NO-GO appended to `docs/AMA_RT_LIVE_OPERATOR_RUNBOOK.md`.
+
+**Capital scaling without a new PR:** the live runtime never hardcodes
+10U. `L1_10U_PROBE` is the initial default; switching to `L1_1U` … `L8_10M`
+through persistent state / env / Telegram `/profile set` changes every
+risk + execution cap with **no code change**. Equity above the active band
+emits `CAPITAL_PROFILE_MISMATCH`, caps usable capital, and demands an
+explicit operator switch (no auto escalation). Deposits/withdrawals affect
+profile evaluation but never pollute strategy PnL.
+
+**Hotfix — kill switch state disambiguation (pre-merge):** the launch
+readiness checker previously treated `kill_switch_armed=true` as a
+`LIVE_LIMITED` GO requirement, which contradicted the execution / arming
+rule that a triggered kill switch blocks every new entry. The single
+ambiguous flag is split into two distinct states:
+`kill_switch_ready` (subsystem available — state readable, operator can
+trigger it; a GO **requirement**) and
+`kill_switch_active` (emergency halt engaged — blocks new entries; a GO
+**blocker**). Correct `LIVE_LIMITED` GO rule = `kill_switch_ready=true`
+**and** `kill_switch_active=false`; correct execution rule = reject new
+entries when `kill_switch_active=true`. `LaunchReadinessReport` /
+`KillSwitchStatus` / `ArmingStatus` now surface both states;
+`kill_switch_armed` is retained only as a backward-compatible alias of
+`kill_switch_active`. Runbook + launch-pack docs updated to match
+(“ready / available” vs “active / emergency halt”).
+
+**Tests:** `tests/unit/test_pr116_live_launch_pack.py` (readiness, shadow,
+arming, smoke, kill switch, isolation, capital-scaling, safety defaults).
+
 ### PR115 — DeepSeek Live Intelligence v0: Live-safe Operator Briefing + Evidence Compression + Risk Explanation: IN_REVIEW
 
 **Type:** AI market-intelligence only — live-safe operator briefing,

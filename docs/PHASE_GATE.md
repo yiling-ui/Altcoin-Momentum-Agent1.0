@@ -8,6 +8,37 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR116 — 10U LIVE_LIMITED Launch Pack v0 (IN_REVIEW)
+
+**PR116 — end-to-end live readiness, LIVE_SHADOW run, controlled
+operator-confirmed real-order arming, kill switch, and the final operator
+runbook.** PR116 is the first slice that **may** support real 10U
+`LIVE_LIMITED` operation, but it does **NOT** loosen any Phase 1 safety
+flag and stays safe by default:
+
+  - **No default real trading.** A bare boot / default config stays on
+    `runtime_mode=LIVE_SHADOW` with `exchange_live_orders=false`,
+    `trade_authority=false`, `ai_trade_authority=false`,
+    `live_trading=false`, and sends **no real order**. A real order is only
+    ever attempted behind the full handshake: operator env flags + Telegram
+    `/mode live_limited` + `/confirm_live CODE` + armed kill switch + an
+    `L1_10U` (or approved) profile + `LiveExecutionGateway` approval +
+    `LiveRiskDecision` approval.
+  - **AI has no trade authority.** `ai_trade_authority=false` stays pinned;
+    the AI can never trigger a launch/execute.
+  - **No automatic profile escalation.** The active capital profile is read
+    dynamically; equity above the active band emits
+    `CAPITAL_PROFILE_MISMATCH` and caps usable capital until the operator
+    explicitly switches profile. Switching profile needs no code change.
+  - **Source isolation re-asserted.** Only `OrderSource.LIVE` may drive
+    live operation; `MockExchange` / `HistoricalMarketStore` / sim / blind
+    / replay / paper-shadow can never reach the live path.
+
+**Gate to close PR116:** the full unit suite passes (including the PR116
+readiness / shadow / arming / smoke / kill-switch / isolation /
+capital-scaling / safety-default tests), and a real 10U smoke is only ever
+sent when every gate above is explicitly satisfied.
+
 ## Open slice — PR115 — DeepSeek Live Intelligence v0 (IN_REVIEW)
 
 **PR115 — live-safe operator briefing + evidence compression + risk
