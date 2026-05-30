@@ -8,6 +8,46 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR113 — Live Execution Gateway v0 (IN_REVIEW)
+
+**PR113 — Binance order execution adapter + order lifecycle + fill
+ledger + strict LIVE_LIMITED gate.** PR113 introduces the first code path
+able to compose + send a real Binance order, but it is **blocked by
+default** and does **NOT** loosen any Phase 1 safety flag:
+
+  - `exchange_live_orders` defaults `False`; `trade_authority` defaults
+    `False`; `live_trading` stays `False`; default runtime mode is
+    `LIVE_SHADOW`. With these defaults the gateway returns a `BLOCKED`
+    result and the adapter never opens a socket.
+  - A real order request leaves the system **only** when all 15 gate
+    conditions are true (`LIVE_LIMITED` + `live_limited_confirmed` + an
+    allowed profile + `exchange_live_orders` + `trade_authority` +
+    private trade enabled + `LiveRiskDecision.approved` +
+    `real_order_allowed` + kill switch off + `source=LIVE` +
+    `client_order_id` + exchangeInfo precision/minNotional + notional /
+    leverage within profile + stop/exit plan or documented emergency
+    exception). See `evaluate_execution_permission`.
+  - `ai_trade_authority` stays `False` and is a **hard refusal** at the
+    gateway (`AiTradeAuthorityForbidden`); AI never places an order.
+    Telegram never bypasses the Risk Engine; blind / replay / sim /
+    paper-shadow sources are isolated (`LivePathIsolationViolation`).
+  - No leverage / margin change (the adapter's `set_leverage` /
+    `set_margin_mode` refuse). Orders are idempotent
+    (`newClientOrderId`) and never blind-retried.
+  - `net_pnl = realized − fee + funding_usdt_attributed`. Funding is
+    carried forward (`UNATTRIBUTED_PENDING_POSITION_LINK`); position-level
+    attribution is the PR114 handoff. `phase_12_forbidden` recorded
+    `True`. PR112's dry `LiveRiskDecision` keeps `real_order_allowed=False`;
+    only `authorize_real_order` (gated on a fully-armed context) flips it.
+
+Gate criteria for the NEXT slice (PR114 — funding/position attribution +
+real execution dry-run on testnet): operator can run
+`scripts/live_execution_smoke.py --permission-check` / `--dry-run-order`
+and see `no_real_order_sent=true` and the full gate decision; the
+real-order path stays blocked unless every gate + all three confirmation
+flags are satisfied. Acceptance evidence:
+`docs/AMA_RT_LIVE_EXECUTION_GATEWAY.md`, `tests/unit/test_pr113_*.py`.
+
 ## Open slice — PR112 — Live Capital / Risk / Funding-Aware PnL / 10U Profile Enforcement v0 (IN_REVIEW)
 
 **PR112 — wire PR111 real private-read into a live capital / risk
