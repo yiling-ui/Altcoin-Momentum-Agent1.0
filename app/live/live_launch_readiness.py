@@ -119,6 +119,8 @@ class LiveLaunchReadinessChecker:
         exchange_info: BinanceExchangeInfoSnapshot | None = None,
         income_events: list[BinanceIncomeEvent] | None = None,
         execution_flags: ExecutionPermissionContext | None = None,
+        kill_switch_ready: bool | None = None,
+        kill_switch_active: bool | None = None,
         kill_switch_armed: bool | None = None,
         live_limited_confirmed: bool | None = None,
         dry_order_symbol: str | None = None,
@@ -139,8 +141,16 @@ class LiveLaunchReadinessChecker:
         active_profile_id = self._runtime.active_capital_profile_id()
         active_profile = get_profile(active_profile_id)
 
-        if kill_switch_armed is None:
-            kill_switch_armed = self._runtime.kill_switch_armed()
+        if kill_switch_active is None:
+            # Backward-compat: the deprecated ``kill_switch_armed`` arg maps
+            # onto the ACTIVE (emergency-halt) state.
+            kill_switch_active = (
+                bool(kill_switch_armed)
+                if kill_switch_armed is not None
+                else self._runtime.kill_switch_active()
+            )
+        if kill_switch_ready is None:
+            kill_switch_ready = self._runtime.kill_switch_ready()
         if live_limited_confirmed is None:
             live_limited_confirmed = self._runtime.live_limited_confirmed()
 
@@ -385,12 +395,28 @@ class LiveLaunchReadinessChecker:
                 not capital_profile_mismatch,
             )
         )
+        # Kill switch is split into two distinct GO gates (PR116 hotfix):
+        #   * kill_switch_ready      - subsystem available (REQUIRED true).
+        #   * kill_switch_not_active - no emergency halt engaged (REQUIRED
+        #                              true; an ACTIVE kill switch blocks
+        #                              every new entry, so it can never be a
+        #                              GO requirement).
         items.append(
             _ll(
-                "kill_switch_armed",
-                bool(kill_switch_armed),
-                "Kill switch armed.",
-                bool(kill_switch_armed),
+                "kill_switch_ready",
+                bool(kill_switch_ready),
+                "Kill switch subsystem ready/available (state readable, "
+                "operator can trigger it).",
+                bool(kill_switch_ready),
+            )
+        )
+        items.append(
+            _ll(
+                "kill_switch_not_active",
+                not bool(kill_switch_active),
+                "Kill switch is NOT active (no emergency halt blocking new "
+                "entries).",
+                not bool(kill_switch_active),
             )
         )
         items.append(
@@ -538,7 +564,9 @@ class LiveLaunchReadinessChecker:
             telegram_outbound_ok=telegram_outbound_ok,
             telegram_allowed_chat_ok=telegram_allowed_chat_ok,
             deepseek_ok_or_optional=deepseek_ok_or_optional,
-            kill_switch_armed=bool(kill_switch_armed),
+            kill_switch_ready=bool(kill_switch_ready),
+            kill_switch_active=bool(kill_switch_active),
+            kill_switch_armed=bool(kill_switch_active),
             live_limited_confirmed=bool(live_limited_confirmed),
             exchange_live_orders=exchange_live_orders,
             trade_authority=trade_authority,

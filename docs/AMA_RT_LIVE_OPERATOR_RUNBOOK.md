@@ -106,14 +106,26 @@ To return to safety at any time:
 
 ## 6. Emergency: kill switch
 
+The kill switch has two distinct states:
+
+- **ready / available** — the subsystem exists, its persisted state is
+  readable, and the operator can trigger it. This is the normal state and
+  is a launch-readiness requirement.
+- **active (emergency halt)** — the switch has been triggered; every new
+  entry is blocked.
+
 ```
-/kill_all          → returns a KILL code (not yet armed)
-/confirm_kill CODE → arms the kill switch + pauses new entries
+/kill_status       → shows ready / active / blocks_new_entries
+/kill_all          → returns a KILL code (not yet active)
+/confirm_kill CODE → ACTIVATES the kill switch + pauses new entries
 ```
 
-PR114 arms the kill switch and alerts. A controlled cancel/exit (if
-wired in a later PR) routes through the PR113 execution gateway + safety
-gate. While the kill switch is armed, `/confirm_live` is refused.
+`/kill_all` → `/confirm_kill CODE` arms the kill switch into the **active**
+state and alerts. A controlled cancel/exit (if wired in a later PR) routes
+through the PR113 execution gateway + safety gate. While the kill switch is
+**active**, `/confirm_live` is refused. LIVE_LIMITED never requires the kill
+switch to be active — it only requires the kill switch to be **ready** and
+**not active**.
 
 ---
 
@@ -298,12 +310,14 @@ warning to fix on the exchange.
 optional; system stable.
 
 **GO for LIVE_LIMITED:** real account read OK; `L1_10U` (or approved)
-profile active; usable capital capped; kill switch armed; Telegram allowed
-chat OK; `exchangeInfo` OK; DRY order validation OK; no blind/sim source in
-the live path; operator confirmation complete.
+profile active; usable capital capped; kill switch **ready** (available)
+and **not active**; Telegram allowed chat OK; `exchangeInfo` OK; DRY order
+validation OK; no blind/sim source in the live path; operator confirmation
+complete.
 
 **NO-GO:** private read fail; secret placeholder; withdraw-permission
-warning if detectable; profile mismatch unacknowledged; kill switch not
-armed; funding accounting unavailable; stop/exit plan unavailable; Telegram
-not configured for the live operator; source isolation failure; AI
+warning if detectable; profile mismatch unacknowledged; kill switch **not
+ready** (subsystem unavailable) OR kill switch **active** (emergency halt
+engaged); funding accounting unavailable; stop/exit plan unavailable;
+Telegram not configured for the live operator; source isolation failure; AI
 forbidden-field output accepted; execution gateway rejects.

@@ -75,12 +75,19 @@ class ArmingStatus:
     trade_authority: bool
     private_trade_enabled: bool
     ai_trade_authority: bool
-    kill_switch_armed: bool
+    kill_switch_ready: bool
+    kill_switch_active: bool
     profile_allows_real_orders: bool
 
     @property
     def fully_armed(self) -> bool:
-        """True only when EVERY gate is satisfied for a real order."""
+        """True only when EVERY gate is satisfied for a real order.
+
+        Note the kill switch contributes only through ``kill_switch_active``
+        (an ACTIVE emergency halt blocks a real order). The kill switch
+        being READY/available is NOT a requirement for arming - it is a
+        separate launch-readiness gate.
+        """
         return (
             self.runtime_mode == LiveRuntimeMode.LIVE_LIMITED.value
             and self.live_limited_confirmed
@@ -88,7 +95,7 @@ class ArmingStatus:
             and self.trade_authority
             and self.private_trade_enabled
             and not self.ai_trade_authority
-            and not self.kill_switch_armed
+            and not self.kill_switch_active
             and self.profile_allows_real_orders
         )
 
@@ -106,7 +113,7 @@ class ArmingStatus:
             gaps.append("private_trade_disabled")
         if self.ai_trade_authority:
             gaps.append("ai_trade_authority_forbidden")
-        if self.kill_switch_armed:
+        if self.kill_switch_active:
             gaps.append("kill_switch_active")
         if not self.profile_allows_real_orders:
             gaps.append("profile_real_orders_not_allowed")
@@ -124,7 +131,10 @@ class ArmingStatus:
             "trade_authority": self.trade_authority,
             "private_trade_enabled": self.private_trade_enabled,
             "ai_trade_authority": self.ai_trade_authority,
-            "kill_switch_armed": self.kill_switch_armed,
+            "kill_switch_ready": self.kill_switch_ready,
+            "kill_switch_active": self.kill_switch_active,
+            # Compatibility alias (== active); never used ambiguously.
+            "kill_switch_armed": self.kill_switch_active,
             "profile_allows_real_orders": self.profile_allows_real_orders,
             "fully_armed": self.fully_armed,
             "missing_gates": list(self.missing_gates()),
@@ -155,7 +165,8 @@ def evaluate_arming(
         trade_authority=bool(trade_authority),
         private_trade_enabled=bool(config.binance.enable_private_trade),
         ai_trade_authority=bool(ai_trade_authority),
-        kill_switch_armed=runtime.kill_switch_armed(),
+        kill_switch_ready=runtime.kill_switch_ready(),
+        kill_switch_active=runtime.kill_switch_active(),
         profile_allows_real_orders=profile.real_orders_allowed,
     )
 

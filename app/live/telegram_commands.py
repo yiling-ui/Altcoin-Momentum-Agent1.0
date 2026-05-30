@@ -397,6 +397,7 @@ class TelegramCommandHandler:
             "capital_profile_id": self._profile.capital_profile_id.value,
             "live_limited_armed": self._runtime.live_limited_armed,
             "paused": self._runtime.paused,
+            "kill_switch_active": self._kill.armed,
             "kill_switch_armed": self._kill.armed,
             "open_position_count": len(self._data.positions()),
             "account_equity_usdt": self._data.account_equity_usdt(),
@@ -591,7 +592,9 @@ class TelegramCommandHandler:
         risk.setdefault("max_account_capital_usdt", prof.max_account_capital_usdt)
         risk.setdefault("max_position_notional_usdt", prof.max_position_notional_usdt)
         risk.setdefault("max_leverage", prof.max_leverage)
-        risk.setdefault("kill_switch_state", "ARMED" if self._kill.armed else "READY")
+        risk.setdefault(
+            "kill_switch_state", "ACTIVE" if self._kill.armed else "READY"
+        )
         card = fmt.build_risk_card(risk)
         return self._ok(cmd.key, card)
 
@@ -848,27 +851,39 @@ class TelegramCommandHandler:
         return self._ok(cmd.key, card)
 
     def _cmd_kill_status(self, cmd: ParsedCommand) -> CommandResult:
-        """Return a LIVE_KILL_STATUS card (armed / blocks-new-entries)."""
-        armed = bool(self._kill.armed)
+        """Return a LIVE_KILL_STATUS card (ready / active / blocks-new-entries)."""
+        active = bool(self._kill.armed)
+        # "Ready" means the kill switch subsystem is available: the
+        # persisted state was readable on load (no corrupt fail-safe
+        # warning) and the operator can trigger it.
+        ready = not any("CORRUPT" in str(w).upper() for w in self._load_warnings)
         controlled = self._kill_switch_callback is not None
         card = {
             "card_type": "LIVE_KILL_STATUS",
-            "armed": armed,
-            "blocks_new_entries": armed,
+            # Two distinct states (PR116 hotfix).
+            "kill_switch_ready": ready,
+            "kill_switch_active": active,
+            "ready": ready,
+            "active": active,
+            # Compatibility alias (== active); never used ambiguously.
+            "armed": active,
+            "blocks_new_entries": active,
             "armed_at": self._kill.armed_at,
             "armed_by": self._kill.armed_by,
             "reason": self._kill.reason,
             "controlled_exit_supported": controlled,
-            "can_close_positions": armed and controlled,
+            "can_close_positions": active and controlled,
             "note": (
-                "Kill switch armed: new entries blocked. "
-                + (
-                    "Controlled reduce/exit is wired through the execution gateway."
-                    if controlled
-                    else "PR116 does not auto-close positions; close manually on the exchange."
+                (
+                    "Kill switch ACTIVE (emergency halt): new entries blocked. "
+                    + (
+                        "Controlled reduce/exit is wired through the execution gateway."
+                        if controlled
+                        else "PR116 does not auto-close positions; close manually on the exchange."
+                    )
                 )
-                if armed
-                else "Kill switch ready (not armed)."
+                if active
+                else "Kill switch READY (available, not active). New entries permitted subject to all other gates."
             ),
             "real_order": False,
             "trade_authority": False,
@@ -894,6 +909,11 @@ class TelegramCommandHandler:
             "capital_profile_id": self._profile.capital_profile_id.value,
             "account_equity_usdt": equity,
             "profile_max_account_capital_usdt": prof.max_account_capital_usdt,
+            "kill_switch_ready": not any(
+                "CORRUPT" in str(w).upper() for w in self._load_warnings
+            ),
+            "kill_switch_active": self._kill.armed,
+            # Compatibility alias (== active); never used ambiguously.
             "kill_switch_armed": self._kill.armed,
             "live_limited_armed": self._runtime.live_limited_armed,
             "exchange_live_orders": flags.get("exchange_live_orders", False),

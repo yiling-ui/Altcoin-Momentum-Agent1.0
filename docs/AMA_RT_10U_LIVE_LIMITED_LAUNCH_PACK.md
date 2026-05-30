@@ -48,7 +48,9 @@ The report includes (selected): `overall_status`, `go_for_live_shadow`,
 `l1_10u_cap_enforced`, `binance_public_ok`, `binance_private_read_ok`,
 `binance_private_trade_configured`, `binance_private_trade_enabled`,
 `telegram_outbound_ok`, `telegram_allowed_chat_ok`,
-`deepseek_ok_or_optional`, `kill_switch_armed`, `exchange_live_orders`,
+`deepseek_ok_or_optional`, `kill_switch_ready`, `kill_switch_active`
+(plus `kill_switch_armed` as a backward-compatible alias of
+`kill_switch_active`), `exchange_live_orders`,
 `trade_authority`, `ai_trade_authority`, `live_path_isolation_ok`,
 `blind_sim_isolation_ok`, `funding_accounting_ok`, `order_precision_ok`,
 `dry_order_validation_ok`, and `no_real_order_sent` (**always `true`**).
@@ -92,7 +94,9 @@ Arming `LIVE_LIMITED` for a real order requires **every** gate:
 2. Operator runs the launch check (`--pre-live-limited`).
 3. Operator switches mode in Telegram: `/mode live_limited`.
 4. Operator confirms: `/confirm_live CODE`.
-5. Kill switch is armed.
+5. Kill switch is **ready** (available) and **not active** (no emergency
+   halt engaged). An ACTIVE kill switch blocks every new entry, so it can
+   never be a launch requirement.
 6. Active profile is `L1_10U_PROBE` (or an operator-approved profile).
 7. `exchange_live_orders=true` **and** `trade_authority=true`.
 8. Binance private trade is enabled (`AMA_BINANCE_ENABLE_PRIVATE_TRADE=true`).
@@ -172,19 +176,29 @@ claims a fill/close unless the exchange confirms.
 
 ## 7. Kill switch and emergency workflow
 
-`/kill_all` → `/confirm_kill CODE` (a two-step confirmation). When armed:
+The kill switch has two distinct states (PR116 hotfix):
 
-  - **new entries are blocked immediately** (the persisted armed flag is
+  - **ready / available** — the subsystem exists, its persisted state is
+    readable, and the operator can trigger it. A LIVE_LIMITED launch
+    REQUIRES the kill switch to be ready.
+  - **active (emergency halt)** — the switch has been triggered. A
+    LIVE_LIMITED launch REQUIRES the kill switch to be **not** active (an
+    active kill switch blocks every new entry).
+
+`/kill_all` → `/confirm_kill CODE` (a two-step confirmation) moves the kill
+switch into the **active** state. When active:
+
+  - **new entries are blocked immediately** (the persisted active flag is
     the source of truth the execution context consults),
-  - the kill state is visible in `/status`, `/kill_status`, and the
-    readiness report.
+  - the state is visible in `/status`, `/kill_status`, and the readiness
+    report as both `kill_switch_ready` and `kill_switch_active`.
 
 **PR116 limit (documented):** a real cancel / exit only happens through the
 `LiveExecutionGateway` and only when a controlled-exit callback is wired.
-With no callback wired, the kill switch **arms + halts new entries** and
-tells the operator, in plain language, that open positions must be closed
-**manually on the exchange**. The kill switch **never** claims a position
-is closed unless the exchange actually confirmed it.
+With no callback wired, the kill switch **activates + halts new entries**
+and tells the operator, in plain language, that open positions must be
+closed **manually on the exchange**. The kill switch **never** claims a
+position is closed unless the exchange actually confirmed it.
 
 ---
 

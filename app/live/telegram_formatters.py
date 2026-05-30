@@ -626,15 +626,20 @@ def build_kill_switch_card(
     return _finalize(
         {
             "card_type": card_type,
+            "kill_switch_active": bool(armed),
+            # Compatibility alias (== active); never used ambiguously.
             "kill_switch_armed": bool(armed),
+            "blocks_new_entries": bool(armed),
             "arm_requested": bool(arm_requested),
             "confirmation_code": _or(confirmation_code),
             "reason": reason,
             "note": (
-                "Second confirmation (/confirm_kill CODE) required."
+                "Second confirmation (/confirm_kill CODE) required to ACTIVATE "
+                "the kill switch (emergency halt)."
                 if arm_requested
-                else "Kill switch armed; new entries blocked. Cancels/exits, if "
-                "wired, route through the execution gateway + safety gate."
+                else "Kill switch ACTIVE (emergency halt); new entries blocked. "
+                "Cancels/exits, if wired, route through the execution gateway + "
+                "safety gate."
             ),
             "real_order": False,
         }

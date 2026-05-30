@@ -164,10 +164,15 @@ def _store(tmp_path=None) -> LiveOperatorStateStore:
 
 
 def _arm_store(store: LiveOperatorStateStore, profile=L1) -> None:
-    """Persist a fully-armed LIVE_LIMITED + confirmed + kill-switch state."""
+    """Persist a fully-armed LIVE_LIMITED + confirmed state.
+
+    The kill switch is READY (available) but NOT active: a funded launch
+    requires the kill switch to be ready and NOT active (an active kill
+    switch is an emergency halt that blocks every new entry).
+    """
     store.save_runtime_mode(RuntimeModeState(runtime_mode=LIMITED, live_limited_armed=True))
     store.save_confirmation(ConfirmationState(live_limited_confirmed=True))
-    store.save_kill_switch(KillSwitchState(armed=True, armed_by="operator"))
+    store.save_kill_switch(KillSwitchState(armed=False))
     store.save_capital_profile(CapitalProfileStateRecord(capital_profile_id=profile))
 
 
@@ -299,10 +304,43 @@ def test_08_launch_check_equity_above_10u_no_auto_upgrade():
     assert AUTO_ESCALATION_ALLOWED is False
 
 
-def test_09_launch_check_requires_kill_switch_armed():
+def test_09_launch_check_go_when_kill_switch_ready_and_not_active():
+    # Correct LIVE_LIMITED posture: kill switch READY (available) and NOT
+    # active. This must be a GO (a previous bug required it to be ACTIVE).
+    rep = _armed_report()
+    assert rep.kill_switch_ready is True
+    assert rep.kill_switch_active is False
+    assert rep.go_for_live_limited is True
+    assert "kill_switch_ready" not in rep.blockers
+    assert "kill_switch_not_active" not in rep.blockers
+
+
+def test_09a_launch_check_no_go_when_kill_switch_not_ready():
+    # If the kill-switch subsystem is NOT ready (unavailable), it is NO-GO.
     st = _store()
     _arm_store(st)
-    st.save_kill_switch(KillSwitchState(armed=False))  # disarm
+    env = _armed_env()
+    config = LiveApiConfig.from_env(env)
+    rt = LiveRuntime(config, state_store=st)
+    client = _binance_client(config, _account_body(), mode=LIMITED)
+    checker = LiveLaunchReadinessChecker(config, runtime=rt, state_store=st)
+    rep = checker.check(
+        pre_live_limited=True, check_telegram=False, binance_client=client,
+        exchange_info=EXINFO, account_snapshot=parse_account(_account_body()),
+        kill_switch_ready=False, kill_switch_active=False,
+        execution_flags=ExecutionPermissionContext.from_config(config, environ=env),
+    )
+    assert rep.go_for_live_limited is False
+    assert "kill_switch_ready" in rep.blockers
+    assert rep.kill_switch_ready is False
+
+
+def test_09b_launch_check_no_go_when_kill_switch_active():
+    # An ACTIVE kill switch (emergency halt) is NO-GO: it blocks new entries
+    # and can never be a launch requirement.
+    st = _store()
+    _arm_store(st)
+    st.save_kill_switch(KillSwitchState(armed=True, armed_by="operator"))  # ACTIVE
     env = _armed_env()
     config = LiveApiConfig.from_env(env)
     rt = LiveRuntime(config, state_store=st)
@@ -314,7 +352,19 @@ def test_09_launch_check_requires_kill_switch_armed():
         execution_flags=ExecutionPermissionContext.from_config(config, environ=env),
     )
     assert rep.go_for_live_limited is False
-    assert "kill_switch_armed" in rep.blockers
+    assert "kill_switch_not_active" in rep.blockers
+    assert rep.kill_switch_active is True
+    assert rep.kill_switch_ready is True  # the subsystem is still available
+
+
+def test_09c_readiness_report_exposes_ready_and_active_clearly():
+    rep = _armed_report()
+    d = rep.to_dict()
+    # Both distinct states are exposed (not a single ambiguous flag).
+    assert d["kill_switch_ready"] is True
+    assert d["kill_switch_active"] is False
+    # The old key is kept ONLY as a backward-compatible alias of active.
+    assert d["kill_switch_armed"] == d["kill_switch_active"]
 
 
 def test_10_launch_check_requires_exchange_info_precision():
@@ -633,6 +683,106 @@ def test_29_mode_shadow_rollback_disarms_live_limited():
     handler.handle("/mode shadow")
     assert handler.runtime_mode is SHADOW
     assert handler.live_limited_armed is False
+
+
+def test_28b_smoke_rejects_when_kill_switch_active():
+    # An ACTIVE kill switch must block a fully-flagged real-order smoke.
+    st = _store()
+    smoke = _smoke(store=st)
+    st.save_kill_switch(KillSwitchState(armed=True, armed_by="operator"))  # ACTIVATE
+    r = smoke.run(
+        symbol="RAVEUSDT", notional_usdt=6, leverage=1, real_order=True,
+        i_understand_this_places_real_order=True, confirm_code="CODE",
+        expected_confirm_code="CODE", max_notional_usdt=20,
+        exchange_live_orders=True, trade_authority=True,
+        account_snapshot=parse_account(_account_body()),
+        planned_entry_price=1.0, planned_stop_price=0.9, planned_take_profit_price=1.2,
+    )
+    assert r.real_order is False
+    assert r.no_real_order_sent is True
+    assert r.blocked_reason == ExecutionRejectReason.KILL_SWITCH_ACTIVE
+
+
+def test_28c_smoke_not_rejected_merely_because_kill_switch_ready():
+    # Kill switch READY (available) but NOT active must NOT block ordering.
+    # The dry-run exposes the full gate reason list; KILL_SWITCH_ACTIVE
+    # must not appear when the switch is merely ready.
+    smoke = _smoke()  # _arm_store leaves the kill switch ready, not active
+    r = smoke.run(
+        symbol="RAVEUSDT", notional_usdt=6, leverage=1,
+        account_snapshot=parse_account(_account_body()),
+        planned_entry_price=1.0, planned_stop_price=0.9, planned_take_profit_price=1.2,
+    )
+    assert ExecutionRejectReason.KILL_SWITCH_ACTIVE not in r.reject_reasons
+
+
+def test_28d_confirm_kill_sets_active_and_blocks_new_entries():
+    # /kill_all -> /confirm_kill activates the kill switch + blocks entries.
+    st = _store()
+    st.save_capital_profile(CapitalProfileStateRecord(capital_profile_id=L1))
+    handler = _handler(store=st)
+    r1 = handler.handle("/kill_all")
+    code = r1.card["confirmation_code"]
+    r2 = handler.handle("/confirm_kill " + code)
+    assert r2.ok is True
+    assert handler.kill_switch_armed is True  # active (alias)
+    # /kill_status surfaces the split state + blocks_new_entries.
+    ks = handler.handle("/kill_status")
+    assert ks.card["kill_switch_active"] is True
+    assert ks.card["kill_switch_ready"] is True
+    assert ks.card["blocks_new_entries"] is True
+    # The execution context built afterwards reports the active halt.
+    config = LiveApiConfig.from_env(_armed_env())
+    rt = LiveRuntime(config, state_store=st)
+    ctx = rt.build_execution_context(exchange_live_orders=True, trade_authority=True)
+    assert ctx.kill_switch_active is True
+
+
+def test_28e_kill_switch_status_card_split_states():
+    # The LiveKillSwitch status card clearly carries ready / active /
+    # blocks_new_entries (PR116 hotfix disambiguation).
+    st = _store()
+    ks = LiveKillSwitch(state_store=st)
+    ready_status = ks.status()
+    assert ready_status.ready is True
+    assert ready_status.active is False
+    assert ready_status.blocks_new_entries is False
+    card = ready_status.telegram_card()
+    assert card["kill_switch_ready"] is True
+    assert card["kill_switch_active"] is False
+    # Activate -> active + blocks new entries.
+    ks.arm(by="operator")
+    active_status = ks.status()
+    assert active_status.active is True
+    assert active_status.ready is True
+    assert active_status.blocks_new_entries is True
+
+
+def test_28f_arming_status_rejects_only_on_active_not_ready():
+    # evaluate_arming: an ACTIVE kill switch is a missing gate; a READY
+    # (not active) kill switch is NOT a blocker for arming.
+    from app.live.live_limited_arming import evaluate_arming
+
+    env = _armed_env()
+    config = LiveApiConfig.from_env(env)
+    st = _store()
+    _arm_store(st)  # ready, not active
+    rt = LiveRuntime(config, state_store=st)
+    armed = evaluate_arming(
+        config, rt, exchange_live_orders=True, trade_authority=True
+    )
+    assert armed.kill_switch_ready is True
+    assert armed.kill_switch_active is False
+    assert "kill_switch_active" not in armed.missing_gates()
+    assert armed.fully_armed is True
+    # Activate -> kill_switch_active becomes a missing gate.
+    st.save_kill_switch(KillSwitchState(armed=True, armed_by="operator"))
+    armed2 = evaluate_arming(
+        config, rt, exchange_live_orders=True, trade_authority=True
+    )
+    assert armed2.kill_switch_active is True
+    assert "kill_switch_active" in armed2.missing_gates()
+    assert armed2.fully_armed is False
 
 
 # ===========================================================================

@@ -213,9 +213,42 @@ class LiveRuntime:
         record, _ = self._store.load_runtime_mode()
         return record.runtime_mode
 
-    def kill_switch_armed(self) -> bool:
+    def kill_switch_active(self) -> bool:
+        """Whether the kill switch is ACTIVE (emergency halt triggered).
+
+        When True every NEW entry is blocked. This is the persisted
+        ``armed`` flag; ``armed`` historically meant "active" so the two
+        are the same boolean - only the name is disambiguated here.
+        """
         record, _ = self._store.load_kill_switch()
         return bool(record.armed)
+
+    def kill_switch_ready(self) -> bool:
+        """Whether the kill switch subsystem is READY / available.
+
+        "Ready" (a.k.a. available) means the persisted kill-switch state
+        is readable and the operator can trigger it through the
+        confirmation workflow. It is INDEPENDENT of whether the switch is
+        active: a ready switch may be inactive (normal) or active
+        (emergency halt engaged). A corrupt / unreadable persisted state
+        fails safe to ``ready=False`` so the operator re-checks before a
+        funded launch.
+        """
+        _record, warnings = self._store.load_kill_switch()
+        for w in warnings:
+            if "CORRUPT" in str(w).upper():
+                return False
+        return True
+
+    def kill_switch_armed(self) -> bool:
+        """Backward-compatible alias of :meth:`kill_switch_active`.
+
+        ``armed`` is retained only as a compatibility alias for the
+        ACTIVE (emergency-halt) state; new code should use
+        :meth:`kill_switch_active` / :meth:`kill_switch_ready` so the two
+        distinct states are never confused.
+        """
+        return self.kill_switch_active()
 
     def live_limited_confirmed(self) -> bool:
         record, _ = self._store.load_confirmation()
@@ -337,7 +370,7 @@ class LiveRuntime:
         if live_limited_confirmed is None:
             live_limited_confirmed = self.live_limited_confirmed()
         if kill_switch_active is None:
-            kill_switch_active = self.kill_switch_armed()
+            kill_switch_active = self.kill_switch_active()
         return ExecutionPermissionContext(
             runtime_mode=self.runtime_mode(),
             live_limited_confirmed=bool(live_limited_confirmed),

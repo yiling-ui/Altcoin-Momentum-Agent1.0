@@ -76,6 +76,22 @@ emits `CAPITAL_PROFILE_MISMATCH`, caps usable capital, and demands an
 explicit operator switch (no auto escalation). Deposits/withdrawals affect
 profile evaluation but never pollute strategy PnL.
 
+**Hotfix — kill switch state disambiguation (pre-merge):** the launch
+readiness checker previously treated `kill_switch_armed=true` as a
+`LIVE_LIMITED` GO requirement, which contradicted the execution / arming
+rule that a triggered kill switch blocks every new entry. The single
+ambiguous flag is split into two distinct states:
+`kill_switch_ready` (subsystem available — state readable, operator can
+trigger it; a GO **requirement**) and
+`kill_switch_active` (emergency halt engaged — blocks new entries; a GO
+**blocker**). Correct `LIVE_LIMITED` GO rule = `kill_switch_ready=true`
+**and** `kill_switch_active=false`; correct execution rule = reject new
+entries when `kill_switch_active=true`. `LaunchReadinessReport` /
+`KillSwitchStatus` / `ArmingStatus` now surface both states;
+`kill_switch_armed` is retained only as a backward-compatible alias of
+`kill_switch_active`. Runbook + launch-pack docs updated to match
+(“ready / available” vs “active / emergency halt”).
+
 **Tests:** `tests/unit/test_pr116_live_launch_pack.py` (readiness, shadow,
 arming, smoke, kill switch, isolation, capital-scaling, safety defaults).
 

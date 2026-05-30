@@ -145,6 +145,17 @@ class LaunchReadinessReport:
     deepseek_ok_or_optional: bool
 
     # Operator / system flags.
+    # Kill switch is split into two DISTINCT states (PR116 hotfix):
+    #   * ``kill_switch_ready``  - the subsystem is available: persisted
+    #     state is readable and the operator can trigger it. A LIVE_LIMITED
+    #     GO REQUIREMENT (must be True).
+    #   * ``kill_switch_active`` - an emergency halt has been triggered and
+    #     new entries are blocked. A LIVE_LIMITED GO BLOCKER (must be
+    #     False).
+    # ``kill_switch_armed`` is kept ONLY as a backward-compatible alias of
+    # ``kill_switch_active`` and is never used ambiguously.
+    kill_switch_ready: bool
+    kill_switch_active: bool
     kill_switch_armed: bool
     live_limited_confirmed: bool
     exchange_live_orders: bool
@@ -189,6 +200,8 @@ class LaunchReadinessReport:
             "telegram_outbound_ok": self.telegram_outbound_ok,
             "telegram_allowed_chat_ok": self.telegram_allowed_chat_ok,
             "deepseek_ok_or_optional": self.deepseek_ok_or_optional,
+            "kill_switch_ready": self.kill_switch_ready,
+            "kill_switch_active": self.kill_switch_active,
             "kill_switch_armed": self.kill_switch_armed,
             "live_limited_confirmed": self.live_limited_confirmed,
             "exchange_live_orders": self.exchange_live_orders,
@@ -229,6 +242,8 @@ class LaunchReadinessReport:
             "usable_live_capital_usdt": self.usable_live_capital_usdt,
             "exchange_live_orders": self.exchange_live_orders,
             "trade_authority": self.trade_authority,
+            "kill_switch_ready": self.kill_switch_ready,
+            "kill_switch_active": self.kill_switch_active,
             "kill_switch_armed": self.kill_switch_armed,
             "binance_public_ok": self.binance_public_ok,
             "binance_private_read_ok": self.binance_private_read_ok,

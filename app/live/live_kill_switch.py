@@ -59,8 +59,19 @@ KILL_EXIT_NO_GATEWAY_WIRED = "no_controlled_exit_callback_wired"
 
 @dataclass(frozen=True)
 class KillSwitchStatus:
-    """Read-only kill switch status surfaced to the operator."""
+    """Read-only kill switch status surfaced to the operator.
 
+    Two DISTINCT states (PR116 hotfix):
+      * ``ready``  - the subsystem is available: persisted state is
+        readable and the operator can trigger it (confirmation workflow
+        available). Independent of whether it is active.
+      * ``active`` - an emergency halt has been triggered; every new entry
+        is blocked.
+    ``armed`` is kept ONLY as a backward-compatible alias of ``active``.
+    """
+
+    ready: bool
+    active: bool
     armed: bool
     blocks_new_entries: bool
     armed_at: int | None
@@ -72,6 +83,12 @@ class KillSwitchStatus:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            # Split, unambiguous states.
+            "kill_switch_ready": self.ready,
+            "kill_switch_active": self.active,
+            "ready": self.ready,
+            "active": self.active,
+            # Compatibility alias (== active); never used ambiguously.
             "armed": self.armed,
             "blocks_new_entries": self.blocks_new_entries,
             "armed_at": self.armed_at,
@@ -123,9 +140,31 @@ class LiveKillSwitch:
     # Read state
     # ------------------------------------------------------------------
     @property
-    def is_armed(self) -> bool:
+    def is_active(self) -> bool:
+        """True when an emergency halt has been triggered (blocks new entries)."""
         state, _ = self._store.load_kill_switch()
         return bool(state.armed)
+
+    @property
+    def is_armed(self) -> bool:
+        """Backward-compatible alias of :attr:`is_active`."""
+        return self.is_active
+
+    @property
+    def is_ready(self) -> bool:
+        """True when the kill-switch subsystem is available / state readable.
+
+        "Ready" (a.k.a. available) means the persisted kill-switch state
+        can be read and the operator can trigger the switch through the
+        confirmation workflow. It is INDEPENDENT of whether the switch is
+        active. A corrupt / unreadable persisted state fails safe to
+        ``ready=False``.
+        """
+        _state, warnings = self._store.load_kill_switch()
+        for w in warnings:
+            if "CORRUPT" in str(w).upper():
+                return False
+        return True
 
     @property
     def controlled_exit_supported(self) -> bool:
@@ -133,28 +172,34 @@ class LiveKillSwitch:
 
     def status(self) -> KillSwitchStatus:
         state, _ = self._store.load_kill_switch()
+        ready = self.is_ready
+        active = bool(state.armed)
         supported = self.controlled_exit_supported
         note = (
-            "Kill switch armed: new entries are blocked. A controlled "
-            "reduce/exit is wired through the LiveExecutionGateway."
-            if (state.armed and supported)
+            "Kill switch ACTIVE (emergency halt): new entries are blocked. "
+            "A controlled reduce/exit is wired through the "
+            "LiveExecutionGateway."
+            if (active and supported)
             else (
-                "Kill switch armed: new entries are blocked. PR116 does "
-                "NOT auto-close open positions; close them manually on the "
-                "exchange (no controlled-exit callback wired)."
-                if state.armed
-                else "Kill switch ready (not armed). New entries permitted "
-                "subject to all other gates."
+                "Kill switch ACTIVE (emergency halt): new entries are "
+                "blocked. PR116 does NOT auto-close open positions; close "
+                "them manually on the exchange (no controlled-exit callback "
+                "wired)."
+                if active
+                else "Kill switch READY (available, not active). New entries "
+                "permitted subject to all other gates."
             )
         )
         return KillSwitchStatus(
-            armed=bool(state.armed),
-            blocks_new_entries=bool(state.armed),
+            ready=ready,
+            active=active,
+            armed=active,
+            blocks_new_entries=active,
             armed_at=state.armed_at,
             armed_by=state.armed_by,
             reason=state.reason,
             controlled_exit_supported=supported,
-            can_close_positions=bool(state.armed and supported),
+            can_close_positions=bool(active and supported),
             note=note,
         )
 
