@@ -746,6 +746,37 @@ class CapitalFrozenError(RuntimeError):
     """
 
 
+class MaxActivePositionsReachedError(RuntimeError):
+    """Raised when a caller attempts to open a NEW simulated position
+    while the simulated position book is already at its configured
+    ``max_active_positions`` cap.
+
+    This is a *predictable, paper-only* simulated risk/capital
+    rejection (NOT a runtime error in the program sense): the engine
+    refuses to oversubscribe the concurrency cap. It is a subclass of
+    :class:`RuntimeError` for backward compatibility with callers that
+    previously caught the bare ``RuntimeError`` this path used to
+    raise. The dedicated subclass lets the (separately gated) Blind
+    Walk-forward Runner distinguish this *expected* rejection from an
+    unknown failure so it can record a SIM_REJECT and continue the
+    blind run instead of aborting it. It NEVER authorises raising the
+    cap, live trading, auto-tuning, or Phase 12.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        symbol: Optional[str] = None,
+        active_positions: Optional[int] = None,
+        max_active_positions: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.symbol = symbol
+        self.active_positions = active_positions
+        self.max_active_positions = max_active_positions
+
+
 class SimulatedCapitalFlowEngine:
     """Strict blind walk-forward simulated capital flow engine.
 
@@ -1185,10 +1216,18 @@ class SimulatedCapitalFlowEngine:
             ])
             >= self._config.max_active_positions
         ):
-            raise RuntimeError(
+            active = len([
+                p
+                for p in self._positions.values()
+                if p.status == PositionStatus.OPEN
+            ])
+            raise MaxActivePositionsReachedError(
                 f"max_active_positions={self._config.max_active_positions} "
                 f"reached; cannot open new simulated position on "
-                f"{fill.symbol}"
+                f"{fill.symbol}",
+                symbol=fill.symbol,
+                active_positions=active,
+                max_active_positions=int(self._config.max_active_positions),
             )
         side = (
             PositionSide.LONG
@@ -1740,6 +1779,7 @@ class SimulatedCapitalFlowEngine:
 __all__ = [
     "PHASE_NAME",
     "CapitalFrozenError",
+    "MaxActivePositionsReachedError",
     "PositionSide",
     "PositionStatus",
     "RiskFreezeReason",

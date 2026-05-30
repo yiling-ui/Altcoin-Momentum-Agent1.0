@@ -112,7 +112,11 @@ from app.sim.pessimistic_fill_model import (
     PessimisticFillModel,
 )
 from app.sim.replay_feed_provider import ReplayFeedBatch, ReplayFeedProvider
-from app.sim.simulated_capital_flow import SimulatedCapitalFlowEngine
+from app.sim.simulated_capital_flow import (
+    CapitalFrozenError,
+    MaxActivePositionsReachedError,
+    SimulatedCapitalFlowEngine,
+)
 from app.sim.simulation_clock import (
     SimulationClock,
     ensure_utc_aware,
@@ -145,6 +149,22 @@ __phase__ = PHASE_NAME
 # ---------------------------------------------------------------------------
 
 DEFAULT_REPORT_ROOT: str = "data/reports/blind_walk_forward"
+
+
+# ---------------------------------------------------------------------------
+# Paper-shadow simulated-rejection reasons (PR107 hotfix)
+# ---------------------------------------------------------------------------
+
+# Closed reasons for a paper-only SIM_REJECT raised by the runner when
+# the (PR98) Simulated Capital Flow refuses to OPEN a new simulated
+# position. These are *predictable* simulated risk/capital rejections,
+# NOT program errors: the runner records a SIM_REJECT and continues the
+# blind run instead of aborting it. They NEVER authorise raising any
+# cap, live trading, auto-tuning, or Phase 12.
+PAPER_SHADOW_REJECT_MAX_ACTIVE_POSITIONS: str = (
+    "max_active_positions_reached"
+)
+PAPER_SHADOW_REJECT_CAPITAL_FROZEN: str = "capital_frozen"
 
 
 # ---------------------------------------------------------------------------
@@ -1075,7 +1095,32 @@ class BlindWalkForwardRunner:
             equity_before = self._capital_flow.current_marked_equity()
             try:
                 closed_entry = self._capital_flow.consume_fill(fill)
+            except (
+                MaxActivePositionsReachedError,
+                CapitalFrozenError,
+            ) as exc:
+                # PR107 hotfix: a fill that would OPEN a new simulated
+                # position can be refused by the (PR98) Simulated
+                # Capital Flow when the position book is already at its
+                # max_active_positions cap (or the capital is frozen).
+                # This is a *predictable* simulated risk/capital
+                # rejection, NOT a program error: convert it into a
+                # SIM_REJECT paper-shadow rejection event (written to
+                # the transcript + report rejection summary) and
+                # CONTINUE the blind run instead of aborting it. The
+                # already-opened / closed simulated trades are
+                # untouched.
+                self._handle_capital_flow_reject(
+                    fill=fill,
+                    exc=exc,
+                    simulated_time=new_st,
+                )
+                continue
             except Exception as exc:
+                # Any OTHER exception is unexpected: never swallow it.
+                # Record it in the failure ledger and re-raise so the
+                # run fails loudly (we only absorb explicit, predictable
+                # simulated risk/capital rejections above).
                 self._record_failure(
                     kind="capital_flow_consume_error",
                     detail=str(exc),
@@ -1141,7 +1186,32 @@ class BlindWalkForwardRunner:
 
         # 5) Submit orders WITHOUT a replay_batch; they will fill
         #    against the next batch's closed bars (strict forward-only).
+        #
+        # PR107 hotfix: before forwarding an order that would OPEN a new
+        # simulated position, check the (PR98) Simulated Capital Flow
+        # concurrency cap. If accepting the order would push the
+        # projected open-position count to or beyond
+        # ``max_active_positions`` we DROP the order here and record a
+        # deterministic SIM_REJECT (reason=max_active_positions_reached)
+        # rather than letting the later fill abort the run. The
+        # projected count = currently-open positions + opens already
+        # accepted earlier in this same step. This never raises the
+        # cap, never enables live trading, and is paper-only.
+        max_active = int(self._capital_flow.config.max_active_positions)
+        open_now = len(self._capital_flow.get_positions())
+        accepted_opens_this_step = 0
         for req in orders:
+            if self._order_would_open_new_position(req):
+                projected = open_now + accepted_opens_this_step
+                if projected >= max_active:
+                    self._handle_capacity_presubmit_reject(
+                        symbol=getattr(req, "symbol", None),
+                        active_positions=projected,
+                        max_active_positions=max_active,
+                        simulated_time=new_st,
+                    )
+                    continue
+                accepted_opens_this_step += 1
             try:
                 self._mock_exchange.submit_order(
                     req, simulated_time=new_st
@@ -2168,6 +2238,153 @@ class BlindWalkForwardRunner:
                 f"equity_after={float(equity_after)}",
             ],
         )
+
+    def _order_would_open_new_position(self, req: Any) -> bool:
+        """Return True if submitting ``req`` would OPEN a brand-new
+        simulated position (paper-only, read-only check).
+
+        A fill OPENs a position only when the symbol currently has no
+        OPEN position in the (PR98) Simulated Capital Flow book (a fill
+        on an already-open symbol increases / reduces / closes it).
+        This is used by the PR107 pre-submit concurrency gate so the
+        runner never forwards an order that the later fill would have
+        to reject. It is deliberately conservative: it treats any order
+        on a flat symbol as a potential open regardless of side.
+        """
+        symbol = getattr(req, "symbol", None)
+        if not isinstance(symbol, str) or not symbol:
+            return False
+        return self._open_position_for(symbol) is None
+
+    def _handle_capacity_presubmit_reject(
+        self,
+        *,
+        symbol: Optional[str],
+        active_positions: int,
+        max_active_positions: int,
+        simulated_time: datetime,
+    ) -> None:
+        """Record a SIM_REJECT for an entry order dropped BEFORE
+        submission because the simulated concurrency cap is reached
+        (PR107 pre-submit gate).
+        """
+        sym = symbol if isinstance(symbol, str) and symbol else "unknown"
+        rejection: Dict[str, Any] = {
+            "symbol": sym,
+            "simulated_time": ensure_utc_aware(
+                simulated_time, "simulated_time"
+            ).isoformat(),
+            "reason": PAPER_SHADOW_REJECT_MAX_ACTIVE_POSITIONS,
+            "detail": (
+                f"pre-submit concurrency gate: active_positions="
+                f"{int(active_positions)} >= max_active_positions="
+                f"{int(max_active_positions)}; simulated order suppressed"
+            ),
+            "stage": "pre_submit",
+            "active_positions": int(active_positions),
+            "max_active_positions": int(max_active_positions),
+            "bridge_name": self._paper_shadow_bridge_name,
+            "no_live_order": True,
+            "phase_12_forbidden": True,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+        }
+        self._handle_simulated_reject(
+            rejection=rejection, simulated_time=simulated_time
+        )
+
+    def _handle_capital_flow_reject(
+        self,
+        *,
+        fill: MockFill,
+        exc: Exception,
+        simulated_time: datetime,
+    ) -> None:
+        """Convert an expected, predictable Simulated Capital Flow
+        OPEN rejection (max_active_positions reached, or capital
+        frozen) into a SIM_REJECT paper-shadow rejection event and keep
+        the blind run going (PR107 hotfix §3).
+
+        This is the belt-and-suspenders fallback for the rare case
+        where a fill still reaches :meth:`consume_fill` after the
+        pre-submit gate (e.g. several in-flight orders for distinct
+        symbols all filling on the same step). It NEVER swallows an
+        unknown exception: only the explicit
+        :class:`MaxActivePositionsReachedError` /
+        :class:`CapitalFrozenError` types are routed here.
+        """
+        symbol = getattr(fill, "symbol", None)
+        sym = symbol if isinstance(symbol, str) and symbol else "unknown"
+        if isinstance(exc, MaxActivePositionsReachedError):
+            reason = PAPER_SHADOW_REJECT_MAX_ACTIVE_POSITIONS
+            active = getattr(exc, "active_positions", None)
+            cap = getattr(exc, "max_active_positions", None)
+            if cap is None:
+                cap = int(self._capital_flow.config.max_active_positions)
+            detail = (
+                f"consume_fill open rejected: active_positions="
+                f"{active if active is not None else 'n/a'} >= "
+                f"max_active_positions={cap}; simulated fill not opened"
+            )
+        else:
+            reason = PAPER_SHADOW_REJECT_CAPITAL_FROZEN
+            detail = (
+                "consume_fill open rejected: simulated capital frozen "
+                f"({getattr(self._capital_flow, 'freeze_reason', None)}); "
+                "simulated fill not opened"
+            )
+        rejection: Dict[str, Any] = {
+            "symbol": sym,
+            "simulated_time": ensure_utc_aware(
+                simulated_time, "simulated_time"
+            ).isoformat(),
+            "reason": reason,
+            "detail": detail,
+            "stage": "consume_fill",
+            "bridge_name": self._paper_shadow_bridge_name,
+            "no_live_order": True,
+            "phase_12_forbidden": True,
+            "trade_authority": False,
+            "ai_trade_authority": False,
+        }
+        # Reset the bridge's per-symbol in-flight intent so a rejected
+        # entry does NOT leave the symbol stuck ENTRY_PENDING forever.
+        self._reset_bridge_intent_after_reject(sym)
+        self._handle_simulated_reject(
+            rejection=rejection, simulated_time=simulated_time
+        )
+
+    def _reset_bridge_intent_after_reject(self, symbol: str) -> None:
+        """Best-effort reset of the paper-shadow bridge's per-symbol
+        intent after a simulated OPEN rejection so the symbol can be
+        re-evaluated on a later step instead of being stuck pending.
+
+        Paper-only bookkeeping; never touches a real account, never
+        carries trade authority.
+        """
+        bridge = self._paper_shadow_bridge
+        if bridge is None:
+            return
+        try:
+            states = getattr(bridge, "_states", None)
+            if not isinstance(states, dict):
+                return
+            state = states.get(symbol)
+            if state is None:
+                return
+            # Only reset a symbol that has no real open position; if a
+            # position actually opened we must not clobber the intent.
+            if self._open_position_for(symbol) is not None:
+                return
+            from app.sim.paper_shadow_strategy_bridge import (  # noqa: PLC0415
+                _Intent,
+            )
+
+            state.intent = _Intent.FLAT
+            state.entry_bar_index = None
+            state.entry_signal_reason = None
+        except Exception:  # pragma: no cover - defensive, never abort
+            return
 
     def _handle_simulated_reject(
         self,

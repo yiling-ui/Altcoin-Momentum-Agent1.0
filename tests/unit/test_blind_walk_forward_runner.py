@@ -2035,3 +2035,269 @@ def test_pr104_main_creates_output_dir_and_completes_on_big_store(
     )
     assert viol["violations"] == []
     assert viol["invalidations"] == []
+
+
+# ---------------------------------------------------------------------------
+# PR107 hotfix: Paper Shadow Max Active Position Reject Handling.
+#
+# When the (PR98) Simulated Capital Flow refuses to OPEN a new
+# simulated position because it is already at ``max_active_positions``,
+# the blind runner must record a deterministic SIM_REJECT
+# (reason=max_active_positions_reached) and KEEP RUNNING -- it must
+# NEVER abort the blind window with a RuntimeError. The run must still
+# finish EVIDENCE_GENERATED, with no-lookahead violations = 0 and every
+# safety flag intact.
+# ---------------------------------------------------------------------------
+
+
+def _make_multi_symbol_store(
+    *,
+    symbols: Sequence[str],
+    blind_minutes: int = 8,
+) -> HistoricalMarketStore:
+    """Build a store with closed, already-available 1m klines for every
+    symbol across the blind window so market orders can fill.
+    """
+    store = HistoricalMarketStore()
+    for sym in symbols:
+        store.add_record(_make_symbol_status(symbol=sym))
+        base = 100.0
+        for i in range(-1, blind_minutes):
+            open_time = _T0 + timedelta(minutes=i)
+            close_price = base + i * 0.1
+            store.add_record(
+                _make_kline(
+                    symbol=sym,
+                    open_time=open_time,
+                    interval="1m",
+                    open_=close_price - 0.1,
+                    high=close_price + 0.2,
+                    low=close_price - 0.3,
+                    close=close_price,
+                    record_id=f"k1m_{sym}_{i + 5}",
+                )
+            )
+    return store
+
+
+def _make_multi_symbol_runner(
+    *,
+    tmpdir: Path,
+    symbols: Sequence[str],
+    capital: SimulatedCapitalFlowEngine,
+    decision_callback,
+    blind_minutes: int = 8,
+) -> BlindWalkForwardRunner:
+    store = _make_multi_symbol_store(
+        symbols=symbols, blind_minutes=blind_minutes
+    )
+    provider = _make_provider(store=store, blind_minutes=blind_minutes)
+    exchange = _make_mock_exchange()
+    telegram = _make_telegram(tmpdir)
+    cfg = BlindWalkForwardRunnerConfig(
+        window=_make_window(blind_minutes=blind_minutes),
+        config_artefact={"ver": 1, "label": "pr107"},
+        rule_artefact={"rules": ["max_active_reject"]},
+        feature_schema_artefact={"schema": ["close"]},
+        data_manifest_artefact={"data": "v0"},
+        universe_manifest_artefact={"universe": list(symbols)},
+        fee_model_artefact={"taker_bps": 4.0},
+        slippage_model_artefact={"bps": 5.0},
+        latency_model_artefact={"bps": 1.0},
+        outage_model_artefact={"min_gap_seconds": 0},
+        fill_model_artefact={"policy": "WORST_CASE"},
+        code_commit="pr107commit1234",
+        run_id="bwf_pr107_test",
+        report_root=str(tmpdir / "reports"),
+    )
+    return BlindWalkForwardRunner(
+        config=cfg,
+        replay_provider=provider,
+        capital_flow=capital,
+        mock_exchange=exchange,
+        telegram_sandbox=telegram,
+        decision_callback=decision_callback,
+    )
+
+
+def _submit_buys_once(symbols: Sequence[str], qty: float = 0.1):
+    """Decision callback that submits one MARKET BUY per symbol on the
+    very first step, then nothing.
+    """
+    state = {"fired": False}
+
+    def cb(simulated_time, batch, runner):
+        if state["fired"]:
+            return []
+        state["fired"] = True
+        return [
+            OrderRequest(
+                symbol=s,
+                side=MockOrderSide.BUY,
+                order_type=MockOrderType.MARKET,
+                requested_qty=qty,
+            )
+            for s in symbols
+        ]
+
+    return cb
+
+
+def test_max_active_positions_presubmit_reject_does_not_crash(tmp_path):
+    # Six distinct symbols, capital flow caps at five concurrent
+    # positions. Submitting all six opens in one step must accept five
+    # and SIM_REJECT exactly one (the pre-submit concurrency gate),
+    # never crashing the blind run.
+    symbols = [f"SYM{i}USDT" for i in range(6)]
+    capital = SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=10_000.0, max_active_positions=5
+        )
+    )
+    runner = _make_multi_symbol_runner(
+        tmpdir=tmp_path,
+        symbols=symbols,
+        capital=capital,
+        decision_callback=_submit_buys_once(symbols),
+    )
+    out = runner.run()  # must NOT raise
+
+    # The run produced evidence and was NOT invalidated / aborted.
+    assert out["score"]["status"] == BlindRunStatus.EVIDENCE_GENERATED
+    # Exactly five simulated positions were opened (cap honoured); the
+    # cap was NOT silently raised to admit the sixth.
+    assert len(capital.get_positions()) == 5
+    assert capital.config.max_active_positions == 5
+    # At least one SIM_REJECT with the required reason was recorded.
+    rejections = runner.paper_shadow_rejections
+    max_active_rejects = [
+        r
+        for r in rejections
+        if r.get("reason") == "max_active_positions_reached"
+    ]
+    assert len(max_active_rejects) >= 1
+    rej = max_active_rejects[0]
+    assert rej["no_live_order"] is True
+    assert rej["phase_12_forbidden"] is True
+    assert rej["trade_authority"] is False
+    assert rej["ai_trade_authority"] is False
+    assert "symbol" in rej and "simulated_time" in rej
+    # No-lookahead violations remain zero.
+    assert runner.violations == ()
+    assert out["score"]["no_lookahead_violation_count"] == 0
+
+
+def test_max_active_positions_reject_in_transcript_and_report(tmp_path):
+    symbols = [f"SYM{i}USDT" for i in range(6)]
+    capital = SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=10_000.0, max_active_positions=5
+        )
+    )
+    runner = _make_multi_symbol_runner(
+        tmpdir=tmp_path,
+        symbols=symbols,
+        capital=capital,
+        decision_callback=_submit_buys_once(symbols),
+    )
+    out = runner.run()
+
+    # Transcript must contain the SIM_REJECT event and the reason.
+    transcript_path = Path(out["paths"]["telegram_sandbox_transcript.md"])
+    text = transcript_path.read_text(encoding="utf-8")
+    assert "SIM_REJECT" in text
+    assert "max_active_positions_reached" in text
+
+    # The paper-shadow sidecar report must surface the rejection too.
+    ps_path = Path(out["paths"]["paper_shadow_trades.json"])
+    ps = json.loads(ps_path.read_text(encoding="utf-8"))
+    reasons = [r.get("reason") for r in ps["rejections"]]
+    assert "max_active_positions_reached" in reasons
+    # Safety flags intact on every emitted artefact.
+    for name in (
+        "blind_walk_forward_report.json",
+        "paper_shadow_trades.json",
+        "trade_ledger.json",
+    ):
+        data = json.loads(
+            Path(out["paths"][name]).read_text(encoding="utf-8")
+        )
+        assert data["live_trading"] is False
+        assert data["exchange_live_orders"] is False
+        assert data["binance_private_api_enabled"] is False
+        assert data["auto_tuning_allowed"] is False
+        assert data["trade_authority"] is False
+        assert data["ai_trade_authority"] is False
+        assert data["phase_12_forbidden"] is True
+        assert data["telegram_outbound_enabled"] is False
+        assert_no_forbidden_fields(data)
+
+
+def test_consume_fill_max_active_reject_is_caught_not_raised(
+    tmp_path, monkeypatch
+):
+    # Belt-and-suspenders: even if the pre-submit gate misses an open
+    # (the gate is disabled here to force the fallback path), a fill
+    # that reaches consume_fill while the book is at the cap must be
+    # converted into a SIM_REJECT (stage=consume_fill) and the run must
+    # continue -- never abort with a RuntimeError.
+    symbols = [f"SYM{i}USDT" for i in range(6)]
+    capital = SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=10_000.0, max_active_positions=5
+        )
+    )
+    runner = _make_multi_symbol_runner(
+        tmpdir=tmp_path,
+        symbols=symbols,
+        capital=capital,
+        decision_callback=_submit_buys_once(symbols),
+    )
+    # Disable the pre-submit concurrency gate so all six orders are
+    # forwarded and the sixth fill exercises the consume_fill catch.
+    monkeypatch.setattr(
+        runner, "_order_would_open_new_position", lambda req: False
+    )
+    out = runner.run()  # must NOT raise
+
+    assert out["score"]["status"] == BlindRunStatus.EVIDENCE_GENERATED
+    assert len(capital.get_positions()) == 5
+    consume_rejects = [
+        r
+        for r in runner.paper_shadow_rejections
+        if r.get("reason") == "max_active_positions_reached"
+        and r.get("stage") == "consume_fill"
+    ]
+    assert len(consume_rejects) >= 1
+    # No-lookahead violations remain zero and the transcript shows it.
+    assert runner.violations == ()
+    text = Path(
+        out["paths"]["telegram_sandbox_transcript.md"]
+    ).read_text(encoding="utf-8")
+    assert "SIM_REJECT" in text
+    assert "max_active_positions_reached" in text
+
+
+def test_unknown_consume_fill_error_still_aborts(tmp_path, monkeypatch):
+    # Only EXPECTED simulated risk/capital rejections are absorbed.
+    # An unknown error from consume_fill must still propagate (we never
+    # swallow unexpected exceptions).
+    symbols = ["SYM0USDT"]
+    capital = SimulatedCapitalFlowEngine(
+        config=SimulatedCapitalConfig(
+            initial_capital=10_000.0, max_active_positions=5
+        )
+    )
+    runner = _make_multi_symbol_runner(
+        tmpdir=tmp_path,
+        symbols=symbols,
+        capital=capital,
+        decision_callback=_submit_buys_once(symbols),
+    )
+
+    def _boom(_fill):
+        raise ValueError("unexpected boom")
+
+    monkeypatch.setattr(capital, "consume_fill", _boom)
+    with pytest.raises(ValueError):
+        runner.run()
