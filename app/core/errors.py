@@ -130,6 +130,54 @@ class DataExportError(AMARTError):
 
 
 # ---------------------------------------------------------------------------
+# PR110 - Live Foundation v0 (Live Path Isolation + Runtime Mode Guard +
+# Right-tail Leverage Gate)
+# ---------------------------------------------------------------------------
+class LivePathIsolationViolation(SafetyViolation):
+    """Raised when a non-LIVE order intent attempts to reach the live path.
+
+    PR110 introduces a hard isolation boundary: the historical / blind /
+    simulated / paper-shadow code paths (``OrderSource.SIM`` /
+    ``BLIND`` / ``REPLAY`` / ``PAPER_SHADOW``) may continue to exist,
+    but they MUST NEVER reach a live order gateway. The
+    :class:`app.live.path_isolation.LivePathIsolationGuard` raises this
+    exception (and emits a ``LIVE_PATH_BLOCKED`` event) the moment any
+    order intent whose ``source`` is not ``OrderSource.LIVE`` is handed
+    to the live path.
+
+    It is a :class:`SafetyViolation` so any existing Phase 1 / Phase 9
+    handler that catches the broader safety hierarchy continues to
+    catch it.
+    """
+
+
+class LiveModeViolation(SafetyViolation):
+    """Raised when an action is attempted in the wrong live runtime mode.
+
+    Examples: a real order attempt while the runtime is ``LIVE_SHADOW``;
+    a real order attempt while ``LIVE_LIMITED`` has not been armed via
+    the operator confirmation handshake; an attempt to arm
+    ``LIVE_LIMITED`` without a persisted confirmation state.
+
+    A :class:`SafetyViolation` subclass for the same handler-compatibility
+    reason as :class:`LivePathIsolationViolation`.
+    """
+
+
+class LeverageGateViolation(SafetyViolation):
+    """Raised when forbidden (e.g. AI-derived) input reaches the leverage gate.
+
+    The PR110 right-tail leverage gate is deterministic: leverage may be
+    decided ONLY by the capital profile + the deterministic right-tail
+    evidence gate + the risk engine. Any attempt to feed the gate an
+    AI / LLM / Telegram / blind-result field is a safety violation. The
+    gate normally returns a *rejection decision* (so the audit trail
+    records the refusal); this exception is reserved for the defensive
+    assertion path.
+    """
+
+
+# ---------------------------------------------------------------------------
 # PR111 - Live API Integration Pack v0
 # ---------------------------------------------------------------------------
 class LiveTradeNotEnabled(SafeModeViolation):

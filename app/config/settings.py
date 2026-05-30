@@ -95,6 +95,26 @@ class Settings:
         return self.defaults.strategy_validation
 
     @property
+    def live(self):
+        """PR110 - Live Foundation v0 config + persisted state."""
+        return self.defaults.live
+
+    @property
+    def live_runtime_mode(self) -> str:
+        """PR110 - the configured live-preparation runtime mode.
+
+        NOTE: this is the *configured* value. The runtime guard always
+        boots in ``LIVE_SHADOW`` regardless, so a restart can never
+        silently enter ``LIVE_LIMITED``.
+        """
+        return self.defaults.live.runtime_mode
+
+    @property
+    def capital_profile_id(self) -> str:
+        """PR110 - the configured active capital profile id."""
+        return self.defaults.live.capital_profile_id
+
+    @property
     def telegram_outbound_enabled(self) -> bool:
         """Phase 11C real-outbound gate.
 

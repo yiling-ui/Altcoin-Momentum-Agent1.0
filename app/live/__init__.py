@@ -1,53 +1,193 @@
-"""AMA-RT Live API Integration Pack v0 (PR111).
+"""AMA-RT Live Foundation v0 (PR110).
 
-This package is the FIRST place in the project allowed to hold real
-Binance / Telegram / DeepSeek API *credentials* and to talk to those
-real private / authenticated APIs. It exists to build the foundation
-for the live-capital road map (LIVE_SHADOW -> LIVE_LIMITED -> ...).
+This package builds the SAFETY FOUNDATION for AMA-RT's transition from
+large-scale cloud blind testing to a 10U small-capital live-preparation
+posture. It is the hard boundary that keeps the historical / blind /
+replay / simulated / paper-shadow stack away from any live execution.
 
-PR111 boundary (hard rules)
----------------------------
+================================================================
+HARD SAFETY BOUNDARY (PR110)
+================================================================
 
-PR111 connects real external APIs but **does NOT place, cancel, or
-modify any real order**, and does **NOT** change leverage / margin
-mode. Concretely:
+  phase_12_forbidden            = True
+  live_trading                  = False   (by default)
+  exchange_live_orders          = False   (by default)
+  binance_private_api_enabled   = False   (by default)
+  telegram_outbound_enabled     = False   (by default)
+  ai_trade_authority            = False
+  trade_authority               = False   (by default)
+  right_tail_live_boost_enabled = False   (by default)
 
-  - Binance ``PUBLIC_MARKET`` + ``PRIVATE_READ`` layers may talk to the
-    real exchange (ping / exchangeInfo / mark price / account / balance
-    / positions / income history).
-  - The Binance ``PRIVATE_TRADE`` layer is an interface **only**. Every
-    trade method is blocked by default and either returns
-    ``TRADE_API_BLOCKED_BY_PR111`` or raises
-    :class:`app.core.errors.LiveTradeNotEnabled`. No HTTP order request
-    is ever built or sent in PR111.
-  - Telegram outbound is gated by config and disabled by default; a
-    test message is sent only when the operator explicitly enables
-    outbound AND asks for the test.
-  - DeepSeek output is MARKET_INTELLIGENCE_ONLY. It can never carry
-    trade-authority fields (direction / size / leverage / stop /
-    target / execution). ``ai_trade_authority`` is pinned ``False``.
-  - No API key / secret / token is ever hard-coded, logged, exported,
-    embedded in a Telegram message, or placed in an exception text.
-    Only masked forms (``abc***xyz``) ever surface.
-  - The default live runtime mode is :class:`LiveRuntimeMode.LIVE_SHADOW`
-    which keeps the order path blocked even if a trade-capable API key
-    is configured.
+PR110 does NOT:
+  - connect the real Binance order / account / position / leverage /
+    margin endpoints,
+  - place / cancel a real order, change leverage, or change margin mode,
+  - enable real Telegram outbound,
+  - enable Phase 12,
+  - let AI decide direction / size / leverage / stop / target / exit,
+  - let a Telegram command bypass the Risk Engine,
+  - let any blind / replay / sim module influence live execution,
+  - auto-escalate a capital profile, or auto-enter LIVE_LIMITED on a
+    restart, or auto-tune from blind / replay results, or let a future
+    label / MFE / MAE / completed_tail_label influence a live decision.
 
-Relationship to PR110
----------------------
+What PR110 DOES build:
+  1. Live Path Isolation (:mod:`app.live.path_isolation`,
+     :mod:`app.live.gateway`).
+  2. Runtime Mode Guard - LIVE_SHADOW / LIVE_LIMITED
+     (:mod:`app.live.runtime_mode`).
+  3. Capital Profile Ladder - 1U .. 10,000,000U
+     (:mod:`app.live.capital_profile`).
+  4. Capital Event Contract (:mod:`app.live.capital_event`).
+  5. Right-tail Leverage Gate - deterministic, profile-bound
+     (:mod:`app.live.leverage_gate`).
+  6. Telegram Operator Contract
+     (:mod:`app.live.telegram_operator_contract`).
 
-PR111 is designed to dock onto the PR110 "Live Path Isolation" /
-``LIVE_SHADOW`` / ``LIVE_LIMITED`` runtime modes and the PR110
-Capital Event Contract. While PR110 is in review, this package ships a
-self-contained :class:`LiveRuntimeMode` and a self-contained
-:class:`app.live.capital_events.CapitalEvent` contract that are
-intentionally shaped to be unified with PR110's once both land. Search
-this package for ``HANDOFF`` to find the unification points.
+LIVE_SHADOW (空盘跑) and LIVE_LIMITED (有资金跑) are DIFFERENT and must
+never be confused: the former can never move real capital; the latter
+is the only mode that ever could (in a future PR) and only behind the
+operator confirmation handshake.
 """
 
-from __future__ import annotations
+from app.core.enums import LiveRuntimeMode, OrderSource
+from app.core.errors import (
+    LeverageGateViolation,
+    LiveModeViolation,
+    LivePathIsolationViolation,
+)
+from app.live.capital_event import (
+    CapitalEventCategory,
+    CapitalEventLedger,
+    CapitalEventType,
+    LiveCapitalEvent,
+    classify_capital_event,
+)
+from app.live.capital_profile import (
+    AUTO_ESCALATION_ALLOWED,
+    CAPITAL_PROFILE_LADDER,
+    CAPITAL_PROFILE_ORDER,
+    CapitalProfile,
+    CapitalProfileId,
+    ProfileChangeRequest,
+    ProfileMismatch,
+    build_profile_change_request,
+    detect_profile_mismatch,
+    get_profile,
+    suggest_profile_for_equity,
+)
+from app.live.gateway import LiveExecutionGateway
+from app.live.leverage_gate import (
+    FORBIDDEN_LEVERAGE_INPUT_FIELDS,
+    LeverageDecision,
+    RightTailLeverageEvidence,
+    RightTailLeverageReason,
+    evaluate_right_tail_leverage_permission,
+)
+from app.live.path_isolation import (
+    IsolationDecision,
+    LiveOrderIntent,
+    LivePathIsolationGuard,
+    classify_source_module,
+)
+from app.live.runtime_mode import (
+    PR110_INITIAL_LIVE_LIMITED_PROFILE,
+    LiveModeGuard,
+    LiveModeState,
+    LiveModeSwitchRequest,
+    LiveModeSwitchResult,
+)
+from app.live.telegram_operator_contract import (
+    ALL_CARD_TYPES,
+    COMMON_FIELDS,
+    LIVE_CARD_TYPES,
+    LIVE_EXECUTION_ADAPTER_AVAILABLE,
+    OPERATOR_COMMANDS,
+    PLANNED_FIELDS,
+    REAL_ORDER_FIELDS,
+    SHADOW_CARD_TYPES,
+    OperatorCardType,
+    OperatorCommand,
+    build_audit_payload,
+    build_operator_card,
+    parse_operator_command,
+    render_operator_card,
+)
 
+__all__ = [
+    # enums / errors
+    "OrderSource",
+    "LiveRuntimeMode",
+    "LivePathIsolationViolation",
+    "LiveModeViolation",
+    "LeverageGateViolation",
+    # path isolation + gateway
+    "LiveOrderIntent",
+    "IsolationDecision",
+    "LivePathIsolationGuard",
+    "classify_source_module",
+    "LiveExecutionGateway",
+    # runtime mode
+    "LiveModeGuard",
+    "LiveModeState",
+    "LiveModeSwitchRequest",
+    "LiveModeSwitchResult",
+    "PR110_INITIAL_LIVE_LIMITED_PROFILE",
+    # capital profile
+    "CapitalProfile",
+    "CapitalProfileId",
+    "CAPITAL_PROFILE_LADDER",
+    "CAPITAL_PROFILE_ORDER",
+    "AUTO_ESCALATION_ALLOWED",
+    "get_profile",
+    "suggest_profile_for_equity",
+    "detect_profile_mismatch",
+    "ProfileMismatch",
+    "ProfileChangeRequest",
+    "build_profile_change_request",
+    # capital event
+    "CapitalEventType",
+    "CapitalEventCategory",
+    "LiveCapitalEvent",
+    "CapitalEventLedger",
+    "classify_capital_event",
+    # leverage gate
+    "RightTailLeverageEvidence",
+    "RightTailLeverageReason",
+    "LeverageDecision",
+    "evaluate_right_tail_leverage_permission",
+    "FORBIDDEN_LEVERAGE_INPUT_FIELDS",
+    # telegram operator contract
+    "OperatorCommand",
+    "OPERATOR_COMMANDS",
+    "OperatorCardType",
+    "SHADOW_CARD_TYPES",
+    "LIVE_CARD_TYPES",
+    "ALL_CARD_TYPES",
+    "COMMON_FIELDS",
+    "PLANNED_FIELDS",
+    "REAL_ORDER_FIELDS",
+    "LIVE_EXECUTION_ADAPTER_AVAILABLE",
+    "parse_operator_command",
+    "build_operator_card",
+    "render_operator_card",
+    "build_audit_payload",
+]
+
+# ---------------------------------------------------------------------------
+# PR111 - API Integration Pack v0 metadata.
+#
+# PR111 layers the real Binance / Telegram / DeepSeek API clients, secret
+# loading, health/permission checks, and funding/fee accounting ON TOP of
+# this PR110 foundation. The PR111 modules (api_config, secrets,
+# binance_client, telegram_client, deepseek_client, health, ...) reuse
+# PR110's LiveRuntimeMode (app.core.enums), Capital Event contract
+# (app.live.capital_event), and Capital Profile ladder
+# (app.live.capital_profile). They are imported directly (e.g.
+# ``from app.live.binance_client import BinanceLiveClient``) rather than
+# re-exported here, to keep this package's import surface small.
+# ---------------------------------------------------------------------------
 LIVE_API_PACK_VERSION = "v0"
 LIVE_API_PACK_PR = "PR111"
 
-__all__ = ["LIVE_API_PACK_VERSION", "LIVE_API_PACK_PR"]
+__all__ += ["LIVE_API_PACK_VERSION", "LIVE_API_PACK_PR"]

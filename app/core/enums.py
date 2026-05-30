@@ -541,3 +541,96 @@ class Direction(str, Enum):
     LONG = "long"
     SHORT = "short"
     NONE = "none"
+
+
+
+# ---------------------------------------------------------------------------
+# PR110 - Live Foundation v0: order-intent source provenance
+# ---------------------------------------------------------------------------
+class OrderSource(str, Enum):
+    """Provenance tag attached to every order intent in the system.
+
+    PR110 (Live Foundation v0) introduces a hard isolation boundary
+    between the historical / blind / simulated / paper-shadow code
+    paths and the (not-yet-implemented) live execution path. Every
+    order intent MUST carry exactly one of these source tags so the
+    :class:`app.live.path_isolation.LivePathIsolationGuard` can refuse
+    any non-live intent before it can reach a live order gateway.
+
+    Hard rule (PR110): only ``LIVE`` is admissible at the live order
+    gateway. ``SIM`` / ``BLIND`` / ``REPLAY`` / ``PAPER_SHADOW``
+    intents are blocked with a ``LIVE_PATH_BLOCKED`` event and a
+    :class:`app.core.errors.LivePathIsolationViolation`.
+
+      - ``SIM``          : MockExchange / SimulatedCapitalFlow /
+                           HistoricalMarketStore origin.
+      - ``BLIND``        : Blind Walk-forward Runner origin.
+      - ``REPLAY``       : ReplayFeedProvider origin.
+      - ``PAPER_SHADOW`` : Paper Shadow Strategy Bridge origin.
+      - ``LIVE``         : the ONLY source a real
+                           LiveExchangeAdapter / LiveExecutionGateway
+                           may ever attach. PR110 does not implement
+                           that adapter; it only reserves the source.
+    """
+
+    SIM = "SIM"
+    BLIND = "BLIND"
+    REPLAY = "REPLAY"
+    PAPER_SHADOW = "PAPER_SHADOW"
+    LIVE = "LIVE"
+
+    @property
+    def is_live(self) -> bool:
+        """True only for ``LIVE``. Every other source is a test path."""
+        return self is OrderSource.LIVE
+
+
+# ---------------------------------------------------------------------------
+# PR110 - Live Foundation v0: live runtime operating mode
+# ---------------------------------------------------------------------------
+class LiveRuntimeMode(str, Enum):
+    """Live-preparation operating mode (PR110).
+
+    This is a DIFFERENT concept from :class:`TradingMode`.
+    :class:`TradingMode` (``paper`` / ``live_limited`` / ``live_full``
+    ...) describes the historical Phase 1 trade-authority ladder and
+    is hard-locked to ``paper`` by the Phase 1 safety lock.
+
+    ``LiveRuntimeMode`` describes how the live-preparation layer is
+    running RIGHT NOW and only has two values:
+
+      - ``LIVE_SHADOW`` (*空盘跑*) : read-only live context. May read
+        market data / account balance / positions / exchangeInfo and
+        produce a *shadow* entry/exit plan + Telegram push, but
+        ``real_order=False`` and ``real_capital_changed=False``. NEVER
+        places / cancels an order, changes leverage, or changes margin
+        mode. This is the DEFAULT and the only mode a fresh boot may
+        enter.
+
+      - ``LIVE_LIMITED`` (*有资金跑*) : real small-capital live trading
+        is permitted IN PRINCIPLE, but PR110 does NOT implement real
+        order placement. Entering ``LIVE_LIMITED`` requires a persisted
+        operator confirmation state, a valid capital profile, and an
+        armed kill switch. A bare restart / default config can NEVER
+        silently enter ``LIVE_LIMITED``.
+
+    LIVE_SHADOW and LIVE_LIMITED must never be confused: the former can
+    never move real capital; the latter is the only mode that ever
+    could (in a future PR), and only behind the operator confirmation
+    handshake.
+    """
+
+    LIVE_SHADOW = "LIVE_SHADOW"
+    LIVE_LIMITED = "LIVE_LIMITED"
+
+    @property
+    def real_orders_possible(self) -> bool:
+        """True only for ``LIVE_LIMITED``.
+
+        Even when True this is a NECESSARY-not-sufficient condition:
+        the capital profile must allow real orders AND the operator
+        confirmation handshake must have completed AND the kill switch
+        must be armed. PR110 still refuses every real order because no
+        live execution adapter exists yet.
+        """
+        return self is LiveRuntimeMode.LIVE_LIMITED

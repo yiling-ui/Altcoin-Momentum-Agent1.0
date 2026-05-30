@@ -966,6 +966,74 @@ class EventType(str, Enum):
     EVIDENCE_CLAIM_REJECTED = "EVIDENCE_CLAIM_REJECTED"
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # PR110 - Live Foundation v0 (Live Path Isolation + Runtime Mode
+    # Guard + Capital Profile Ladder + Capital Event Contract +
+    # Right-tail Leverage Gate + Telegram Operator Contract).
+    #
+    # PR110 boundary (repeated on every event below):
+    # - PR110 does NOT enable live trading, does NOT connect the
+    #   Binance private API, does NOT place / cancel orders, does NOT
+    #   change leverage / margin mode, and does NOT enable real
+    #   Telegram outbound.
+    # - Every event below is an AUDIT record of the live-preparation
+    #   safety layer. None of them authorises a real trade, moves real
+    #   capital, or flips a Phase 1 safety flag.
+    # - The five Phase 1 safety flags remain locked; PR110 additionally
+    #   keeps ``binance_private_api_enabled=False``,
+    #   ``telegram_outbound_enabled=False``, ``ai_trade_authority=False``,
+    #   ``trade_authority=False``, ``right_tail_live_boost_enabled=False``,
+    #   and ``phase_12_forbidden=True``.
+    #
+    #   LIVE_PATH_BLOCKED               - a non-LIVE order intent
+    #     (source = SIM / BLIND / REPLAY / PAPER_SHADOW) attempted to
+    #     reach the live order gateway and was refused by the
+    #     LivePathIsolationGuard. Pairs with a
+    #     ``LivePathIsolationViolation``.
+    #   LIVE_MODE_SWITCH_REQUESTED      - the operator requested a
+    #     LIVE_SHADOW <-> LIVE_LIMITED switch. Descriptive; does not
+    #     itself change the mode.
+    #   LIVE_MODE_SWITCH_CONFIRMED      - the operator confirmation
+    #     handshake (``/confirm_live CODE``) succeeded.
+    #   LIVE_MODE_SWITCH_REJECTED       - a switch request / confirm
+    #     was refused (bad code, expired code, missing prerequisite,
+    #     profile invalid, kill switch not armed, ...).
+    #   LIVE_LIMITED_ARMED              - LIVE_LIMITED was armed after a
+    #     valid confirmation. Real orders are STILL refused in PR110.
+    #   LIVE_LIMITED_DISARMED           - LIVE_LIMITED was disarmed back
+    #     to LIVE_SHADOW (operator action, kill switch, or safety
+    #     event).
+    #   LIVE_SHADOW_ACTIVE              - the runtime entered / re-asserted
+    #     LIVE_SHADOW (the default mode).
+    #   LIVE_LIMITED_ACTIVE             - the runtime entered LIVE_LIMITED
+    #     (armed). Real orders are STILL refused in PR110.
+    #   CAPITAL_EVENT_CLASSIFIED        - a real account balance change
+    #     was classified into a closed CapitalEventType so external
+    #     deposits / withdrawals never pollute strategy PnL.
+    #   CAPITAL_PROFILE_CHANGED         - the active capital profile was
+    #     changed by explicit operator action (never automatically).
+    #   CAPITAL_PROFILE_MISMATCH_DETECTED - the adjusted account equity
+    #     left the active profile's range; the operator must re-select a
+    #     profile. Never auto-escalates.
+    #   RIGHT_TAIL_LEVERAGE_EVALUATED   - the deterministic right-tail
+    #     leverage gate produced a permission decision. Descriptive
+    #     audit; leverage is decided ONLY by the deterministic gate +
+    #     capital profile + risk engine, never by AI / Telegram / blind
+    #     results.
+    LIVE_PATH_BLOCKED = "LIVE_PATH_BLOCKED"
+    LIVE_MODE_SWITCH_REQUESTED = "LIVE_MODE_SWITCH_REQUESTED"
+    LIVE_MODE_SWITCH_CONFIRMED = "LIVE_MODE_SWITCH_CONFIRMED"
+    LIVE_MODE_SWITCH_REJECTED = "LIVE_MODE_SWITCH_REJECTED"
+    LIVE_LIMITED_ARMED = "LIVE_LIMITED_ARMED"
+    LIVE_LIMITED_DISARMED = "LIVE_LIMITED_DISARMED"
+    LIVE_SHADOW_ACTIVE = "LIVE_SHADOW_ACTIVE"
+    LIVE_LIMITED_ACTIVE = "LIVE_LIMITED_ACTIVE"
+    CAPITAL_EVENT_CLASSIFIED = "CAPITAL_EVENT_CLASSIFIED"
+    CAPITAL_PROFILE_CHANGED = "CAPITAL_PROFILE_CHANGED"
+    CAPITAL_PROFILE_MISMATCH_DETECTED = "CAPITAL_PROFILE_MISMATCH_DETECTED"
+    RIGHT_TAIL_LEVERAGE_EVALUATED = "RIGHT_TAIL_LEVERAGE_EVALUATED"
+
+    # ------------------------------------------------------------------
     # PR111 - Live API Integration Pack v0 (Binance / Telegram / DeepSeek
     # health, permission, account-read, funding/fee accounting).
     #
@@ -1032,6 +1100,7 @@ class EventType(str, Enum):
     DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY = (
         "DEEPSEEK_OUTPUT_REJECTED_FOR_TRADE_AUTHORITY"
     )
+
 
 
 # Capital-flow event types per Issue #2 / Spec §28.3.

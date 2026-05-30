@@ -44,6 +44,49 @@ See `docs/AMA_RT_API_INTEGRATION_PACK.md` and
 
 ## Current phase
 
+> **PR110 — Live Foundation v0 — Live Path Isolation + LIVE_SHADOW/LIVE_LIMITED
+> Mode Guard + Capital Profile Ladder + Capital Event Contract +
+> Right-tail Leverage Gate + Telegram Operator Contract.**
+> **Status: IN_REVIEW (after this implementation PR; not `ACCEPTED`
+> until maintainer review).**
+> **Type: live-preparation safety foundation (contract / model /
+> evidence-only infrastructure). Safety foundation ONLY — no strategy
+> parameter was tuned and no profitability change was attempted.**
+> The roadmap switched from large-scale cloud blind testing to a 10U
+> small-capital live-preparation posture. PR110 builds the hard
+> pre-live boundaries: (1) **Live Path Isolation** — every order intent
+> carries an `OrderSource`; only `OrderSource.LIVE` may reach the
+> reserved `LiveExecutionGateway`; MockExchange / BlindWalkForwardRunner
+> / ReplayFeedProvider / PaperShadowStrategyBridge / SimulatedCapitalFlow
+> are blocked with a `LIVE_PATH_BLOCKED` event +
+> `LivePathIsolationViolation`. (2) **Runtime Mode Guard** — `LIVE_SHADOW`
+> (空盘跑, default, no real orders ever) vs `LIVE_LIMITED` (有资金跑,
+> behind a `/mode live_limited` → `/confirm_live CODE` handshake); a
+> restart / default config can never silently enter `LIVE_LIMITED`.
+> (3) **Capital Profile Ladder** — `L0_SHADOW` .. `L8_10M_CAPITAL_PRESERVATION`
+> (1U → 10,000,000U); `L0_SHADOW` allows no real orders; `L1_10U_PROBE`
+> caps `max_account_capital_usdt=10`; escalation is never automatic.
+> (4) **Capital Event Contract** — deposits/withdrawals/fees/funding are
+> classified separately so they never pollute strategy PnL.
+> (5) **Right-tail Leverage Gate** — deterministic permission policy that
+> refuses AI input, missing exit/stop plan, risk-off regime, systemic
+> risk, drawdown/risk-halt, profile-disallows-boost, and over-threshold
+> slippage/exposure; grants limited leverage only on strong deterministic
+> right-tail structure when the profile allows it. (6) **Telegram Operator
+> Contract** — command + card schema; shadow cards show the plan but
+> `real_order=False` / `order_id="--"`, live cards carry the real
+> entry/exit/pnl/balance schema. Scope is additive and isolated to
+> `app/live/`, plus enum/event/error/config additions and a new test
+> file; **nothing** under `app/risk/`, `app/execution/`, `app/exchanges/`
+> live-order surfaces is loosened. Safety flags unchanged
+> (`phase_12_forbidden=true`, `live_trading=false`,
+> `exchange_live_orders=false`, `binance_private_api_enabled=false`,
+> `telegram_outbound_enabled=false`, `ai_trade_authority=false`,
+> `trade_authority=false`, `right_tail_live_boost_enabled=false`).
+> **Phase 12 remains FORBIDDEN.** See `docs/CHANGELOG.md` (PR110 entry),
+> `docs/AMA_RT_LIVE_FOUNDATION_SPEC.md`,
+> `docs/AMA_RT_LIVE_MODE_AND_CAPITAL_PROFILE.md`.
+
 > **Phase 11C.1D-D — Simulated Capital Safety Floor / Kill Switch /
 > No Negative Equity Guard (*模拟资金安全下限 / 熔断 / 无负权益保护*;
 > PR108).**
