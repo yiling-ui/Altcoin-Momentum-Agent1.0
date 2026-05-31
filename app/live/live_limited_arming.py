@@ -37,6 +37,7 @@ from app.live.binance_models import BinanceAccountSnapshot
 from app.live.capital_profile import CapitalProfile
 from app.live.capital_state import LiveCapitalState
 from app.live.execution_gateway import (
+    ExecutionRejectReason,
     LiveExecutionGateway,
     authorize_real_order,
     evaluate_execution_permission,
@@ -47,6 +48,12 @@ from app.live.execution_models import (
     OrderSide,
     OrderType,
     generate_client_order_id,
+)
+from app.live.execution_telegram import (
+    PAYLOAD_LIVE_EXECUTION_BLOCKED,
+    PAYLOAD_LIVE_RISK_REJECT,
+    PAYLOAD_SHADOW_ENTRY_PLAN,
+    build_execution_telegram_payload,
 )
 from app.live.live_launch_models import SmokeResult
 from app.live.live_risk_engine import (
@@ -190,15 +197,19 @@ class LiveLimitedSmoke:
         runtime: LiveRuntime,
         adapter: BinanceExecutionAdapter | None = None,
         gateway: LiveExecutionGateway | None = None,
+        notifier: Any | None = None,
         event_repo: Any | None = None,
         clock: Callable[[], int] = now_ms,
     ) -> None:
         self._config = config
         self._runtime = runtime
         self._adapter = adapter
+        self._notifier = notifier
         self._gateway = gateway
         if self._gateway is None and adapter is not None:
-            self._gateway = LiveExecutionGateway(adapter=adapter, event_repo=event_repo)
+            self._gateway = LiveExecutionGateway(
+                adapter=adapter, event_repo=event_repo, notifier=notifier
+            )
         self._event_repo = event_repo
         self._clock = clock
 
@@ -214,6 +225,7 @@ class LiveLimitedSmoke:
         leverage: float = 1.0,
         side: str = "BUY",
         real_order: bool = False,
+        send_telegram: bool = False,
         i_understand_this_places_real_order: bool = False,
         confirm_code: str = "",
         expected_confirm_code: str | None = None,
@@ -268,6 +280,10 @@ class LiveLimitedSmoke:
             decision = evaluate_execution_permission(
                 intent, risk_decision, context, validation=validation, profile=profile
             )
+            # Push a real_order=false planned / reject card (the brief:
+            # 空盘 dry-run must still surface the plan / why it would not
+            # trade). Never sends a real order.
+            self._maybe_notify_dry(intent, decision, risk_decision, send_telegram)
             return self._dry_result(intent, decision, validation)
 
         # ---- REAL ORDER: triple confirmation + full gate + gateway ----
@@ -416,6 +432,55 @@ class LiveLimitedSmoke:
         if not self._runtime.live_limited_confirmed():
             return "live_limited_not_armed"
         return None
+
+    # ------------------------------------------------------------------
+    # Dry-run / shadow Telegram card (real_order=false, never submits)
+    # ------------------------------------------------------------------
+    _RISK_REJECT_REASONS = frozenset(
+        {
+            ExecutionRejectReason.RISK_DECISION_MISSING,
+            ExecutionRejectReason.RISK_DECISION_NOT_APPROVED,
+            ExecutionRejectReason.REAL_ORDER_NOT_ALLOWED,
+        }
+    )
+
+    def _maybe_notify_dry(
+        self,
+        intent: LiveOrderIntent,
+        decision: Any,
+        risk_decision: Any,
+        send_telegram: bool,
+    ) -> None:
+        """Build + push a real_order=false planned / reject card for dry-run.
+
+        - allowed -> ``SHADOW_ENTRY_PLAN`` (planned geometry).
+        - rejected for a risk reason -> ``LIVE_RISK_REJECT``.
+        - rejected for any other gate -> ``LIVE_EXECUTION_BLOCKED``.
+
+        Never builds a ``result`` so the card stays real_order=false /
+        order_id=-- / actual_*=--. A missing notifier / send_telegram=False
+        is a no-op.
+        """
+        if not send_telegram or self._notifier is None:
+            return
+        if decision.allowed:
+            payload_type = PAYLOAD_SHADOW_ENTRY_PLAN
+        elif set(decision.reject_reasons) & self._RISK_REJECT_REASONS:
+            payload_type = PAYLOAD_LIVE_RISK_REJECT
+        else:
+            payload_type = PAYLOAD_LIVE_EXECUTION_BLOCKED
+        payload = build_execution_telegram_payload(
+            payload_type,
+            intent=intent,
+            risk_decision=risk_decision,
+            reject_reason=decision.reject_reason,
+            runtime_mode=intent.runtime_mode,
+            event_id=f"{intent.client_order_id}:{payload_type}:dry",
+        )
+        try:
+            self._notifier.notify(payload, source=intent.source)
+        except Exception:  # pragma: no cover - notify must never break dry-run
+            pass
 
     # ------------------------------------------------------------------
     # Result builders
