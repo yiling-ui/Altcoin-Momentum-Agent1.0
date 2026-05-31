@@ -321,3 +321,41 @@ ready** (subsystem unavailable) OR kill switch **active** (emergency halt
 engaged); funding accounting unavailable; stop/exit plan unavailable;
 Telegram not configured for the live operator; source isolation failure; AI
 forbidden-field output accepted; execution gateway rejects.
+
+
+
+---
+
+## Phase 0 (pre-flight) — PR117 full-system sandbox audit
+
+Run the final full-system sandbox audit **before** any real-key launch
+check. It runs the real PR110–PR116 chain against the fake altcoin
+`RAVEUSDT_SANDBOX` with fake transports only and never sends a real order.
+
+```bash
+python scripts/live_full_system_sandbox_audit.py --json
+# focused runs:
+python scripts/live_full_system_sandbox_audit.py --scenario strategy_lifecycle --json
+python scripts/live_full_system_sandbox_audit.py --scenario execution_lifecycle --json
+python scripts/live_full_system_sandbox_audit.py --scenario capital_ladder --json
+python scripts/live_full_system_sandbox_audit.py --scenario funding_fee_pnl --json
+python scripts/live_full_system_sandbox_audit.py --scenario telegram_operator --json
+python scripts/live_full_system_sandbox_audit.py --scenario ai_guard --json
+python scripts/live_full_system_sandbox_audit.py --scenario kill_switch --json
+python scripts/live_full_system_sandbox_audit.py --scenario blind_isolation --json
+```
+
+**Read:** `overall_status` (PASS/WARN/FAIL), the per-chain `*_chain_ok`
+flags, `no_real_order_sent` (always true), `fake_transports_used` (always
+true), and `ready_for_real_key_validation`.
+
+**GO (to real-key validation):** `overall_status` is PASS or WARN,
+`full_system_chain_ok=true`, `blind_isolation_ok=true`,
+`no_real_order_sent=true`, and `ready_for_real_key_validation=true`. Then
+proceed to the real-key launch check below.
+
+**NO-GO:** `overall_status=FAIL`, any blocker listed, or
+`ready_for_real_key_validation=false`. Fix the reported blocker and re-run.
+
+See `docs/AMA_RT_FINAL_FULL_SYSTEM_AUDIT.md` for scenario detail and the
+PASS/WARN/FAIL semantics.

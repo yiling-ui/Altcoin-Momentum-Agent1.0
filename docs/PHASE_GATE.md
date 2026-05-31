@@ -8,6 +8,47 @@ The five Phase 1 safety flags REMAIN LOCKED across every phase below;
 **no phase in this document loosens them**. Loosening any of them is a
 Phase 12+ concern and requires the Spec §41 Go/No-Go checklist.
 
+## Open slice — PR117 — Full-System Single-Altcoin Live Sandbox Audit v0 (IN_REVIEW)
+
+**PR117 — the FINAL full-system sandbox audit.** It runs the real
+PR110–PR116 live chain end to end against a single fake altcoin
+(`RAVEUSDT_SANDBOX`) with **fake transports only**, to surface串联 (chained)
+bugs and prove the chain behaves like a real live system. It is an audit
+harness: it does **NOT** loosen any Phase 1 safety flag and sends **no real
+order**.
+
+  - **No real order, fake transports only.** `no_real_order_sent=true`,
+    `fake_transports_used=true`, `live_trading=false`,
+    `exchange_live_orders=false`, `trade_authority=false`,
+    `ai_trade_authority=false` — all by default and unconditionally for the
+    audit. It is not a unit test, not a blind test, not a replay/backtest,
+    and does not re-open the blind route.
+  - **Whole chain exercised:** market → strategy (source=LIVE, no future
+    labels) → live risk → capital profile → deterministic leverage gate →
+    execution gateway (15-point) → fake Binance order (real adapter + fake
+    transport) → fills/fees/funding → ledger + funding-aware PnL → Telegram
+    cards → DeepSeek explain-only briefing → kill switch / rollback →
+    deposit/withdrawal/mismatch/scaling.
+  - **AI has no trade authority.** Forbidden trade-authority fields are
+    stripped+rejected (incl. nested); AI cannot call execution, mutate live
+    state, or decide leverage.
+  - **Source isolation re-proven under the full chain.** Only
+    `OrderSource.LIVE` reaches the live path; `MockExchange` /
+    `HistoricalMarketStore` / `ReplayFeedProvider` / `SimulatedCapitalFlow`
+    / blind / paper-shadow can never be a live source.
+  - **Capital scales with no code change.** L1_1U … L8_10M reached by an
+    operator profile switch; escalation never automatic; mismatch caps
+    usable capital and demands operator action.
+
+**Gate result:** sandbox `overall_status=PASS`,
+`ready_for_real_key_validation=true`. PR117 sets the *go to real-key
+validation* signal; a funded launch still requires
+`scripts/live_launch_check.py --require-real-keys` with real credentials
+and the full PR113 execution handshake. Tests:
+`tests/unit/test_pr117_full_system_sandbox_audit.py` (50-point suite); the
+existing PR110–PR116 suites continue to pass.
+
+
 ## Open slice — PR116 — 10U LIVE_LIMITED Launch Pack v0 (IN_REVIEW)
 
 **PR116 — end-to-end live readiness, LIVE_SHADOW run, controlled

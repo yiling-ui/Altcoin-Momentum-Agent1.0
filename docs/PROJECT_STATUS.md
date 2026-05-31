@@ -5,6 +5,34 @@ intentionally short. The full phase-gate ledger lives in
 `docs/PHASE_GATE.md`; per-phase deep dives live in their own
 `PHASE_*` documents.
 
+## Live road map — PR117 (Full-System Single-Altcoin Live Sandbox Audit v0)
+
+> **PR117 — Full-System Single-Altcoin Live Sandbox Audit v0.**
+> **Status: IN_REVIEW (`PR117 FULL_SYSTEM_SANDBOX_AUDIT_IN_REVIEW`).**
+> **Type: the FINAL full-system sandbox audit of the whole PR110–PR116
+> live chain. Audit harness only — flips no safety flag, sends no real
+> order.**
+
+PR117 runs the *real* PR110–PR116 live chain end to end against a single
+fake altcoin (`RAVEUSDT_SANDBOX`) using **fake transports only**, to find
+串联 (chained) bugs and prove the chain behaves like a real live system
+without ever placing a real order. New modules under `app/live/`:
+`full_system_audit_models.py`, `fake_live_market.py`,
+`fake_live_exchange.py`, `fake_live_strategy.py`, `fake_live_telegram.py`,
+`fake_live_deepseek.py`, `full_system_sandbox.py`. CLI:
+`scripts/live_full_system_sandbox_audit.py`. Doc:
+`docs/AMA_RT_FINAL_FULL_SYSTEM_AUDIT.md`. Tests:
+`tests/unit/test_pr117_full_system_sandbox_audit.py`.
+
+Default posture (unchanged): `live_trading=false`,
+`exchange_live_orders=false`, `trade_authority=false`,
+`ai_trade_authority=false`, `no_real_order_sent=true`,
+`fake_transports_used=true`. Sandbox result: `overall_status=PASS`,
+`ready_for_real_key_validation=true` — a *go to real-key validation*, not a
+*go to live*. Capital still scales 10U → 10,000,000U by an operator profile
+switch with no code change, and blind/replay/sim stay isolated.
+
+
 ## Live road map — PR116 (10U LIVE_LIMITED Launch Pack v0)
 
 > **PR116 — 10U LIVE_LIMITED Launch Pack v0: End-to-End Live Readiness,
