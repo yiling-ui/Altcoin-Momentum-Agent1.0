@@ -148,7 +148,10 @@ The health check reports: `public_market_ok`, `private_read_ok`,
 `private_trade_configured`, `private_trade_enabled_by_config`,
 `private_trade_blocked_by_mode`, `can_read_account`, `can_read_positions`,
 `can_read_income`, `can_trade_if_account_reports_it`,
-`high_risk_permission_warning`.
+`high_risk_permission_warning`, and (PR118) the raw API-KEY permission
+view: `withdraw_permission`, `universal_transfer_permission`,
+`internal_transfer_permission`, `futures_trade_permission`,
+`api_restrictions_reported`, plus a sanitised `permission_debug` block.
 
 If a trade-capable key exists but the runtime mode is `LIVE_SHADOW`, the
 order path stays blocked. `can_trade_if_account_reports_it` mirrors the
@@ -164,9 +167,52 @@ deliberately left untouched (still `False`) by PR111. PR111's
 read, or depend on PR110's `binance_private_api_enabled`, and PR110's
 `LiveExecutionGateway` order path remains fully blocked.
 
-**Withdraw permission is NEVER required.** If the API key reports
-withdraw / high-risk permission, the health check raises
-`BINANCE_PERMISSION_WARNING`. Prefer an API key without withdraw enabled.
+### Permission warnings are based ONLY on explicit raw fields (PR118)
+
+**Withdraw permission is NEVER required.** The high-risk withdraw warning
+(`binance_key_has_withdraw_permission` / `high_risk_permission_warning`)
+is raised **only** when the raw API-KEY restriction field
+`apiRestrictions.enableWithdrawals` is explicitly `true`, read from the
+signed SAPI endpoint `GET /sapi/v1/account/apiRestrictions`.
+
+PR118 fixed a false positive where the warning was inferred from the
+futures *account capability* (`/fapi/v2/account` `canWithdraw` /
+`canDeposit`) instead of the *key* restriction. The withdraw warning is
+**never** inferred from any of:
+
+- `can_read_account` / `can_read_income` / `can_read_positions`
+- `can_trade_if_account_reports_it` (account `canTrade`)
+- `enableFutures` / `enableSpotAndMarginTrading`
+- `permitsUniversalTransfer` / `enableInternalTransfer`
+
+Severity classification:
+
+| Raw field (`enable…` = true) | Severity | Warning code |
+|------------------------------|----------|--------------|
+| `enableWithdrawals`          | BLOCKER / high-risk | `binance_key_has_withdraw_permission` |
+| `permitsUniversalTransfer`   | WARN     | `binance_key_has_universal_transfer_permission` |
+| `enableInternalTransfer`     | WARN     | `binance_key_has_internal_transfer_permission` |
+| `enableFutures`              | INFO/WARN | `binance_key_has_futures_trade_permission` |
+| account `canTrade`           | INFO only | `binance_account_can_trade` |
+
+Universal / internal transfer get their **own** separate warnings - never
+the withdraw warning. If Binance does not expose a field, it is reported
+as `NOT_REPORTED` (never `true`). The deposit warning was removed: the
+restriction endpoint exposes no field that proves key-level deposit
+permission. A **UI-confirmed withdraw-disabled** key therefore does **not**
+trigger a withdraw warning.
+
+`high_risk_permission_warning=True` means the key's raw
+`enableWithdrawals` is `true` - disable it on the exchange. The sanitised
+`permission_debug` block surfaces `raw_permission_fields_seen`,
+`enableWithdrawals`, `enableInternalTransfer`, `permitsUniversalTransfer`,
+`enableFutures`, `enableSpotAndMarginTrading`, `enableReading`, and
+`ipRestrict` - and **never** an API key, secret, signature, or account id.
+
+The project-side no-order safety gates are unchanged: `exchange_live_orders`,
+`trade_authority`, and `private_trade_enabled_by_config` remain the actual
+gates that keep the order path blocked, independent of any exchange-side
+key permission.
 
 ### Precision / symbol rules
 exchangeInfo is parsed into per-symbol filters (`tickSize`, `stepSize`,

@@ -15,7 +15,7 @@ from app.live.binance_income import (
     classify_income_rows,
     summarise_income_events,
 )
-from app.live.binance_models import parse_account, parse_exchange_info
+from app.live.binance_models import parse_account, parse_api_restrictions, parse_exchange_info
 from app.live.binance_permissions import inspect_permissions
 from app.live.capital_event import CapitalEventType
 from app.live.status import TRADE_API_BLOCKED_BY_PR111
@@ -311,16 +311,29 @@ def test_live_shadow_blocks_trade_even_with_trade_key():
     assert transport.calls == []
 
 
-# ---- permission inspection: high-risk withdraw warning --------------------
+# ---- permission inspection: high-risk withdraw warning (PR118) ------------
 def test_permission_high_risk_warning_on_withdraw():
-    acct = parse_account({**SAMPLE_ACCOUNT, "canWithdraw": True})
-    perms = inspect_permissions(acct)
-    assert perms.high_risk_permission_warning is True
-    assert any("withdraw" in w for w in perms.warnings)
-    # Read-only key (no withdraw) -> no high-risk warning.
-    acct2 = parse_account({**SAMPLE_ACCOUNT, "canWithdraw": False, "canDeposit": False})
-    perms2 = inspect_permissions(acct2)
-    assert perms2.high_risk_permission_warning is False
+    # PR118 hotfix: the withdraw warning is driven ONLY by the raw
+    # apiRestrictions.enableWithdrawals field - NEVER by the account-level
+    # canWithdraw / canTrade / canDeposit capabilities.
+    #
+    # Account-level canWithdraw=True alone is the OLD false positive and must
+    # NOT raise the high-risk warning any more.
+    acct = parse_account({**SAMPLE_ACCOUNT, "canWithdraw": True, "canTrade": True})
+    perms = inspect_permissions(account=acct)
+    assert perms.high_risk_permission_warning is False
+    assert not any("withdraw" in w for w in perms.warnings)
+
+    # An explicit raw enableWithdrawals=True DOES raise the high-risk warning.
+    restr = parse_api_restrictions({"enableWithdrawals": True, "enableReading": True})
+    perms2 = inspect_permissions(account=acct, restrictions=restr)
+    assert perms2.high_risk_permission_warning is True
+    assert any("withdraw" in w for w in perms2.warnings)
+
+    # A read-only key (enableWithdrawals=False) -> no high-risk warning.
+    restr2 = parse_api_restrictions({"enableWithdrawals": False, "enableReading": True})
+    perms3 = inspect_permissions(account=acct, restrictions=restr2)
+    assert perms3.high_risk_permission_warning is False
 
 
 # ---- public + private read health check (fake transport) ------------------

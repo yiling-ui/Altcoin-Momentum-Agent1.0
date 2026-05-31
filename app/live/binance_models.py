@@ -263,6 +263,159 @@ def parse_account(body: dict[str, Any], *, timestamp_ms: int = 0) -> BinanceAcco
 
 
 # ---------------------------------------------------------------------------
+# API-key restrictions (the AUTHORITATIVE permission source)
+# ---------------------------------------------------------------------------
+# Sentinel used in sanitised debug output for a permission field that the
+# Binance API did NOT expose. A missing field is NEVER treated as ``True``.
+NOT_REPORTED: str = "NOT_REPORTED"
+
+# Map of raw Binance ``apiRestrictions`` camelCase field -> snapshot attr.
+# These are the ONLY fields that may drive a key-permission warning.
+_RESTRICTION_FIELD_MAP: dict[str, str] = {
+    "ipRestrict": "ip_restrict",
+    "enableReading": "enable_reading",
+    "enableWithdrawals": "enable_withdrawals",
+    "enableInternalTransfer": "enable_internal_transfer",
+    "permitsUniversalTransfer": "permits_universal_transfer",
+    "enableFutures": "enable_futures",
+    "enableSpotAndMarginTrading": "enable_spot_and_margin_trading",
+    "enableMargin": "enable_margin",
+    "enableVanillaOptions": "enable_vanilla_options",
+}
+
+# Fields that may carry identifying / timing information and must NEVER be
+# echoed in debug output (no account id, no create time, no expiry).
+_RESTRICTION_SENSITIVE_FIELDS: frozenset[str] = frozenset(
+    {"createTime", "tradingAuthorityExpirationTime", "accountId", "uid", "id"}
+)
+
+
+def _to_tristate_bool(value: Any) -> bool | None:
+    """Parse a raw value into ``True`` / ``False`` / ``None`` (NOT_REPORTED).
+
+    Only an explicit boolean-ish value yields ``True`` / ``False``. Anything
+    ambiguous (missing / unknown) yields ``None`` so it is reported as
+    NOT_REPORTED rather than silently treated as enabled.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in {"true", "1", "yes", "on"}:
+            return True
+        if token in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+@dataclass(frozen=True)
+class BinanceApiRestrictionsSnapshot:
+    """API-KEY restriction view parsed from ``GET /sapi/v1/account/apiRestrictions``.
+
+    This is the **only** authoritative source for the withdraw / transfer
+    permission warnings. Each permission is tri-state:
+
+      * ``True``  - Binance explicitly reported the field as enabled.
+      * ``False`` - Binance explicitly reported the field as disabled.
+      * ``None``  - Binance did NOT expose the field (NOT_REPORTED). It is
+        NEVER inferred as ``True``.
+
+    Account-level ``canWithdraw`` / ``canDeposit`` (from ``/fapi/v2/account``)
+    are *account capabilities*, NOT *key permissions*, and must never drive a
+    withdraw warning. ``reported`` is ``True`` only when at least one known
+    restriction field was present in the response.
+    """
+
+    reported: bool = False
+    ip_restrict: bool | None = None
+    enable_reading: bool | None = None
+    enable_withdrawals: bool | None = None
+    enable_internal_transfer: bool | None = None
+    permits_universal_transfer: bool | None = None
+    enable_futures: bool | None = None
+    enable_spot_and_margin_trading: bool | None = None
+    enable_margin: bool | None = None
+    enable_vanilla_options: bool | None = None
+    raw_fields_seen: tuple[str, ...] = ()
+
+    @staticmethod
+    def _display(value: bool | None) -> Any:
+        """Render a tri-state value for debug output (NOT_REPORTED for None)."""
+        return NOT_REPORTED if value is None else bool(value)
+
+    def to_debug_dict(self) -> dict[str, Any]:
+        """Sanitised debug view. NEVER carries an API key / secret / id.
+
+        Only the whitelisted raw permission field names + their tri-state
+        values are surfaced (plus ``raw_permission_fields_seen``). No secret,
+        signature, account id, create time, or expiry is ever included.
+        """
+        disp = self._display
+        return {
+            "raw_permission_fields_seen": list(self.raw_fields_seen),
+            "restrictions_reported": self.reported,
+            "enableWithdrawals": disp(self.enable_withdrawals),
+            "enableInternalTransfer": disp(self.enable_internal_transfer),
+            "permitsUniversalTransfer": disp(self.permits_universal_transfer),
+            "enableFutures": disp(self.enable_futures),
+            "enableSpotAndMarginTrading": disp(self.enable_spot_and_margin_trading),
+            "enableReading": disp(self.enable_reading),
+            "ipRestrict": disp(self.ip_restrict),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reported": self.reported,
+            "ip_restrict": self.ip_restrict,
+            "enable_reading": self.enable_reading,
+            "enable_withdrawals": self.enable_withdrawals,
+            "enable_internal_transfer": self.enable_internal_transfer,
+            "permits_universal_transfer": self.permits_universal_transfer,
+            "enable_futures": self.enable_futures,
+            "enable_spot_and_margin_trading": self.enable_spot_and_margin_trading,
+            "enable_margin": self.enable_margin,
+            "enable_vanilla_options": self.enable_vanilla_options,
+            "raw_fields_seen": list(self.raw_fields_seen),
+        }
+
+
+def parse_api_restrictions(body: Any) -> BinanceApiRestrictionsSnapshot:
+    """Parse a Binance ``/sapi/v1/account/apiRestrictions`` body.
+
+    A missing / empty / malformed body yields a snapshot with
+    ``reported=False`` and every permission ``None`` (NOT_REPORTED) - so a
+    transport that does not expose the endpoint can NEVER produce a
+    false-positive withdraw warning.
+    """
+
+    if not isinstance(body, dict) or not body:
+        return BinanceApiRestrictionsSnapshot(reported=False)
+
+    kwargs: dict[str, bool | None] = {}
+    seen: list[str] = []
+    for raw_name, attr in _RESTRICTION_FIELD_MAP.items():
+        if raw_name in body:
+            kwargs[attr] = _to_tristate_bool(body.get(raw_name))
+            seen.append(raw_name)
+    # Record any additional (non-sensitive) field NAMES the API exposed so an
+    # operator can see exactly what came back - names only, never values.
+    for raw_name in body.keys():
+        if raw_name in _RESTRICTION_FIELD_MAP or raw_name in _RESTRICTION_SENSITIVE_FIELDS:
+            continue
+        seen.append(str(raw_name))
+
+    return BinanceApiRestrictionsSnapshot(
+        reported=len(kwargs) > 0,
+        raw_fields_seen=tuple(seen),
+        **kwargs,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Income events: see app.live.binance_income.BinanceIncomeEvent (imported
 # above). It maps each Binance income row onto PR110's Capital Event
 # contract (app.live.capital_event).
@@ -274,29 +427,55 @@ def parse_account(body: dict[str, Any], *, timestamp_ms: int = 0) -> BinanceAcco
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class BinancePermissionSnapshot:
-    """Permission view inferred from the account read.
+    """Permission view built from the API-KEY restrictions (PR118).
 
-    PR111 does NOT require withdraw permission. If the key reports a
-    high-risk permission (withdraw / internal-transfer), a warning is
-    produced. ``can_trade_if_account_reports_it`` mirrors the exchange's
-    own ``canTrade`` flag - it is NOT a runtime authorisation to trade.
+    PR118 hard rule: the withdraw warning (``high_risk_permission_warning``)
+    is set **only** when the raw ``apiRestrictions.enableWithdrawals`` field
+    is explicitly ``True``. It is NEVER inferred from account-level
+    capabilities (``canWithdraw`` / ``canDeposit`` / ``canTrade``) nor from
+    transfer / futures / spot-margin permissions.
+
+    Permission fields are tri-state (``True`` / ``False`` / ``None`` =
+    NOT_REPORTED). ``can_trade_if_account_reports_it`` mirrors the exchange's
+    own ``canTrade`` flag - it is INFO only, NOT a runtime trade
+    authorisation. Universal / internal transfer are surfaced as their own
+    (lower-severity) warnings, never as a withdraw warning.
     """
 
     can_read: bool = False
     can_trade_if_account_reports_it: bool = False
-    can_deposit: bool = False
-    can_withdraw: bool = False
+    # Tri-state key permissions sourced from /sapi/v1/account/apiRestrictions.
+    withdraw_permission: bool | None = None
+    internal_transfer_permission: bool | None = None
+    universal_transfer_permission: bool | None = None
+    futures_trade_permission: bool | None = None
+    spot_margin_trade_permission: bool | None = None
+    reading_permission: bool | None = None
+    ip_restricted: bool | None = None
+    restrictions_reported: bool = False
     high_risk_permission_warning: bool = False
     warnings: tuple[str, ...] = ()
+    # Structured (severity, message) findings: BLOCKER / WARN / INFO.
+    findings: tuple[tuple[str, str], ...] = ()
+    # Sanitised debug view (NEVER carries a secret / signature / account id).
+    debug: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "can_read": self.can_read,
             "can_trade_if_account_reports_it": self.can_trade_if_account_reports_it,
-            "can_deposit": self.can_deposit,
-            "can_withdraw": self.can_withdraw,
+            "withdraw_permission": self.withdraw_permission,
+            "internal_transfer_permission": self.internal_transfer_permission,
+            "universal_transfer_permission": self.universal_transfer_permission,
+            "futures_trade_permission": self.futures_trade_permission,
+            "spot_margin_trade_permission": self.spot_margin_trade_permission,
+            "reading_permission": self.reading_permission,
+            "ip_restricted": self.ip_restricted,
+            "restrictions_reported": self.restrictions_reported,
             "high_risk_permission_warning": self.high_risk_permission_warning,
             "warnings": list(self.warnings),
+            "findings": [{"severity": s, "message": m} for s, m in self.findings],
+            "debug": dict(self.debug),
         }
 
 
@@ -315,6 +494,16 @@ class BinanceApiHealthResult:
     can_read_income: bool = False
     can_trade_if_account_reports_it: bool = False
     high_risk_permission_warning: bool = False
+    # PR118: tri-state API-KEY permissions sourced ONLY from the raw
+    # /sapi/v1/account/apiRestrictions endpoint (None = NOT_REPORTED).
+    withdraw_permission: bool | None = None
+    universal_transfer_permission: bool | None = None
+    internal_transfer_permission: bool | None = None
+    futures_trade_permission: bool | None = None
+    api_restrictions_reported: bool = False
+    # Sanitised permission debug (raw field names + tri-state values only;
+    # never an API key / secret / signature / account id).
+    permission_debug: dict[str, Any] = field(default_factory=dict)
     server_time_ms: int | None = None
     symbol_count: int = 0
     open_position_count: int = 0
@@ -335,6 +524,12 @@ class BinanceApiHealthResult:
             "can_read_income": self.can_read_income,
             "can_trade_if_account_reports_it": self.can_trade_if_account_reports_it,
             "high_risk_permission_warning": self.high_risk_permission_warning,
+            "withdraw_permission": self.withdraw_permission,
+            "universal_transfer_permission": self.universal_transfer_permission,
+            "internal_transfer_permission": self.internal_transfer_permission,
+            "futures_trade_permission": self.futures_trade_permission,
+            "api_restrictions_reported": self.api_restrictions_reported,
+            "permission_debug": dict(self.permission_debug),
             "server_time_ms": self.server_time_ms,
             "symbol_count": self.symbol_count,
             "open_position_count": self.open_position_count,
@@ -350,9 +545,12 @@ __all__ = [
     "BinanceBalanceSnapshot",
     "BinancePositionSnapshot",
     "BinanceAccountSnapshot",
+    "BinanceApiRestrictionsSnapshot",
     "BinanceIncomeEvent",
     "BinancePermissionSnapshot",
     "BinanceApiHealthResult",
     "parse_exchange_info",
     "parse_account",
+    "parse_api_restrictions",
+    "NOT_REPORTED",
 ]

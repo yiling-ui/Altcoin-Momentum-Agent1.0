@@ -242,10 +242,16 @@ This is the final live operator runbook. The full launch-pack reference is
 
 ## Verify no withdraw permission
 
-Run the launch check and inspect the warnings. A key reporting a high-risk
-(withdraw / internal-transfer) permission raises a warning. PR116 does
-**not** require withdraw permission; if it is detectable, it is a NO-GO
-warning to fix on the exchange.
+Run the launch check and inspect the warnings. The high-risk withdraw
+warning is based **only** on the explicit raw API-KEY restriction field
+`apiRestrictions.enableWithdrawals` (read from
+`GET /sapi/v1/account/apiRestrictions`) - never on the futures account
+capability (`canWithdraw` / `canDeposit`) or on reading / trading /
+futures permissions (PR118 hotfix). A key whose raw `enableWithdrawals`
+is `true` is a NO-GO warning to fix on the exchange; a UI-confirmed
+withdraw-disabled key reports `withdraw_permission=False` and raises no
+withdraw warning. Universal / internal transfer are reported as their
+own separate WARN findings, not as withdraw.
 
 ## Phase A — No-key server validation
 
