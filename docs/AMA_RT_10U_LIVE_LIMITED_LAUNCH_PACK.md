@@ -234,3 +234,29 @@ claiming an order filled/closed unless the exchange confirms.
 
 See `docs/AMA_RT_LIVE_OPERATOR_RUNBOOK.md` for the full Phase A–F runbook
 and the explicit GO / NO-GO criteria.
+
+
+---
+
+## 10. PR117 — Final full-system sandbox audit (pre-launch gate)
+
+Before the 10U `LIVE_LIMITED` launch is validated against real keys, run
+the PR117 full-system sandbox audit. It exercises the **whole** PR110–PR116
+chain end to end against the fake altcoin `RAVEUSDT_SANDBOX` with **fake
+transports only** — it never sends a real order.
+
+```bash
+python scripts/live_full_system_sandbox_audit.py --json
+```
+
+A `PASS` (or `WARN`) with `ready_for_real_key_validation=true` is the
+*go-to-real-key-validation* signal: the machinery is proven correct in the
+sandbox, and the only remaining step before funded operation is
+`scripts/live_launch_check.py --require-real-keys` with real (non-
+placeholder) Binance / Telegram / DeepSeek credentials. A `FAIL` blocks the
+launch until the reported blocker is fixed.
+
+PR117 also re-proves, under the full chain, that capital can scale from 10U
+→ 50U → 1,000U → … → 10,000,000U by an **operator** profile switch with no
+code change, and that blind / replay / sim sources stay isolated from the
+live path. See `docs/AMA_RT_FINAL_FULL_SYSTEM_AUDIT.md`.

@@ -7,6 +7,84 @@ Versioning follows the project phase plan in `docs/AMA_RT_V1_4_Production_Spec_K
 
 ## [Unreleased]
 
+### PR117 — Full-System Single-Altcoin Live Sandbox Audit v0: Final Satisfied-Blood Sandbox Audit of the Whole PR110–PR116 Live Chain: IN_REVIEW
+
+**Type:** the FINAL full-system sandbox audit. It runs the *real*
+PR110–PR116 live chain end to end against a single fake altcoin
+(`RAVEUSDT_SANDBOX`) using **fake transports only**, to find串联 bugs and
+prove the chain behaves like a real live system **without ever placing a
+real order**. **Default behaviour stays safe:** `live_trading=false`,
+`exchange_live_orders=false`, `trade_authority=false`,
+`ai_trade_authority=false`, `no_real_order_sent=true`,
+`fake_transports_used=true`.
+
+**Runtime effect on trading:** none. PR117 is an audit harness; it flips
+no safety flag and sends no real order. It is not a unit test, not a
+blind test, not a replay/backtest, and does not re-open the blind route.
+
+**Added — `app/live/` package:**
+
+  - `full_system_audit_models.py` — `FullSystemAuditReport`,
+    `ScenarioResult`, `ScenarioBuilder`, `AuditCheck` (PASS/WARN/FAIL +
+    blocker/warning/info severities). The report carries every
+    `*_chain_ok` flag, the hard safety markers, and
+    `ready_for_real_key_validation`.
+  - `fake_live_market.py` — `FakeLiveMarketAdapter` generating 8
+    deterministic market shapes (`quiet_market`, `weak_pump`,
+    `right_tail_breakout`, `fake_breakout_reversal`,
+    `funding_negative_hold`, `funding_positive_hold`,
+    `spread_liquidity_bad`, `exchange_failure_mid_trade`). A
+    live-equivalent source with **no future labels**; deliberately NOT in
+    `FORBIDDEN_LIVE_SOURCE_CLASSES`.
+  - `fake_live_exchange.py` — `FakeBinanceTransport` (a no-socket
+    transport that drives the *real* `BinanceExecutionAdapter`: fill /
+    partial / reject / timeout, with call-count tracking so no duplicate
+    order is ever sent), `FakeBinanceLiveAdapter`, `FakeFeeEngine`,
+    `FakeFundingEngine`, `FakeLiveAccount` (keeps external flows separate
+    from strategy PnL via the PR110 capital-event ledger).
+  - `fake_live_strategy.py` — `LiveStrategySandboxAdapter`: a minimal
+    deterministic strategy harness (`source=LIVE`, no MFE/MAE/completed-
+    tail leakage) that emits an opportunity score, a planned entry zone /
+    stop / take-profit, and the deterministic right-tail leverage
+    evidence the real gate consumes.
+  - `fake_live_telegram.py` — `FakeTelegramTransport` +
+    `SandboxConsoleDataProvider` so the *real* `TelegramOperatorConsole`
+    runs against a fake authorized/unauthorized chat.
+  - `fake_live_deepseek.py` — `FakeDeepSeekTransport` (clean + forbidden-
+    field payloads) so the *real* `LiveAIBriefingGenerator` +
+    `sanitize_ai_output` run with no network.
+  - `full_system_sandbox.py` — `FullSystemSandboxAudit`: wires the real
+    chain (path isolation → capital profile → live risk → leverage gate →
+    execution gateway → Binance adapter → ledger → funding-aware PnL →
+    Telegram → DeepSeek → kill switch) to the fakes across 9 scenarios.
+
+**Added — scripts / docs / tests:**
+
+  - `scripts/live_full_system_sandbox_audit.py` — the CLI
+    (`--json`, `--symbol`, `--scenario {all,strategy_lifecycle,
+    execution_lifecycle,live_risk,capital_ladder,funding_fee_pnl,
+    telegram_operator,ai_guard,blind_isolation,kill_switch}`). Exit 0 on
+    PASS/WARN, 1 on FAIL. Never sends a real order.
+  - `docs/AMA_RT_FINAL_FULL_SYSTEM_AUDIT.md` — purpose, why one altcoin,
+    why it is not blind testing, isolation, scenarios, how to run,
+    PASS/WARN/FAIL meaning, what blocks real 10U, what still needs real-
+    key validation, and how capital scales after 10U with no code change.
+  - `tests/unit/test_pr117_full_system_sandbox_audit.py` — the 50-point
+    test suite (fake transports only; no real order; strategy/execution/
+    capital/funding/Telegram/AI/isolation/kill-switch behaviour;
+    existing PR110–PR116 tests still pass).
+
+**Audit findings (sandbox):** the串联 chain passed with `overall_status=PASS`
+and `ready_for_real_key_validation=true`. No串联 bug surfaced that blocks a
+real-key validation; the only behavioural fix needed was internal to the
+audit harness (the operator `/pnl` card separates external flows via the
+`deposits` / `withdrawals` / `net_strategy_pnl` card keys).
+
+**Hard boundaries (unchanged):** no real order, no real cancel, no real
+leverage/margin change, real Telegram/DeepSeek never required, and
+blind/replay/sim can never reach the live path.
+
+
 ### PR116 — 10U LIVE_LIMITED Launch Pack v0: End-to-End Live Readiness + Shadow Run + Controlled Real-Order Arming + Kill Switch + Runbook: IN_REVIEW
 
 **Type:** the final launch pack that wires PR110–PR115 into a controlled,
