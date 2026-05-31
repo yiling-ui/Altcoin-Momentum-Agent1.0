@@ -1,4 +1,4 @@
-"""PR118 - Live Execution Telegram Notifier (independent app.live sender).
+"""PR120 - Live Execution Telegram Notifier (independent app.live sender).
 
 Covers the behaviour the brief requires:
 
@@ -54,13 +54,17 @@ from app.live.execution_telegram import (
     PAYLOAD_LIVE_EXECUTION_BLOCKED,
     PAYLOAD_LIVE_ORDER_FILLED,
     PAYLOAD_LIVE_ORDER_SUBMITTED,
+    PAYLOAD_LIVE_RISK_REJECT,
     PAYLOAD_SHADOW_ENTRY_PLAN,
     build_execution_telegram_payload,
     execution_payload_dedup_key,
 )
+from app.live.live_limited_arming import LiveLimitedSmoke
 from app.live.live_risk_engine import LiveRiskDecision
+from app.live.live_runtime import LiveRuntime
 from app.live.order_ledger import LiveOrderLedger
 from app.live.secrets import SecretValue
+from app.live.telegram_state import LiveOperatorStateStore
 
 L1 = CapitalProfileId.L1_10U_PROBE
 SHADOW = LiveRuntimeMode.LIVE_SHADOW
@@ -530,3 +534,216 @@ def test_notifier_exposes_no_order_surface():
     n = LiveExecutionNotifier(telegram_config=_tg())
     assert not hasattr(n, "submit_order")
     assert not hasattr(n, "cancel_order")
+
+
+
+# ===========================================================================
+# Real-order CLI precheck blockers -> LIVE_EXECUTION_BLOCKED card
+#
+# When live_limited_smoke is called with --real-order --send-telegram but the
+# CLI precheck refuses BEFORE the gateway, a real_order=false
+# LIVE_EXECUTION_BLOCKED card is pushed so the operator sees WHY no order was
+# placed. No real order is ever sent.
+# ===========================================================================
+def _make_smoke(notifier, tmp_path, *, profile=L1) -> LiveLimitedSmoke:
+    config = LiveApiConfig.from_env({})  # empty env -> safe defaults
+    store = LiveOperatorStateStore(str(tmp_path / "live_state"))
+    runtime = LiveRuntime(config, state_store=store, capital_profile_id=profile)
+    # adapter=None: the precheck refuses before the gateway is ever needed.
+    return LiveLimitedSmoke(config, runtime=runtime, adapter=None, notifier=notifier)
+
+
+def _run_real(smoke, **kw):
+    base = dict(
+        symbol="RAVEUSDT",
+        notional_usdt=5.0,
+        leverage=1.0,
+        side="BUY",
+        real_order=True,
+        send_telegram=True,
+        planned_entry_price=0.5,
+        planned_stop_price=0.45,
+        planned_take_profit_price=0.7,
+    )
+    base.update(kw)
+    return smoke.run(**base)
+
+
+def _assert_blocked_card(notifier, reason):
+    assert len(notifier.calls) == 1
+    payload, source = notifier.calls[0]
+    assert source is OrderSource.LIVE
+    assert payload["payload_type"] == PAYLOAD_LIVE_EXECUTION_BLOCKED
+    assert payload["real_order"] is False
+    assert payload["real_capital_changed"] is False
+    assert payload["order_id"] == PLACEHOLDER
+    assert payload["actual_entry_price"] == PLACEHOLDER
+    assert payload["actual_exit_price"] == PLACEHOLDER
+    assert payload["reject_reason"] == reason
+
+
+def test_real_order_missing_i_understand_sends_blocked(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    res = _run_real(
+        smoke,
+        i_understand_this_places_real_order=False,
+        confirm_code="SECRET",
+        expected_confirm_code="SECRET",
+    )
+    assert res.blocked_reason == "missing_i_understand_flag"
+    assert res.real_order is False
+    assert res.no_real_order_sent is True
+    _assert_blocked_card(n, "missing_i_understand_flag")
+
+
+def test_real_order_missing_confirm_code_sends_blocked(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    res = _run_real(
+        smoke,
+        i_understand_this_places_real_order=True,
+        confirm_code="",
+        expected_confirm_code="SECRET",
+    )
+    assert res.blocked_reason == "invalid_or_missing_confirmation_code"
+    assert res.no_real_order_sent is True
+    _assert_blocked_card(n, "invalid_or_missing_confirmation_code")
+
+
+def test_real_order_notional_exceeds_max_sends_blocked(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    res = _run_real(
+        smoke,
+        i_understand_this_places_real_order=True,
+        confirm_code="SECRET",
+        expected_confirm_code="SECRET",
+        notional_usdt=5.0,
+        max_notional_usdt=1.0,
+    )
+    assert res.blocked_reason == "notional_exceeds_max_notional_arg"
+    assert res.no_real_order_sent is True
+    _assert_blocked_card(n, "notional_exceeds_max_notional_arg")
+
+
+def test_real_order_precheck_blocked_event_id_is_stable(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    res = _run_real(
+        smoke,
+        i_understand_this_places_real_order=False,
+        confirm_code="SECRET",
+        expected_confirm_code="SECRET",
+    )
+    payload, _ = n.calls[0]
+    assert payload["event_id"] == (
+        f"{res.client_order_id}:{PAYLOAD_LIVE_EXECUTION_BLOCKED}:missing_i_understand_flag"
+    )
+
+
+def test_real_order_precheck_blocked_outbound_disabled_sends_nothing(tmp_path):
+    tx = RecordingTransport()
+    notifier = LiveExecutionNotifier(telegram_config=_tg(outbound=False), transport=tx)
+    smoke = _make_smoke(notifier, tmp_path)
+    res = _run_real(
+        smoke,
+        i_understand_this_places_real_order=False,
+        confirm_code="SECRET",
+        expected_confirm_code="SECRET",
+    )
+    assert res.blocked_reason == "missing_i_understand_flag"
+    assert tx.calls == []  # suppressed; no network contacted
+
+
+def test_real_order_precheck_blocked_no_send_telegram_flag_does_not_notify(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    res = _run_real(
+        smoke,
+        send_telegram=False,
+        i_understand_this_places_real_order=False,
+        confirm_code="SECRET",
+        expected_confirm_code="SECRET",
+    )
+    assert res.blocked_reason == "missing_i_understand_flag"
+    assert n.calls == []
+
+
+# ===========================================================================
+# Dry-run still sends SHADOW_ENTRY_PLAN / LIVE_RISK_REJECT / LIVE_EXECUTION_BLOCKED
+# ===========================================================================
+def test_dry_run_sends_real_order_false_card(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    res = smoke.run(
+        symbol="RAVEUSDT",
+        notional_usdt=5.0,
+        leverage=1.0,
+        real_order=False,
+        send_telegram=True,
+        planned_entry_price=0.5,
+        planned_stop_price=0.45,
+        planned_take_profit_price=0.7,
+    )
+    assert res.dry_run is True
+    assert res.real_order is False
+    assert len(n.calls) == 1
+    payload, source = n.calls[0]
+    assert source is OrderSource.LIVE
+    assert payload["real_order"] is False
+    assert payload["payload_type"] in {
+        PAYLOAD_SHADOW_ENTRY_PLAN,
+        PAYLOAD_LIVE_RISK_REJECT,
+        PAYLOAD_LIVE_EXECUTION_BLOCKED,
+    }
+
+
+class _FakeDecision:
+    def __init__(self, allowed, reject_reasons=(), reject_reason=None):
+        self.allowed = allowed
+        self.reject_reasons = tuple(reject_reasons)
+        self.reject_reason = reject_reason
+
+
+def test_dry_run_branch_selection_picks_correct_card(tmp_path):
+    n = RecordingNotifier()
+    smoke = _make_smoke(n, tmp_path)
+    intent = _shadow_intent()
+    smoke._maybe_notify_dry(intent, _FakeDecision(True), None, True)
+    smoke._maybe_notify_dry(
+        intent,
+        _FakeDecision(False, ("risk_decision_not_approved",), "risk_decision_not_approved"),
+        None,
+        True,
+    )
+    smoke._maybe_notify_dry(
+        intent,
+        _FakeDecision(False, ("exchange_live_orders_disabled",), "exchange_live_orders_disabled"),
+        None,
+        True,
+    )
+    types = [c[0]["payload_type"] for c in n.calls]
+    assert types == [
+        PAYLOAD_SHADOW_ENTRY_PLAN,
+        PAYLOAD_LIVE_RISK_REJECT,
+        PAYLOAD_LIVE_EXECUTION_BLOCKED,
+    ]
+    assert all(c[0]["real_order"] is False for c in n.calls)
+
+
+def test_dry_run_outbound_disabled_sends_nothing(tmp_path):
+    tx = RecordingTransport()
+    notifier = LiveExecutionNotifier(telegram_config=_tg(outbound=False), transport=tx)
+    smoke = _make_smoke(notifier, tmp_path)
+    smoke.run(
+        symbol="RAVEUSDT",
+        notional_usdt=5.0,
+        leverage=1.0,
+        real_order=False,
+        send_telegram=True,
+        planned_entry_price=0.5,
+        planned_stop_price=0.45,
+        planned_take_profit_price=0.7,
+    )
+    assert tx.calls == []  # suppressed; no network contacted

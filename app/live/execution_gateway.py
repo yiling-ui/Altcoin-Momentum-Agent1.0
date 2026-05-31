@@ -405,7 +405,7 @@ class LiveExecutionGateway:
         self._isolation = isolation_guard or LivePathIsolationGuard(event_repo=event_repo)
         self._event_repo = event_repo
         self._clock = clock
-        # OPTIONAL live Telegram notifier (PR118). When wired, every
+        # OPTIONAL live Telegram notifier (PR120). When wired, every
         # blocked / rejected / submitted / filled payload is pushed to
         # Telegram through the INDEPENDENT app.live sender. When None, the
         # gateway behaves exactly as before (payload built + parked on

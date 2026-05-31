@@ -1,4 +1,4 @@
-"""Live execution Telegram notifier (PR118 - independent app/live sender).
+"""Live execution Telegram notifier (PR120 - independent app/live sender).
 
 Pushes live execution operator cards to Telegram using the INDEPENDENT
 ``app.live`` Telegram transport (the same urllib transport PR111's
@@ -303,7 +303,7 @@ class LiveExecutionNotifier:
                     source_module=LIVE_EXECUTION_NOTIFIER_MODULE,
                     payload={
                         **payload,
-                        # PR118 safety markers (audit visibility).
+                        # PR120 safety markers (audit visibility).
                         "trade_authority": False,
                         "ai_trade_authority": False,
                         "exchange_live_orders": False,

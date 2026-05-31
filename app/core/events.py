@@ -1158,7 +1158,7 @@ class EventType(str, Enum):
     LIVE_ORDER_ADAPTER_BLOCKED = "LIVE_ORDER_ADAPTER_BLOCKED"
 
     # ------------------------------------------------------------------
-    # PR118 - Live Execution Telegram Notifier (independent app/live
+    # PR120 - Live Execution Telegram Notifier (independent app/live
     # sender). Two extra descriptive payload / card types so the operator
     # console + the dry-run / shadow path can push a *planned* order card
     # and a risk-reject card with the SAME stable schema the PR113 live

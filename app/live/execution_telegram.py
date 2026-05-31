@@ -43,7 +43,7 @@ PAYLOAD_LIVE_ORDER_REJECTED = EventType.LIVE_ORDER_REJECTED.value
 PAYLOAD_LIVE_ORDER_FAILED = EventType.LIVE_ORDER_FAILED.value
 PAYLOAD_LIVE_EXECUTION_BLOCKED = EventType.LIVE_EXECUTION_BLOCKED.value
 PAYLOAD_LIVE_EXIT_FILLED = EventType.LIVE_EXIT_FILLED.value
-# PR118 - planned (shadow / dry-run) entry card + risk-reject card. Both
+# PR120 - planned (shadow / dry-run) entry card + risk-reject card. Both
 # always render real_order=false / order_id=-- / actual_*=--.
 PAYLOAD_SHADOW_ENTRY_PLAN = EventType.SHADOW_ENTRY_PLAN.value
 PAYLOAD_LIVE_RISK_REJECT = EventType.LIVE_RISK_REJECT.value

@@ -300,6 +300,12 @@ class LiveLimitedSmoke:
             decision = evaluate_execution_permission(
                 intent, risk_decision, context, validation=validation, profile=profile
             )
+            # Push a real_order=false LIVE_EXECUTION_BLOCKED card when the
+            # --real-order CLI precheck refuses BEFORE the gateway runs, so
+            # the operator sees WHY no order was placed. Never sends an order.
+            self._maybe_notify_precheck_blocked(
+                intent, blocked_reason, risk_decision, send_telegram
+            )
             return self._blocked_result(intent, decision, validation, blocked_reason)
 
         if self._gateway is None:
@@ -480,6 +486,41 @@ class LiveLimitedSmoke:
         try:
             self._notifier.notify(payload, source=intent.source)
         except Exception:  # pragma: no cover - notify must never break dry-run
+            pass
+
+    def _maybe_notify_precheck_blocked(
+        self,
+        intent: LiveOrderIntent,
+        blocked_reason: str,
+        risk_decision: Any,
+        send_telegram: bool,
+    ) -> None:
+        """Push a real_order=false ``LIVE_EXECUTION_BLOCKED`` card for a
+        --real-order request refused by the CLI precheck BEFORE the gateway.
+
+        The card carries the forced placeholders (real_order=false /
+        real_capital_changed=false / order_id=-- / actual_*=--) plus the
+        precheck ``blocked_reason``. The ``event_id`` is stable
+        (client_order_id + LIVE_EXECUTION_BLOCKED + blocked_reason) so a
+        retry of the same refusal is de-duplicated. A missing notifier /
+        send_telegram=False is a no-op. NEVER sends a real order.
+        """
+        if not send_telegram or self._notifier is None:
+            return
+        payload = build_execution_telegram_payload(
+            PAYLOAD_LIVE_EXECUTION_BLOCKED,
+            intent=intent,
+            risk_decision=risk_decision,
+            reject_reason=blocked_reason,
+            runtime_mode=intent.runtime_mode,
+            event_id=(
+                f"{intent.client_order_id}:"
+                f"{PAYLOAD_LIVE_EXECUTION_BLOCKED}:{blocked_reason}"
+            ),
+        )
+        try:
+            self._notifier.notify(payload, source=intent.source)
+        except Exception:  # pragma: no cover - notify must never break the smoke
             pass
 
     # ------------------------------------------------------------------
