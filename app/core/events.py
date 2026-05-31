@@ -1158,6 +1158,26 @@ class EventType(str, Enum):
     LIVE_ORDER_ADAPTER_BLOCKED = "LIVE_ORDER_ADAPTER_BLOCKED"
 
     # ------------------------------------------------------------------
+    # PR120 - Live Execution Telegram Notifier (independent app/live
+    # sender). Two extra descriptive payload / card types so the operator
+    # console + the dry-run / shadow path can push a *planned* order card
+    # and a risk-reject card with the SAME stable schema the PR113 live
+    # order cards use. Both are ALWAYS real_order=false / order_id=-- /
+    # actual_*=-- / real_capital_changed=false:
+    #
+    #   SHADOW_ENTRY_PLAN  - 空盘跑 / dry-run planned entry. The system
+    #     produced an order plan that passed the deterministic execution
+    #     gate but was NOT (and will not be) sent to the exchange. Carries
+    #     the planned entry / stop / take-profit / leverage; every
+    #     real-order field is a forced placeholder.
+    #   LIVE_RISK_REJECT   - the Risk Engine (PR112) refused the order
+    #     before the 15-point execution gate could authorise it
+    #     (risk_decision missing / not approved / real_order_not_allowed).
+    #     real_order=false; carries the reject reason taxonomy.
+    SHADOW_ENTRY_PLAN = "SHADOW_ENTRY_PLAN"
+    LIVE_RISK_REJECT = "LIVE_RISK_REJECT"
+
+    # ------------------------------------------------------------------
     # PR114 - Telegram Operator Console v0 + Live Funding Attribution +
     # Operator Workflow + Blind/Replay/Sim Isolation hardening.
     #

@@ -63,6 +63,7 @@ from app.live.execution_models import (
 )
 from app.live.execution_telegram import (
     PAYLOAD_LIVE_EXECUTION_BLOCKED,
+    PAYLOAD_LIVE_ORDER_FAILED,
     PAYLOAD_LIVE_ORDER_FILLED,
     PAYLOAD_LIVE_ORDER_PARTIALLY_FILLED,
     PAYLOAD_LIVE_ORDER_REJECTED,
@@ -397,12 +398,21 @@ class LiveExecutionGateway:
         isolation_guard: LivePathIsolationGuard | None = None,
         event_repo: Any | None = None,
         clock: Callable[[], int] = now_ms,
+        notifier: Any | None = None,
     ) -> None:
         self._adapter = adapter
         self._ledger = ledger if ledger is not None else LiveOrderLedger(event_repo=event_repo)
         self._isolation = isolation_guard or LivePathIsolationGuard(event_repo=event_repo)
         self._event_repo = event_repo
         self._clock = clock
+        # OPTIONAL live Telegram notifier (PR120). When wired, every
+        # blocked / rejected / submitted / filled payload is pushed to
+        # Telegram through the INDEPENDENT app.live sender. When None, the
+        # gateway behaves exactly as before (payload built + parked on
+        # ``_last_telegram_payload`` only). The notifier itself enforces
+        # outbound / allow-list / source-isolation / dedup gating.
+        self._notifier = notifier
+        self._last_telegram_payload: dict[str, Any] | None = None
 
     @property
     def ledger(self) -> LiveOrderLedger:
@@ -543,8 +553,10 @@ class LiveExecutionGateway:
             risk_decision=risk_decision,
             reject_reason=decision.reject_reason,
             runtime_mode=intent.runtime_mode,
+            event_id=self._payload_event_id(intent, PAYLOAD_LIVE_EXECUTION_BLOCKED),
         )
         self._last_telegram_payload = payload
+        self._notify(payload, intent)
         return result
 
     # ------------------------------------------------------------------
@@ -629,6 +641,9 @@ class LiveExecutionGateway:
         elif result.status is LiveExecutionStatus.REJECTED:
             ptype = PAYLOAD_LIVE_ORDER_REJECTED
             etype = EventType.LIVE_ORDER_REJECTED
+        elif result.status is LiveExecutionStatus.FAILED:
+            ptype = PAYLOAD_LIVE_ORDER_FAILED
+            etype = EventType.LIVE_ORDER_FAILED
         else:
             ptype = PAYLOAD_LIVE_ORDER_SUBMITTED
             etype = EventType.LIVE_ORDER_SUBMITTED
@@ -641,8 +656,10 @@ class LiveExecutionGateway:
             balance_before=balance_before,
             balance_after=balance_after,
             funding_usdt=funding_usdt,
+            event_id=self._payload_event_id(intent, ptype, result=result),
         )
         self._last_telegram_payload = payload
+        self._notify(payload, intent)
         self._emit(
             etype,
             {
@@ -654,6 +671,42 @@ class LiveExecutionGateway:
             },
             symbol=result.symbol,
         )
+
+    def _payload_event_id(
+        self,
+        intent: LiveOrderIntent,
+        payload_type: str,
+        *,
+        result: LiveOrderResult | None = None,
+    ) -> str:
+        """Stable per-(order, lifecycle-step) id used for notifier de-dup.
+
+        Built from the client order id (falling back to the symbol) + the
+        payload type so a retry that re-emits the SAME step is suppressed,
+        while distinct steps (SUBMITTED vs FILLED) stay distinct.
+        """
+        coid = (
+            (result.client_order_id if result and result.client_order_id else None)
+            or intent.client_order_id
+            or intent.symbol
+            or "noid"
+        )
+        return f"{coid}:{payload_type}"
+
+    def _notify(self, payload: dict[str, Any], intent: LiveOrderIntent) -> None:
+        """Push a payload through the OPTIONAL live Telegram notifier.
+
+        The notifier enforces every outbound / allow-list / source /
+        dedup gate itself; the gateway only forwards the order's
+        provenance (``intent.source``) so a non-LIVE source is refused.
+        A notify failure must NEVER crash an order submission.
+        """
+        if self._notifier is None:
+            return
+        try:
+            self._notifier.notify(payload, source=intent.source)
+        except Exception:  # pragma: no cover - notify must never break a submit
+            pass
 
     def _emit(self, event_type: EventType, payload: dict[str, Any], *, symbol: str | None = None) -> None:
         if self._event_repo is None:

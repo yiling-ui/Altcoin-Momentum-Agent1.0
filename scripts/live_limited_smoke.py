@@ -45,6 +45,7 @@ from app.live.api_config import LiveApiConfig  # noqa: E402
 from app.live.binance_client import BinanceLiveClient  # noqa: E402
 from app.live.binance_execution_adapter import BinanceExecutionAdapter  # noqa: E402
 from app.live.execution_gateway import _env_bool  # noqa: E402
+from app.live.execution_notifier import LiveExecutionNotifier  # noqa: E402
 from app.live.live_limited_arming import LiveLimitedSmoke  # noqa: E402
 from app.live.live_runtime import LiveRuntime  # noqa: E402
 
@@ -59,6 +60,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="Dry run (default).")
     parser.add_argument("--real-order", dest="real_order", action="store_true", help="Attempt a REAL order.")
+    parser.add_argument(
+        "--send-telegram",
+        dest="send_telegram",
+        action="store_true",
+        help=(
+            "Push the execution card to Telegram via the independent app.live "
+            "sender (respects outbound + allow-list gating). Dry-run pushes a "
+            "real_order=false plan/reject card; real-order pushes the "
+            "submitted/filled/rejected/failed/blocked card."
+        ),
+    )
     parser.add_argument(
         "--i-understand-this-places-real-order",
         dest="i_understand",
@@ -114,7 +126,16 @@ def main(argv: list[str] | None = None) -> int:
         runtime_mode=runtime.runtime_mode(),
         exchange_info=exchange_info,
     )
-    smoke = LiveLimitedSmoke(config, runtime=runtime, adapter=adapter)
+    # OPTIONAL live Telegram notifier (independent app.live sender). Wired
+    # only when --send-telegram is set; it self-gates on outbound_enabled,
+    # the chat allow-list, LIVE source, and dedup, so a missing token /
+    # disabled outbound simply suppresses (no network contacted).
+    notifier = (
+        LiveExecutionNotifier.from_config(config, runtime_mode=runtime.runtime_mode())
+        if args.send_telegram
+        else None
+    )
+    smoke = LiveLimitedSmoke(config, runtime=runtime, adapter=adapter, notifier=notifier)
 
     result = smoke.run(
         symbol=args.symbol,
@@ -122,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         leverage=float(args.leverage),
         side=args.side,
         real_order=real_order,
+        send_telegram=bool(args.send_telegram),
         i_understand_this_places_real_order=bool(args.i_understand),
         confirm_code=args.confirm_code,
         max_notional_usdt=args.max_notional_usdt,

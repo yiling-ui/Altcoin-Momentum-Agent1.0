@@ -43,6 +43,10 @@ PAYLOAD_LIVE_ORDER_REJECTED = EventType.LIVE_ORDER_REJECTED.value
 PAYLOAD_LIVE_ORDER_FAILED = EventType.LIVE_ORDER_FAILED.value
 PAYLOAD_LIVE_EXECUTION_BLOCKED = EventType.LIVE_EXECUTION_BLOCKED.value
 PAYLOAD_LIVE_EXIT_FILLED = EventType.LIVE_EXIT_FILLED.value
+# PR120 - planned (shadow / dry-run) entry card + risk-reject card. Both
+# always render real_order=false / order_id=-- / actual_*=--.
+PAYLOAD_SHADOW_ENTRY_PLAN = EventType.SHADOW_ENTRY_PLAN.value
+PAYLOAD_LIVE_RISK_REJECT = EventType.LIVE_RISK_REJECT.value
 
 EXECUTION_PAYLOAD_TYPES: frozenset[str] = frozenset(
     {
@@ -55,6 +59,8 @@ EXECUTION_PAYLOAD_TYPES: frozenset[str] = frozenset(
         PAYLOAD_LIVE_ORDER_FAILED,
         PAYLOAD_LIVE_EXECUTION_BLOCKED,
         PAYLOAD_LIVE_EXIT_FILLED,
+        PAYLOAD_SHADOW_ENTRY_PLAN,
+        PAYLOAD_LIVE_RISK_REJECT,
     }
 )
 
@@ -163,6 +169,15 @@ def build_execution_telegram_payload(
         or (intent.order_type.value if intent else PLACEHOLDER)
     )
 
+    # Position direction derived from the order side (BUY -> LONG,
+    # SELL -> SHORT). Descriptive only; the order `side` is kept verbatim.
+    if side == "BUY":
+        direction = "LONG"
+    elif side == "SELL":
+        direction = "SHORT"
+    else:
+        direction = PLACEHOLDER
+
     # Leverage.
     lev = leverage
     if lev is None and intent is not None:
@@ -257,6 +272,7 @@ def build_execution_telegram_payload(
         ),
         "symbol": symbol,
         "side": side,
+        "direction": direction,
         "order_type": order_type,
         "leverage": _or_placeholder(lev),
         "planned_entry_price": _or_placeholder(intent.planned_entry_price if intent else None),
@@ -288,6 +304,80 @@ def build_execution_telegram_payload(
     return payload
 
 
+def execution_payload_dedup_key(payload: dict[str, Any]) -> str:
+    """Stable de-duplication key for an execution payload.
+
+    Prefers an explicit ``event_id``; otherwise falls back to
+    ``<client_order_id>:<payload_type>`` so the same lifecycle step for the
+    same order is never pushed twice (a retry that re-emits an identical
+    payload is suppressed by the notifier). Distinct lifecycle steps
+    (SUBMITTED vs FILLED) keep distinct keys because ``payload_type``
+    differs.
+    """
+    event_id = payload.get("event_id")
+    if event_id not in (None, PLACEHOLDER, ""):
+        return f"eid:{event_id}"
+    coid = payload.get("client_order_id")
+    ptype = payload.get("payload_type", "?")
+    return f"coid:{coid}:{ptype}"
+
+
+def render_execution_payload(payload: dict[str, Any]) -> str:
+    """Render an execution payload into a short, operator-readable card text.
+
+    The field set follows the brief:
+      - planned / shadow / blocked / reject cards show the planned geometry
+        plus the forced ``real_order=false`` / ``order_id=--`` /
+        ``actual_*=--`` / ``real_capital_changed=false`` markers;
+      - real order / fill cards show the real ``order_id`` / actual fill
+        price / fee / funding / net_pnl and ``real_order=true``.
+
+    The renderer never reveals a secret (it reads only the already-safe
+    payload dict, which carries no credential).
+    """
+    ptype = payload.get("payload_type", "?")
+    mode = payload.get("mode_display") or payload.get("runtime_mode") or "空盘跑"
+    real_order = bool(payload.get("real_order", False))
+
+    lines: list[str] = [f"[ama-rt:live] {ptype}", f"mode={mode}"]
+
+    def _add(label: str, key: str) -> None:
+        lines.append(f"{label}={payload.get(key, PLACEHOLDER)}")
+
+    _add("symbol", "symbol")
+    _add("direction", "direction")
+
+    if real_order:
+        # Real order / fill card: show the real execution facts.
+        _add("order_id", "order_id")
+        _add("actual_entry_price", "actual_entry_price")
+        _add("actual_exit_price", "actual_exit_price")
+        _add("fee", "fee_usdt")
+        lines.append(f"funding={payload.get('funding_usdt', 0.0)}")
+        _add("net_pnl", "net_pnl")
+        lines.append("real_order=true")
+        lines.append(f"real_capital_changed={str(bool(payload.get('real_capital_changed', False))).lower()}")
+    else:
+        # Planned / shadow / blocked / reject card: planned geometry +
+        # forced placeholders.
+        lines.append(f"planned_entry={payload.get('planned_entry_price', PLACEHOLDER)}")
+        lines.append(f"planned_stop={payload.get('planned_stop_price', PLACEHOLDER)}")
+        lines.append(
+            f"planned_take_profit={payload.get('planned_take_profit_price', PLACEHOLDER)}"
+        )
+        lines.append(f"planned_leverage={payload.get('leverage', PLACEHOLDER)}")
+        reject = payload.get("reject_reason", PLACEHOLDER)
+        if reject not in (None, PLACEHOLDER, ""):
+            lines.append(f"reject_reason={reject}")
+        lines.append("real_order=false")
+        lines.append(f"order_id={payload.get('order_id', PLACEHOLDER)}")
+        lines.append(f"actual_entry_price={payload.get('actual_entry_price', PLACEHOLDER)}")
+        lines.append(f"actual_exit_price={payload.get('actual_exit_price', PLACEHOLDER)}")
+        lines.append("real_capital_changed=false")
+
+    return "\n".join(lines)
+
+
 __all__ = [
     "PLACEHOLDER",
     "EXECUTION_PAYLOAD_TYPES",
@@ -301,5 +391,9 @@ __all__ = [
     "PAYLOAD_LIVE_ORDER_FAILED",
     "PAYLOAD_LIVE_EXECUTION_BLOCKED",
     "PAYLOAD_LIVE_EXIT_FILLED",
+    "PAYLOAD_SHADOW_ENTRY_PLAN",
+    "PAYLOAD_LIVE_RISK_REJECT",
     "build_execution_telegram_payload",
+    "execution_payload_dedup_key",
+    "render_execution_payload",
 ]
