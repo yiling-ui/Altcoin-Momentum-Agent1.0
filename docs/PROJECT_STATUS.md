@@ -2,8 +2,36 @@
 
 This document is the at-a-glance status board for AMA-RT V1.4. It is
 intentionally short. The full phase-gate ledger lives in
-`docs/PHASE_GATE.md`; per-phase deep dives live in their own
-`PHASE_*` documents.
+`docs/PHASE_GATE.md`; the human-readable milestone map and the
+legacy-code → milestone translation live in `docs/ROADMAP.md`; per-phase
+deep dives live in their own `PHASE_*` documents.
+
+## Current status (milestone scheme)
+
+> Readable milestone ids (`M01`–`M68`, stages `S0`–`S12`) are defined in
+> `docs/ROADMAP.md`. They replace the unreadable fractal phase codes
+> (`Phase 11C.1C-C-B-B-B-D-C-B`). The old codes remain valid in code,
+> events, and the gate ledger — `ROADMAP.md` is the translation layer.
+
+- **Current head:** `M67 — Full-System Single-Altcoin Live Sandbox Audit`
+  (legacy `PR117`), `IN_REVIEW`. Sandbox `overall_status=PASS`,
+  `ready_for_real_key_validation=true` — a *go to real-key validation*
+  signal, **not** a go-live.
+- **Stage `S11` — Live Launch Chain (`M60`–`M67`, legacy `PR110`–`PR117`)**
+  is `IN_REVIEW`. Default posture stays safe: `live_trading=false`,
+  `exchange_live_orders=false`, `trade_authority=false`,
+  `ai_trade_authority=false`.
+- **`M68` / `Phase 12` (real money) is `FORBIDDEN`** and has not been
+  initiated (Spec §41 Go/No-Go is the only path).
+- **Done:** `S0`–`S7` `CLOSED`; `S8` mixed (`M25`–`M29` `CLOSED`,
+  `M30`/`M31` `PARTIAL`, `M33`/`M34`/`M35`/`M39` `IN_REVIEW`, rest
+  `SHIPPED`); `S9` (Blind Walk-Forward Sim) and `S10` (AI Intelligence
+  Layer) `SHIPPED`.
+- **Stale build tag (known, doc-only refactor leaves it):**
+  `app/__init__.py` still prints `__phase__ = "Phase 11C.1C-B-IN_REVIEW …"`
+  (`M21`-era) and `__version__ = "1.4.0a11c.1c.b"`. The runtime banner is a
+  build tag, **not** the current milestone. Re-aligning it is a tracked
+  code task in `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Live road map — PR117 (Full-System Single-Altcoin Live Sandbox Audit v0)
 
