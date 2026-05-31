@@ -55,8 +55,10 @@ The `.env` file is gitignored. The example file documents every variable.
    ```
    Expect `binance_public_status=PASS`. With a valid read key,
    `binance_private_read=PASS` and `can_read_account/positions/income=True`.
-   A `high_risk_permission_warning=True` means your key still has withdraw
-   enabled - disable it.
+   A `high_risk_permission_warning=True` means your key's raw
+   `apiRestrictions.enableWithdrawals` is still `true` - disable withdraw
+   on the key. A UI-confirmed withdraw-disabled key reports
+   `withdraw_permission=False` and raises **no** withdraw warning (PR118).
 
 ---
 
@@ -186,9 +188,32 @@ absent. `AMA_SECRET_LOGGING_ALLOWED` must exist and default `false`.
 
 ### 8.3 Binance key must NOT have withdraw permission
 
-PR111/PR112 never need withdraw. If the key has it, the health check
-raises `high_risk_permission_warning=True`. Disable withdraw on the API
-key.
+AMA-RT never needs withdraw. The withdraw warning
+(`high_risk_permission_warning=True` / `binance_key_has_withdraw_permission`)
+is based **only** on the explicit raw API-KEY restriction field
+`apiRestrictions.enableWithdrawals` read from the signed SAPI endpoint
+`GET /sapi/v1/account/apiRestrictions`.
+
+**PR118 hotfix:** the warning is no longer inferred from the futures
+account capability (`/fapi/v2/account` `canWithdraw` / `canDeposit`) nor
+from reading / trading / transfer / futures permissions. A
+**UI-confirmed withdraw-disabled** key now correctly reports
+`withdraw_permission=False` and raises **no** withdraw warning.
+
+- `enableWithdrawals=true` -> BLOCKER / high-risk withdraw warning.
+- `permitsUniversalTransfer=true` -> separate WARN
+  (`binance_key_has_universal_transfer_permission`), not a withdraw warning.
+- `enableInternalTransfer=true` -> separate WARN
+  (`binance_key_has_internal_transfer_permission`), not a withdraw warning.
+- `enableFutures=true` / account `canTrade=true` -> INFO only.
+- A field Binance does not expose is `NOT_REPORTED`, never `true`.
+
+The sanitised `permission_debug` block (`raw_permission_fields_seen`,
+`enableWithdrawals`, `enableInternalTransfer`, `permitsUniversalTransfer`,
+`enableFutures`, `enableSpotAndMarginTrading`, `enableReading`,
+`ipRestrict`) never carries an API key, secret, signature, or account id.
+The project-side no-order gates (`exchange_live_orders`, `trade_authority`,
+`private_trade_enabled_by_config`) are unchanged and remain `false`.
 
 ### 8.4 Capital profile env variable name
 

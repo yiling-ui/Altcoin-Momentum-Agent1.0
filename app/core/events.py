@@ -1064,8 +1064,11 @@ class EventType(str, Enum):
     #     income read succeeded with the configured key.
     #   BINANCE_PRIVATE_TRADE_BLOCKED    - a private-trade surface was
     #     requested and refused (TRADE_API_BLOCKED_BY_PR111).
-    #   BINANCE_PERMISSION_WARNING       - the key reports a high-risk
-    #     permission (e.g. withdraw) or another permission anomaly.
+    #   BINANCE_PERMISSION_WARNING       - the key's raw apiRestrictions
+    #     report a permission worth flagging. The high-risk withdraw
+    #     warning fires ONLY on explicit enableWithdrawals=true (PR118);
+    #     universal / internal transfer are separate lower-severity
+    #     warnings, never withdraw.
     #   BINANCE_ACCOUNT_SNAPSHOT_READ    - a read-only account snapshot
     #     was parsed (balances / positions counts only).
     #   BINANCE_INCOME_HISTORY_READ      - income history rows were read

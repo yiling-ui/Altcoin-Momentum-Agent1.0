@@ -51,11 +51,13 @@ from app.live.api_config import BinanceApiConfig, LiveRuntimeMode
 from app.live.binance_models import (
     BinanceAccountSnapshot,
     BinanceApiHealthResult,
+    BinanceApiRestrictionsSnapshot,
     BinanceExchangeInfoSnapshot,
     BinanceIncomeEvent,
     BinancePositionSnapshot,
     BinanceSymbolFilter,
     parse_account,
+    parse_api_restrictions,
     parse_exchange_info,
 )
 from app.live.binance_permissions import inspect_permissions
@@ -161,6 +163,11 @@ class BinanceLiveClient:
     def fapi_base_url(self) -> str:
         return self._config.resolved_fapi_base_url.rstrip("/")
 
+    @property
+    def base_url(self) -> str:
+        """Spot/SAPI base URL (used for ``/sapi/...`` signed reads)."""
+        return self._config.resolved_base_url.rstrip("/")
+
     # ------------------------------------------------------------------
     # Event emission (always secret-safe payloads)
     # ------------------------------------------------------------------
@@ -216,6 +223,24 @@ class BinanceLiveClient:
         url = f"{self.fapi_base_url}{path}?{signed}"
         return self._transport("GET", url, headers)
 
+    def _private_sapi_request(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        """Signed SAPI read (spot base URL). Read-only; never an order path.
+
+        The SAPI surface hosts the account API-key restriction endpoint
+        (``/sapi/v1/account/apiRestrictions``). It is signed exactly like a
+        PRIVATE_READ call (HMAC-SHA256, the signature is never logged) but
+        targets the spot base URL rather than the futures base URL.
+        """
+        if not self._config.enable_private_read:
+            raise LiveApiError(
+                "binance: private read is disabled (AMA_BINANCE_ENABLE_PRIVATE_READ=false)"
+            )
+        if not self._config.has_credentials:
+            raise LiveApiError(f"binance: {API_HEALTH_MISSING_SECRET}")
+        signed, headers = self._signed_query(dict(params or {}))
+        url = f"{self.base_url}{path}?{signed}"
+        return self._transport("GET", url, headers)
+
     # ==================================================================
     # 1. PUBLIC_MARKET
     # ==================================================================
@@ -268,6 +293,17 @@ class BinanceLiveClient:
             },
         )
         return snapshot
+
+    def get_api_restrictions(self) -> BinanceApiRestrictionsSnapshot:
+        """Read the API-KEY restrictions from ``/sapi/v1/account/apiRestrictions``.
+
+        This is the AUTHORITATIVE source for the withdraw / transfer
+        permission warnings (PR118). It is a read-only SAPI call; it never
+        places an order. A field the API does not expose is parsed as
+        NOT_REPORTED, never as enabled.
+        """
+        body = self._private_sapi_request("/sapi/v1/account/apiRestrictions")
+        return parse_api_restrictions(body)
 
     def get_balances(self) -> list[dict[str, Any]]:
         body = self._private_read_request("/fapi/v2/balance")
@@ -424,6 +460,13 @@ class BinanceLiveClient:
         can_read_income = False
         can_trade_flag = False
         high_risk = False
+        # PR118: tri-state API-KEY permissions (None = NOT_REPORTED).
+        withdraw_permission: bool | None = None
+        universal_transfer_permission: bool | None = None
+        internal_transfer_permission: bool | None = None
+        futures_trade_permission: bool | None = None
+        api_restrictions_reported = False
+        permission_debug: dict[str, Any] = {}
         server_time_ms: int | None = None
         symbol_count = 0
         open_positions = 0
@@ -469,13 +512,41 @@ class BinanceLiveClient:
                 can_trade_flag = account.can_trade
                 open_positions = account.open_position_count
                 can_read_positions = True
-                perms = inspect_permissions(account)
+                # PR118: read the AUTHORITATIVE API-KEY restrictions
+                # (/sapi/v1/account/apiRestrictions). This is the ONLY source
+                # for the withdraw / transfer warnings. It is best-effort: a
+                # failure (e.g. SAPI unavailable on testnet, futures-only key)
+                # leaves every permission as NOT_REPORTED - which can never
+                # produce a false-positive withdraw warning.
+                restrictions: BinanceApiRestrictionsSnapshot | None = None
+                try:
+                    restrictions = self.get_api_restrictions()
+                except Exception as exc:
+                    permission_debug["api_restrictions_read"] = classify_api_error(
+                        _sanitise(exc)
+                    )
+                perms = inspect_permissions(account=account, restrictions=restrictions)
                 high_risk = perms.high_risk_permission_warning
+                withdraw_permission = perms.withdraw_permission
+                universal_transfer_permission = perms.universal_transfer_permission
+                internal_transfer_permission = perms.internal_transfer_permission
+                futures_trade_permission = perms.futures_trade_permission
+                api_restrictions_reported = perms.restrictions_reported
+                # Merge the sanitised permission debug (raw field names +
+                # tri-state values only; never a secret / signature / id).
+                permission_debug.update(perms.debug)
                 if perms.warnings:
                     warnings.extend(perms.warnings)
                     self._emit(
                         EventType.BINANCE_PERMISSION_WARNING,
-                        {"warnings": list(perms.warnings), "high_risk": high_risk},
+                        {
+                            "warnings": list(perms.warnings),
+                            "high_risk": high_risk,
+                            "withdraw_permission": withdraw_permission,
+                            "universal_transfer_permission": universal_transfer_permission,
+                            "internal_transfer_permission": internal_transfer_permission,
+                            "debug": dict(permission_debug),
+                        },
                     )
                 try:
                     self.get_income_history(limit=10)
@@ -531,6 +602,12 @@ class BinanceLiveClient:
             can_read_income=can_read_income,
             can_trade_if_account_reports_it=can_trade_flag,
             high_risk_permission_warning=high_risk,
+            withdraw_permission=withdraw_permission,
+            universal_transfer_permission=universal_transfer_permission,
+            internal_transfer_permission=internal_transfer_permission,
+            futures_trade_permission=futures_trade_permission,
+            api_restrictions_reported=api_restrictions_reported,
+            permission_debug=permission_debug,
             server_time_ms=server_time_ms,
             symbol_count=symbol_count,
             open_position_count=open_positions,

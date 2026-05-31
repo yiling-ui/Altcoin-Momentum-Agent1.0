@@ -133,6 +133,32 @@ def _render_text(report: LiveApiHealthReport) -> str:
         lines.append(f"  can_read_positions      : {b['can_read_positions']}")
         lines.append(f"  can_read_income         : {b['can_read_income']}")
         lines.append(f"  high_risk_permission    : {b['high_risk_permission_warning']}")
+        # PR118: surface the AUTHORITATIVE key-permission view (tri-state;
+        # None / NOT_REPORTED means Binance did not expose the field).
+        def _perm(v: object) -> str:
+            return "NOT_REPORTED" if v is None else str(v)
+
+        lines.append(f"  withdraw_permission     : {_perm(b['withdraw_permission'])} (BLOCKER if True)")
+        lines.append(f"  universal_transfer_perm : {_perm(b['universal_transfer_permission'])} (WARN if True)")
+        lines.append(f"  internal_transfer_perm  : {_perm(b['internal_transfer_permission'])} (WARN if True)")
+        lines.append(f"  futures_trade_permission: {_perm(b['futures_trade_permission'])} (INFO/WARN)")
+        lines.append(f"  account_can_trade       : {b['can_trade_if_account_reports_it']} (INFO only)")
+        lines.append(f"  api_restrictions_reported: {b['api_restrictions_reported']}")
+        if b.get("permission_debug"):
+            lines.append("  permission_debug (sanitised; no secret/key/id):")
+            for key in (
+                "raw_permission_fields_seen",
+                "enableWithdrawals",
+                "enableInternalTransfer",
+                "permitsUniversalTransfer",
+                "enableFutures",
+                "enableSpotAndMarginTrading",
+                "enableReading",
+                "ipRestrict",
+                "api_restrictions_read",
+            ):
+                if key in b["permission_debug"]:
+                    lines.append(f"    {key:<26}: {b['permission_debug'][key]}")
         if b["warnings"]:
             lines.append(f"  warnings                : {b['warnings']}")
         if b["errors"]:
