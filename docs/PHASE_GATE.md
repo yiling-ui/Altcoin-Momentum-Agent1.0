@@ -360,7 +360,18 @@ high-risk (withdraw) permission, and the health report shows
 | M65 DeepSeek Live Intelligence | PR115 | IN_REVIEW |
 | M66 10U LIVE_LIMITED Launch Pack | PR116 | IN_REVIEW |
 | M67 Full-System Single-Altcoin Live Sandbox Audit *(current head)* | PR117 | IN_REVIEW |
+| — Binance API permission false-positive hotfix *(S11 maintenance; not a milestone)* | PR118 | MERGED |
 | M68 Real money / live trading | Phase 12 | **FORBIDDEN** |
+
+> **PR118 (maintenance hotfix).** Fixes a Binance API permission
+> parser false positive (the high-risk withdraw warning is now driven
+> only by the explicit `apiRestrictions.enableWithdrawals` field, not
+> inferred from futures account capability) and hardens the real-key
+> health check. **It does not loosen any safety gate:**
+> `exchange_live_orders`, `trade_authority`, `live_trading`, and
+> `ai_trade_authority` all remain `false`, and the order path is
+> untouched. It is `S11` live-chain maintenance — **not** a new
+> milestone and **not** Phase 12.
 
 ## Open / Reserved phases
 

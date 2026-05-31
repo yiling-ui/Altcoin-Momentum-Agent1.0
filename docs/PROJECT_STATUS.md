@@ -17,6 +17,15 @@ deep dives live in their own `PHASE_*` documents.
   (legacy `PR117`), `IN_REVIEW`. Sandbox `overall_status=PASS`,
   `ready_for_real_key_validation=true` — a *go to real-key validation*
   signal, **not** a go-live.
+- **Latest merge:** `PR118` merged on top of `PR117` — an `S11` live-chain
+  **maintenance hotfix** that fixes Binance API permission false-positive
+  warnings (the withdraw-permission warning is now driven only by the
+  explicit `apiRestrictions.enableWithdrawals` field, not inferred from
+  futures account capability). **No live trading authority changed:**
+  `exchange_live_orders`, `trade_authority`, `live_trading`, and
+  `ai_trade_authority` all remain `false`; the order path is untouched.
+  Logged under *S11 maintenance / hotfixes* in `docs/ROADMAP.md` (not a new
+  milestone, not Phase 12).
 - **Stage `S11` — Live Launch Chain (`M60`–`M67`, legacy `PR110`–`PR117`)**
   is `IN_REVIEW`. Default posture stays safe: `live_trading=false`,
   `exchange_live_orders=false`, `trade_authority=false`,

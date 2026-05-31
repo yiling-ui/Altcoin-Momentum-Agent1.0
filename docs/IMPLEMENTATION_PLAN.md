@@ -6,7 +6,11 @@
 > order. It uses the readable `M##` / `S#` ids defined in
 > `docs/ROADMAP.md`; the legacy phase codes are kept in that mapping.
 
-Last reconciled: `PR117` head (`M67`, `IN_REVIEW`).
+Last reconciled: `PR118` (merged on top of `M67`/`PR117`). `PR118` is an
+`S11` live-chain maintenance hotfix (Binance API permission false-positive
+fix / real-key health-check hardening); it changed no live-trading
+authority and is not a new milestone. Head milestone remains
+`M67` (`IN_REVIEW`).
 
 ---
 
@@ -59,6 +63,10 @@ Live Intelligence → M66 10U LIVE_LIMITED Launch Pack → **M67 Full-System
 Single-Altcoin Live Sandbox Audit (head)**. Sandbox result
 `overall_status=PASS`, `ready_for_real_key_validation=true`. Default
 posture stays safe; no real order is sent by default.
+
+> Maintenance: `PR118` (merged) fixed a Binance API permission
+> false-positive in the real-key health check; no safety gate loosened.
+> Logged under *S11 maintenance / hotfixes* in `docs/ROADMAP.md`.
 
 ## 3. Next allowed steps (in order)
 

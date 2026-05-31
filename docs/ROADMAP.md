@@ -44,6 +44,13 @@ Status vocabulary:
   (legacy `PR117`), status `IN_REVIEW`. Sandbox result
   `overall_status=PASS`, `ready_for_real_key_validation=true`.
   This is a *go to real-key validation* signal, **not** a go-live.
+- **Latest merge:** `PR118` (Binance API permission parser false-positive
+  fix / real-key health-check hardening) merged on top of `PR117`. It is
+  an `S11` live-chain **maintenance hotfix**, not a new milestone and
+  **not** Phase 12 — see the *S11 maintenance / hotfixes* log below. It
+  changed no live-trading authority (`exchange_live_orders`,
+  `trade_authority`, `live_trading`, `ai_trade_authority` all remain
+  `false`).
 - **Entire `S11` Live Launch Chain (M60–M67) is `IN_REVIEW`** — default
   posture stays safe (`live_trading=false`, `exchange_live_orders=false`,
   `trade_authority=false`, `ai_trade_authority=false`).
@@ -213,6 +220,16 @@ S12 Real-Money Trading ......................... FORBIDDEN
 > Note: `M59` is intentionally reserved as the boundary between the AI
 > layer (S10) and the live chain (S11); no work is assigned to it.
 
+#### S11 maintenance / hotfixes
+
+Maintenance fixes on the live chain are logged here rather than consuming
+a new `M##` (they harden existing milestones; they are **not** new
+capability and **not** Phase 12).
+
+| Ref | Description | Touches | Authority change |
+| --- | --- | --- | --- |
+| PR118 | Binance API permission parser false-positive fix / real-key health-check hardening — bases the high-risk withdraw warning only on the explicit `apiRestrictions.enableWithdrawals` field instead of inferring it from futures account capability | M61 (API Integration Pack) live health-check path | **None** — `exchange_live_orders`, `trade_authority`, `live_trading`, `ai_trade_authority` unchanged (`false`); order path untouched |
+
 ### S12 — Real-Money Trading
 
 | Milestone | Name | Legacy code | Status |
@@ -243,6 +260,7 @@ For quickly translating an old docstring / event / commit message.
 | Phase 11C.1D-B / -C / -D / -D-A … -D-I | M40 / M41 / M42 / M43–M51 |
 | Phase AI-1 … AI-CHECKPOINT | M52–M58 |
 | PR110 … PR117 | M60–M67 |
+| PR118 (hotfix) | S11 maintenance log (no `M##`) |
 | Phase 12 | M68 |
 
 ---
